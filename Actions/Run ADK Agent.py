@@ -3,7 +3,7 @@ from SiemplifyUtils import output_handler
 from ScriptResult import EXECUTION_STATE_COMPLETED, EXECUTION_STATE_FAILED
 from GoogleADKManager import GoogleADKManager, google_search
 
-INTEGRATION_NAME = "Google_ADK"
+INTEGRATION_NAME = "Google ADK"
 SCRIPT_NAME = "Run ADK Agent"
 
 @output_handler

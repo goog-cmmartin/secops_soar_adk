@@ -4,7 +4,7 @@ from ScriptResult import EXECUTION_STATE_COMPLETED, EXECUTION_STATE_FAILED
 from GoogleADKManager import GoogleADKManager
 
 # Integration Identifier (should match your integration name in the IDE)
-INTEGRATION_NAME = "Google_ADK"
+INTEGRATION_NAME = "Google ADK"
 SCRIPT_NAME = "Ping"
 
 @output_handler

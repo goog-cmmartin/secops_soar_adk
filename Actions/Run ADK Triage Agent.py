@@ -7,7 +7,7 @@ from SiemplifyUtils import output_handler
 from ScriptResult import EXECUTION_STATE_COMPLETED, EXECUTION_STATE_FAILED
 from GoogleADKManager import GoogleADKManager
 
-INTEGRATION_NAME = "Google_ADK"
+INTEGRATION_NAME = "Google ADK"
 SCRIPT_NAME = "Run Triage Agent (WF-TRIAGE-001)"
 SKILL_VERSION = "1.2.0"
 

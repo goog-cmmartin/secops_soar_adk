@@ -9,7 +9,7 @@ import hashlib
 import unicodedata
 import os
 
-INTEGRATION_NAME = "Google_ADK"
+INTEGRATION_NAME = "Google ADK"
 SCRIPT_NAME = "Ingest to RAG REST-Lite"
 
 def get_bearer_token(sa_json, logger):

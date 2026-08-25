@@ -6,7 +6,7 @@ import urllib.request
 import urllib.error
 import unicodedata
 
-INTEGRATION_NAME = "Google_ADK"
+INTEGRATION_NAME = "Google ADK"
 SCRIPT_NAME = "Query Vertex RAG REST-Lite"
 
 def get_bearer_token(sa_json, logger):
