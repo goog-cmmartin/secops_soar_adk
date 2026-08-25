@@ -1,0 +1,12 @@
+# Chris Code session state
+.chris_session.json
+
+# Archived legacy content (kept on disk, excluded from repo)
+_archive/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
