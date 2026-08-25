@@ -31,7 +31,13 @@ def main():
         session_id = siemplify.extract_action_param("Session ID", default_value="default")
         memory_mode = siemplify.extract_action_param("Memory Mode", default_value="Memory Bank") # Memory Bank or InMemory
         preload_memory = siemplify.extract_action_param("Preload Memory", default_value="True").lower() == "true"
-        thinking_budget = int(siemplify.extract_action_param("Thinking Budget", default_value=0))
+        raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
+        try:
+            thinking_budget = int(raw_budget) if raw_budget else 0
+            if thinking_budget < 0:
+                raise ValueError()
+        except ValueError:
+            raise ValueError(f"'Thinking Budget' must be a non-negative integer, got: '{raw_budget}'")
         agent_engine_id = siemplify.extract_action_param("Agent Engine ID", default_value="")
 
         # 3. Initialize Manager

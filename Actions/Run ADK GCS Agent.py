@@ -30,7 +30,13 @@ def main():
         user_prompt = siemplify.extract_action_param("User Prompt")
         allow_write = siemplify.extract_action_param("Allow GCS Write", default_value="false").lower() == "true"
         allow_admin = siemplify.extract_action_param("Allow GCS Admin", default_value="false").lower() == "true"
-        thinking_budget = int(siemplify.extract_action_param("Thinking Budget", default_value=0))
+        raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
+        try:
+            thinking_budget = int(raw_budget) if raw_budget else 0
+            if thinking_budget < 0:
+                raise ValueError()
+        except ValueError:
+            raise ValueError(f"'Thinking Budget' must be a non-negative integer, got: '{raw_budget}'")
 
         # 3. Initialize Manager
         manager = GoogleADKManager(

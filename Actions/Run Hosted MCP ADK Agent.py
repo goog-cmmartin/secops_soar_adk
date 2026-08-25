@@ -48,7 +48,13 @@ def main():
 
         # 2. Fetch Action-Specific Parameters
         user_prompt = siemplify.extract_action_param("User Prompt")
-        thinking_budget = int(siemplify.extract_action_param("Thinking Budget", default_value=0))
+        raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
+        try:
+            thinking_budget = int(raw_budget) if raw_budget else 0
+            if thinking_budget < 0:
+                raise ValueError()
+        except ValueError:
+            raise ValueError(f"'Thinking Budget' must be a non-negative integer, got: '{raw_budget}'")
         tool_filter_raw = siemplify.extract_action_param("Tool Filter")
 
         tool_filter = None

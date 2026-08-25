@@ -1,11 +1,9 @@
 import asyncio
 import os
 import json
-import collections
 # Import types for structured content
 from google.genai import types
 from google.adk.agents import LlmAgent
-from google.adk.runners import InMemoryRunner
 from google.adk.apps import App
 # GCS and Auth imports
 from google.cloud import storage
@@ -846,7 +844,7 @@ class GoogleADKManager:
         import tempfile
         import shutil
         import os
-        from google.adk.dependencies.vertexai import vertexai
+        import vertexai
         
         temp_dir = tempfile.mkdtemp()
         try:
