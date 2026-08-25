@@ -403,6 +403,18 @@ Next: {decision.get('next_steps')}"""
         else:
             output_message = f"Dry Run Triage complete. Projected Stage: '{target_stage}' with verdict '{final_verdict}'."
 
+        triage_summary = {
+            "case_id": case_id,
+            "final_verdict": final_verdict,
+            "target_stage": target_stage,
+            "dry_run": dry_run,
+            "decision": decision,
+            "simulated": decision.get("simulated", False),
+            "rationale": decision.get("rationale", "")
+        }
+        siemplify.result.add_result_json(triage_summary)
+        siemplify.result.add_json("Triage_Agent_Results", triage_summary)
+
         siemplify.add_comment(f"### Sequential Triage Execution Summary ###\n**Final Verdict**: `{final_verdict}`\n**Simulated**: `{decision.get('simulated')}`\n**Target Stage**: `{target_stage}`\n\n{decision.get('rationale')}")
         result_value = True
 
