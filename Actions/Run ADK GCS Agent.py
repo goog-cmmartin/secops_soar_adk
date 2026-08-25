@@ -30,6 +30,8 @@ def main():
         user_prompt = siemplify.extract_action_param("User Prompt")
         allow_write = siemplify.extract_action_param("Allow GCS Write", default_value="false").lower() == "true"
         allow_admin = siemplify.extract_action_param("Allow GCS Admin", default_value="false").lower() == "true"
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
         raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
         try:
             thinking_budget = int(raw_budget) if raw_budget else 0
@@ -48,10 +50,19 @@ def main():
             location=region
         )
 
-        # 4. Build GCS Toolsets
-        gcs_tools = manager.init_gcs_toolsets(enable_admin=allow_admin, enable_write=allow_write)
+        # 4. Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=getattr(siemplify, "case_id", None)
+        )
 
-        # 5. Execute Runbook agent
+        # 5. Build GCS Toolsets
+        gcs_tools = manager.init_gcs_toolsets(enable_admin=allow_admin, enable_write=allow_write)
+        if memory_tools:
+            gcs_tools.extend(memory_tools)
+
+        # 6. Execute Runbook agent
         agent_instructions = f"""
             You are a cloud storage assistant. Resolve the user's storage operations
             (reading, listing, uploading, or organizing buckets/objects) using your GCS tools.
@@ -68,7 +79,9 @@ def main():
             instructions=agent_instructions,
             input_text=user_prompt,
             tools=gcs_tools,
-            thinking_budget=thinking_budget
+            thinking_budget=thinking_budget,
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         # Process Results

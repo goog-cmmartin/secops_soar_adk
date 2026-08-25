@@ -33,6 +33,8 @@ def main():
         if not user_prompt or not str(user_prompt).strip():
             raise ValueError("The 'User Prompt' parameter is required and cannot be empty.")
 
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
         raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
         try:
             thinking_budget = int(raw_budget) if raw_budget else 0
@@ -49,14 +51,20 @@ def main():
             logger=siemplify.LOGGER
         )
 
-        # 4. Construct Instructions
+        # 4. Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=getattr(siemplify, "case_id", None)
+        )
+
+        # 5. Construct Instructions
         agent_instructions = """You are a built-in Gemini Code Execution Agent. 
 You have direct access to a Python interpreter to solve problems, perform math, and manipulate data.
 
 IMPORTANT: 
-1. You CANNOT use any other tools (like web search or runbooks) in this mode.
-2. Always show your code and the output in your final response.
-3. Explain your technical reasoning."""
+1. Always show your code and the output in your final response.
+2. Explain your technical reasoning."""
 
         # Fixed security guardrails to defend against prompt injection within dynamic User Prompts
         security_guardrails = (
@@ -67,17 +75,19 @@ IMPORTANT:
         )
         full_instructions = f"{agent_instructions}{security_guardrails}"
 
-        # 5. Execution
-        siemplify.LOGGER.info(f"Launching Built-in Code Execution Agent: {agent_name} for Case: {siemplify.case_id}")
+        # 6. Execution
+        siemplify.LOGGER.info(f"Launching Built-in Code Execution Agent: {agent_name} for Case: {siemplify.case_id} (Memory: {enable_memory}, Session: {session_id})")
         
         # We set use_builtin_code_exec=True
         results = manager.run_agent(
             agent_name=agent_name,
             instructions=full_instructions,
             input_text=user_prompt,
+            tools=memory_tools if memory_tools else None,
             thinking_budget=thinking_budget,
             use_builtin_code_exec=True, # TRIGGER BUILT-IN EXECUTION
-            session_id=str(siemplify.case_id)
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         # 6. Harvest Results

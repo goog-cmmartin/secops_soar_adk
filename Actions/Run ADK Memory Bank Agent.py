@@ -38,25 +38,6 @@ def main():
                 raise ValueError()
         except ValueError:
             raise ValueError(f"'Thinking Budget' must be a non-negative integer, got: '{raw_budget}'")
-        agent_engine_id = siemplify.extract_action_param("Agent Engine ID", default_value="")
-
-        # Dynamic Session ID resolution with fallbacks:
-        # 1. Action parameter (if explicitly configured and not 'default' or empty)
-        # 2. Case-scoped session ID (case_<CaseId>)
-        # 3. Default fallback ('default_session')
-        session_id = str(raw_session_id).strip() if raw_session_id and str(raw_session_id).strip() else ""
-        if not session_id or session_id.lower() == "default":
-            try:
-                active_case_id = getattr(siemplify, "case_id", None)
-                if active_case_id:
-                    session_id = f"case_{active_case_id}"
-                else:
-                    session_id = "default_session"
-            except Exception:
-                session_id = "default_session"
-
-        siemplify.LOGGER.info(f"Using Session ID: '{session_id}' for Memory Bank Agent.")
-
         # 3. Initialize Manager
         manager = GoogleADKManager(
             api_key=api_key, 
@@ -67,22 +48,15 @@ def main():
             location=region
         )
 
-        # 4. Initialize Memory Service and Select Tools with Graceful Fallback
-        memory_service = None
-        if memory_mode == "Memory Bank":
-            try:
-                # Resolves from parameters or falls back to globally configured Agent Engine
-                memory_service = manager.init_memory_bank_service(agent_engine_id=agent_engine_id)
-            except Exception as mb_err:
-                siemplify.LOGGER.warning(
-                    f"Vertex AI Memory Bank initialization failed ({str(mb_err)}). Falling back to InMemoryMemoryService."
-                )
-                memory_service = manager.init_in_memory_memory_service()
-        else:
-            memory_service = manager.init_in_memory_memory_service()
-
-        # Get appropriate pre-built memory tool (preload_memory or load_memory)
-        memory_tools = manager.get_memory_tools(preload=preload_memory)
+        # 4. Resolve Memory Service, Tools, and Session ID with Graceful Fallback
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=True,
+            session_id=raw_session_id,
+            memory_mode=memory_mode,
+            agent_engine_id=agent_engine_id,
+            preload=preload_memory,
+            case_id=getattr(siemplify, "case_id", None)
+        )
 
         # 5. Define instructions
         agent_instructions = f"""

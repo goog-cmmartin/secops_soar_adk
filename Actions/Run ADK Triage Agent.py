@@ -59,12 +59,14 @@ def main():
         dry_run_raw = siemplify.extract_action_param("Dry Run", default_value="False")
         dry_run = str(dry_run_raw).lower() in ("true", "yes", "1")
         triage_identity = siemplify.extract_action_param("Triage Identity", default_value="@Tier1")
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
 
         case_id = str(siemplify.case_id)
         if not case_id.isdigit():
             raise ValueError(f"Triage requires a numeric caseId. Received: {case_id}")
 
-        siemplify.LOGGER.info(f"Starting Triage sequential pipeline for Case: {case_id} (Dry Run: {dry_run})")
+        siemplify.LOGGER.info(f"Starting Triage sequential pipeline for Case: {case_id} (Dry Run: {dry_run}, Memory: {enable_memory})")
 
         # Initialize the ADK Manager
         manager = GoogleADKManager(
@@ -74,6 +76,13 @@ def main():
             logger=siemplify.LOGGER,
             project_id=proj_id,
             location=region
+        )
+
+        # Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=case_id
         )
 
         # Equip read-only toolset
@@ -315,7 +324,9 @@ Do not write any other text outside the json block."""
             agent_name="Triage_Decision_Node",
             instructions=decision_instructions,
             input_text=json.dumps(decision_payload, indent=2),
-            tools=[] # CRITICAL: NO tools for physical state-enforcement!
+            tools=memory_tools if memory_tools else [],
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         decision = extract_json_block(decision_res["final_response"])

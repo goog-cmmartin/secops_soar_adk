@@ -56,6 +56,8 @@ def main():
         except ValueError:
             raise ValueError(f"'Thinking Budget' must be a non-negative integer, got: '{raw_budget}'")
         tool_filter_raw = siemplify.extract_action_param("Tool Filter")
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
 
         tool_filter = None
         if tool_filter_raw and str(tool_filter_raw).strip():
@@ -71,10 +73,17 @@ def main():
             location=region
         )
 
+        # 4. Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=getattr(siemplify, "case_id", None)
+        )
+
         # Initialize the MCP Toolset
         mcp_toolset = manager.init_mcp_toolset(mcp_url=mcp_url, user_project=proj_id, tool_filter=tool_filter)
 
-        # 4. Build a Generic Contextual Instruction
+        # 5. Build a Generic Contextual Instruction
         env_context = ""
         # Robust check for environmental IDs
         safe_cust_id = str(cust_id).strip() if cust_id and str(cust_id).strip() else None
@@ -83,7 +92,7 @@ def main():
         if safe_cust_id or safe_proj_id:
             env_context = f"\nAVAILABLE ENVIRONMENT CONTEXT:\n- customerId: {safe_cust_id}\n- region: {region}\n- projectId: {safe_proj_id}\nUse these values if required by your tools.\n"
 
-        # 5. Construct Final Specialized Instructions
+        # 6. Construct Final Specialized Instructions
         agent_instructions = f"""You are a professional Security Assistant powered by Google ADK.
         Your goal is to solve the user's task using your available tools.{env_context}
         
@@ -93,16 +102,21 @@ def main():
         
         Always provide technical reasoning and summarize your findings in Markdown."""
 
-        # 6. Execution
-        siemplify.LOGGER.info(f"Launching Hosted MCP Agent against: {mcp_url}")
+        # 7. Execution
+        siemplify.LOGGER.info(f"Launching Hosted MCP Agent against: {mcp_url} (Memory: {enable_memory}, Session: {session_id})")
         
+        all_tools = [mcp_toolset]
+        if memory_tools:
+            all_tools.extend(memory_tools)
+
         results = manager.run_agent(
             agent_name="Generic_MCP_Agent",
             instructions=agent_instructions,
             input_text=user_prompt,
-            tools=[mcp_toolset],
+            tools=all_tools,
             thinking_budget=thinking_budget,
-            session_id=str(siemplify.case_id)
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         # 7. Harvest Results

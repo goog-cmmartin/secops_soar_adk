@@ -47,6 +47,8 @@ def main():
         if not user_prompt or not str(user_prompt).strip():
             raise ValueError("The 'User Prompt' parameter is required and cannot be empty.")
 
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
         raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
         try:
             thinking_budget = int(raw_budget) if raw_budget else 0
@@ -64,7 +66,14 @@ def main():
             agent_engine_resource_name=agent_engine_resource
         )
 
-        # 4. Construct Instructions
+        # 4. Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=getattr(siemplify, "case_id", None)
+        )
+
+        # 5. Construct Instructions
         agent_instructions = """You are a specialized Code Execution Agent. 
 You can solve complex problems by writing and running Python code in a secure sandbox.
 Use this capability for data analysis, complex math, or log parsing.
@@ -81,17 +90,19 @@ Provide technical reasoning for your approach."""
         )
         full_instructions = f"{agent_instructions}{security_guardrails}"
 
-        # 5. Execution
-        siemplify.LOGGER.info(f"Launching Code Execution Agent: {agent_name} for Case: {siemplify.case_id}")
+        # 6. Execution
+        siemplify.LOGGER.info(f"Launching Code Execution Agent: {agent_name} for Case: {siemplify.case_id} (Memory: {enable_memory}, Session: {session_id})")
         
         # We set enable_code_execution=True to trigger the executor initialization in the Manager
         results = manager.run_agent(
             agent_name=agent_name,
             instructions=full_instructions,
             input_text=user_prompt,
+            tools=memory_tools if memory_tools else None,
             thinking_budget=thinking_budget,
             enable_code_execution=True, # TRIGGER CODE EXECUTION
-            session_id=str(siemplify.case_id)
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         # 6. Harvest Results

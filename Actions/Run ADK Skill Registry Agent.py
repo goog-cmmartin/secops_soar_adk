@@ -28,6 +28,8 @@ def main():
 
         # 2. Fetch Action-Specific Parameters
         user_prompt = siemplify.extract_action_param("User Prompt")
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
         raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
         try:
             thinking_budget = int(raw_budget) if raw_budget else 0
@@ -46,10 +48,17 @@ def main():
             location=region
         )
 
-        # 4. Build Skill Registry Toolsets
+        # 4. Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=getattr(siemplify, "case_id", None)
+        )
+
+        # 5. Build Skill Registry Toolsets
         skill_toolset = manager.init_skill_registry_toolset()
 
-        # 5. Define instructions and register custom creation tools
+        # 6. Define instructions and register custom creation tools
         agent_instructions = f"""
             You are an active, remote skill registry assistant. You are integrated with the central Google Cloud Skill Registry.
             
@@ -66,16 +75,20 @@ def main():
             Always attempt to execute tools to verify active resources before making any claims or replying to the user.
         """
 
-        # We pass both the skill_toolset and the custom register_gcp_skill tool!
+        # We pass both the skill_toolset and the custom register_gcp_skill tool (+ memory tools if enabled)
         tools = [skill_toolset, manager.register_gcp_skill]
+        if memory_tools:
+            tools.extend(memory_tools)
 
-        # 6. Run Runbook agent
+        # 7. Run Runbook agent
         result = manager.run_agent(
             agent_name="Skill_Registry_Agent",
             instructions=agent_instructions,
             input_text=user_prompt,
             tools=tools,
-            thinking_budget=thinking_budget
+            thinking_budget=thinking_budget,
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         # Process Results

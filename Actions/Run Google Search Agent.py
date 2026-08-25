@@ -34,6 +34,8 @@ def main():
         if not query or not str(query).strip():
             raise ValueError("The 'User Prompt' parameter is required and cannot be empty.")
 
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
         raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
         try:
             thinking_budget = int(raw_budget) if raw_budget else 0
@@ -50,7 +52,14 @@ def main():
             logger=siemplify.LOGGER
         )
 
-        # 4. Specialized OSINT Instructions
+        # 4. Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=getattr(siemplify, "case_id", None)
+        )
+
+        # 5. Specialized OSINT Instructions
         # We hardcode the "Persona" here to ensure this agent always acts as a researcher
         agent_instructions = """You are a professional OSINT and Cyber Threat Intelligence researcher. 
 Your goal is to use Google Search to find technical details, attribution, and recent reports 
@@ -66,16 +75,21 @@ Focus on identifying specific indicators, threat actor aliases, and mitigation s
         )
         full_instructions = f"{agent_instructions}{security_guardrails}"
 
-        # 5. Execution
-        siemplify.LOGGER.info(f"Launching OSINT Search Agent: {agent_name} for Case: {siemplify.case_id}")
+        # 6. Execution
+        siemplify.LOGGER.info(f"Launching OSINT Search Agent: {agent_name} for Case: {siemplify.case_id} (Memory: {enable_memory}, Session: {session_id})")
         
+        agent_tools = [google_search]
+        if memory_tools:
+            agent_tools.extend(memory_tools)
+
         results = manager.run_agent(
             agent_name=agent_name,
             instructions=full_instructions,
             input_text=query,
-            tools=[google_search], # Mandatory for this action
+            tools=agent_tools,
             thinking_budget=thinking_budget,
-            session_id=str(siemplify.case_id)
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         # 6. Harvest Results

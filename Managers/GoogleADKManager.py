@@ -950,3 +950,39 @@ description: {description}
         else:
             from google.adk.tools import load_memory
             return [load_memory]
+
+    def resolve_memory_configuration(self, enable_memory: bool = False, session_id: str = "", memory_mode: str = "Memory Bank", agent_engine_id: str = "", preload: bool = True, case_id: str = None):
+        """
+        Resolves the memory service, memory tools, and effective session ID for any ADK agent action.
+        Returns: (resolved_session_id, memory_service, memory_tools)
+        """
+        # 1. Resolve Session ID
+        clean_session_id = str(session_id).strip() if session_id and str(session_id).strip() else ""
+        if not clean_session_id or clean_session_id.lower() == "default":
+            if case_id:
+                clean_session_id = f"case_{case_id}"
+            else:
+                clean_session_id = "default_session"
+
+        if not enable_memory:
+            return clean_session_id, None, []
+
+        # 2. Resolve Memory Service
+        memory_service = None
+        if memory_mode == "Memory Bank":
+            try:
+                memory_service = self.init_memory_bank_service(agent_engine_id=agent_engine_id)
+            except Exception as mb_err:
+                self.logger.warning(
+                    f"Vertex AI Memory Bank initialization failed ({str(mb_err)}). Falling back to InMemoryMemoryService."
+                )
+                memory_service = self.init_in_memory_memory_service()
+        else:
+            memory_service = self.init_in_memory_memory_service()
+
+        # 3. Resolve Memory Tools
+        memory_tools = self.get_memory_tools(preload=preload)
+        self.logger.info(f"Memory enabled for session '{clean_session_id}' with mode '{memory_mode}'.")
+
+        return clean_session_id, memory_service, memory_tools
+

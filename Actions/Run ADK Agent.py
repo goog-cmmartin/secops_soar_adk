@@ -47,6 +47,8 @@ def main():
         except ValueError:
             raise ValueError(f"'Thinking Budget' must be a non-negative integer, got: '{raw_budget}'")
         enable_osint = siemplify.extract_action_param("Enable Google Search", input_type=bool, default_value=False)
+        enable_memory = siemplify.extract_action_param("Enable Memory", input_type=bool, default_value=False)
+        raw_session_id = siemplify.extract_action_param("Session ID")
 
         # 3. Manager Setup
         manager = GoogleADKManager(
@@ -58,7 +60,14 @@ def main():
             logger=siemplify.LOGGER
         )
 
-        # 4. Construct Final Specialized Instructions
+        # 4. Resolve Memory Configuration
+        session_id, memory_service, memory_tools = manager.resolve_memory_configuration(
+            enable_memory=enable_memory,
+            session_id=raw_session_id,
+            case_id=getattr(siemplify, "case_id", None)
+        )
+
+        # 5. Construct Final Specialized Instructions
         base_persona = "You are a professional Security Analyst powered by Google ADK."
         
         # Fixed security guardrails to defend against prompt injection within dynamic User Prompts
@@ -72,10 +81,14 @@ def main():
         full_instructions = f"{base_persona}{security_guardrails}\nAlways provide technical reasoning and summarize findings in Markdown."
         siemplify.LOGGER.info(f"Full agent system instructions compiled. Total length: {len(full_instructions)} chars.")
 
-        # 5. Execution
-        siemplify.LOGGER.info(f"Launching Agent: {agent_name}")
+        # 6. Execution
+        siemplify.LOGGER.info(f"Launching Agent: {agent_name} (Memory: {enable_memory}, Session: {session_id})")
         
-        agent_tools = [google_search] if enable_osint else []
+        agent_tools = []
+        if enable_osint:
+            agent_tools.append(google_search)
+        if memory_tools:
+            agent_tools.extend(memory_tools)
 
         results = manager.run_agent(
             agent_name=agent_name,
@@ -83,7 +96,8 @@ def main():
             input_text=user_prompt,
             tools=agent_tools,
             thinking_budget=thinking_budget,
-            session_id=str(siemplify.case_id)
+            session_id=session_id,
+            memory_service=memory_service
         )
 
         # 6. Harvest Results
