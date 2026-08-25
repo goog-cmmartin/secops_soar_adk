@@ -39,6 +39,7 @@ def main():
         # Optional Environment Context
         cust_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Customer ID")
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
+        agent_engine_resource = siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
         proj_id = (
             siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
             or siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
@@ -69,6 +70,7 @@ def main():
             service_account_json=sa_json, 
             model_name=model_name, 
             logger=siemplify.LOGGER,
+            agent_engine_resource_name=agent_engine_resource,
             project_id=proj_id,
             location=region
         )

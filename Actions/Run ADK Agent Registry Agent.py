@@ -50,6 +50,7 @@ def main():
             or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
         )
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
+        agent_engine_resource = siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
 
         # 2. Action Parameters
         registry_project_id = siemplify.extract_action_param("Agent Registry Project ID", default_value="my-gcp-project")
@@ -68,7 +69,8 @@ def main():
             model_name=model_name, 
             project_id=proj_id,
             location=region,
-            logger=siemplify.LOGGER
+            logger=siemplify.LOGGER,
+            agent_engine_resource_name=agent_engine_resource
         )
 
         # Set execution environment overrides for Vertex AI models (if routing Gemini inference)

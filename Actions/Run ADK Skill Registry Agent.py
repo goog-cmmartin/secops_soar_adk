@@ -24,6 +24,7 @@ def main():
             or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
         )
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
+        agent_engine_resource = siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
         model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
 
         # 2. Fetch Action-Specific Parameters
@@ -44,6 +45,7 @@ def main():
             service_account_json=sa_json, 
             model_name=model_name, 
             logger=siemplify.LOGGER,
+            agent_engine_resource_name=agent_engine_resource,
             project_id=proj_id,
             location=region
         )

@@ -28,6 +28,7 @@ def main():
             or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
         )
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
+        agent_engine_resource = siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
 
         # 2. Action Parameters
         raw_agent_name = siemplify.extract_action_param("Agent Name", default_value="Logic_Analyst_Agent")
@@ -57,7 +58,8 @@ def main():
             model_name=model_name, 
             project_id=proj_id,
             location=region,
-            logger=siemplify.LOGGER
+            logger=siemplify.LOGGER,
+            agent_engine_resource_name=agent_engine_resource
         )
 
         # 4. Resolve Memory Configuration

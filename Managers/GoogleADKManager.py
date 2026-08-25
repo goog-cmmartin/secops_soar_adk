@@ -913,20 +913,38 @@ description: {description}
         import vertexai
 
         resolved_id = agent_engine_id
-        if not resolved_id and self.agent_engine_resource_name:
-            resolved_id = self.agent_engine_resource_name.split("/")[-1]
+        resolved_project = self.project_id
+        resolved_location = self.location
+
+        raw_target = agent_engine_id or self.agent_engine_resource_name
+        if raw_target:
+            raw_target_str = str(raw_target).strip()
+            if "reasoningEngines/" in raw_target_str:
+                parts = raw_target_str.split("/")
+                try:
+                    if "projects" in parts:
+                        p_idx = parts.index("projects")
+                        resolved_project = parts[p_idx + 1]
+                    if "locations" in parts:
+                        l_idx = parts.index("locations")
+                        resolved_location = parts[l_idx + 1]
+                    resolved_id = parts[-1]
+                except IndexError:
+                    resolved_id = parts[-1]
+            else:
+                resolved_id = raw_target_str
 
         if not resolved_id:
             raise ValueError("Memory Bank: No active Agent Engine ID or Resource Name was provided or resolved.")
 
-        self.logger.info(f"Initializing Vertex AI Memory Bank Service for Project: {self.project_id}, Agent Engine ID: {resolved_id}")
+        self.logger.info(f"Initializing Vertex AI Memory Bank Service for Project: {resolved_project}, Location: {resolved_location}, Agent Engine ID: {resolved_id}")
         
         creds = self._get_cached_credentials()
-        vertexai.init(project=self.project_id, location=self.location, credentials=creds)
+        vertexai.init(project=resolved_project, location=resolved_location, credentials=creds)
 
         return VertexAiMemoryBankService(
-            project=self.project_id,
-            location=self.location,
+            project=resolved_project,
+            location=resolved_location,
             agent_engine_id=resolved_id
         )
 

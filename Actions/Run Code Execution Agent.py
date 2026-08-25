@@ -22,6 +22,7 @@ def main():
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
         # Defaulting to the latest high-performance, cost-effective model (gemini-3.5-flash) with built-in interpreter execution capabilities
         model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
+        agent_engine_resource = siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
 
         # 2. Extract Action Parameters (Specific to this playbook step)
         raw_agent_name = siemplify.extract_action_param("Agent Name", default_value="Builtin_Code_Agent")
@@ -48,7 +49,8 @@ def main():
             api_key=api_key, 
             service_account_json=sa_json, 
             model_name=model_name, 
-            logger=siemplify.LOGGER
+            logger=siemplify.LOGGER,
+            agent_engine_resource_name=agent_engine_resource
         )
 
         # 4. Resolve Memory Configuration
