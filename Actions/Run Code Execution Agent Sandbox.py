@@ -20,16 +20,24 @@ def main():
         # 1. Extract Integration Configuration Parameters (Global)
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
-        # Defaulting to the latest high-performance, cost-effective model (gemini-3.5-flash) for standard orchestration and sandbox code execution
+        # Defaulting to the latest high-performance, cost-effective model (gemini-3.7-flash) for standard orchestration and sandbox code execution
         model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
-        # Agent Engine Resource Name for Managed Sandbox Code Execution
-        agent_engine_resource = siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
-        if not agent_engine_resource or not str(agent_engine_resource).strip():
-            raise ValueError(
-                "Code Execution requires 'Agent Engine Resource Name' to be configured in the integration settings."
-            )
+        proj_id = (
+            siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
+            or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
+        )
+        region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
 
         # 2. Extract Action Parameters (Specific to this playbook step)
+        # Agent Engine Resource Name for Managed Sandbox Code Execution (checks action parameter first, then config)
+        agent_engine_resource = (
+            siemplify.extract_action_param("Agent Engine Resource Name")
+            or siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
+        )
+        if not agent_engine_resource or not str(agent_engine_resource).strip():
+            raise ValueError(
+                "Code Execution requires 'Agent Engine Resource Name' to be configured in the action or integration parameters."
+            )
         raw_agent_name = siemplify.extract_action_param("Agent Name", default_value="Code_Execution_Agent")
         # Ensure API-safe naming by sanitizing spaces/specials, and suffix current Case ID for traceability
         sanitized_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(raw_agent_name).strip())

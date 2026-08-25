@@ -136,7 +136,10 @@ def main():
     try:
         # 1. Fetch Global Configuration
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
-        proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
+        proj_id = (
+            siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
+            or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
+        )
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
         safe_region = str(region).strip() if region and str(region).strip() else "us-central1"
         rag_corpus_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "RAG Corpus Name")
@@ -150,7 +153,7 @@ def main():
             raise ValueError("The global configuration parameter 'Service Account JSON' is malformed JSON.")
 
         if not proj_id or not str(proj_id).strip():
-            raise ValueError("The global configuration parameter 'SecOps Project ID' is required.")
+            raise ValueError("A Google Cloud Project ID ('GCP Project ID' or 'SecOps Project ID') is required.")
 
         if not rag_corpus_name or not str(rag_corpus_name).strip():
             raise ValueError("The global configuration parameter 'RAG Corpus Name' is required.")

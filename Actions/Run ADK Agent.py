@@ -23,7 +23,10 @@ def main():
         model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
         
         # Optional Environment Context
-        proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
+        proj_id = (
+            siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
+            or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
+        )
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
 
         # 2. Action Parameters

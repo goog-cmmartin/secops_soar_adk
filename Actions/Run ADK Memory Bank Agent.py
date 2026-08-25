@@ -19,9 +19,10 @@ def main():
         # 1. Fetch Global Configuration (Integration Level)
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
-        proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
-        if not proj_id:
-            proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
+        proj_id = (
+            siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
+            or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
+        )
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
         model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
 
