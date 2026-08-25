@@ -21,7 +21,7 @@ def main():
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
         # Defaulting to the latest high-performance, cost-effective model (gemini-3.5-flash) for standard orchestration and sandbox code execution
-        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.5-flash")
+        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
         # Agent Engine Resource Name for Managed Sandbox Code Execution
         agent_engine_resource = siemplify.extract_configuration_param(INTEGRATION_NAME, "Agent Engine Resource Name")
         if not agent_engine_resource or not str(agent_engine_resource).strip():

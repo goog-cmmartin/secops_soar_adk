@@ -23,7 +23,7 @@ def main():
         if not proj_id:
             proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
-        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-2.5-flash")
+        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
 
         # 2. Fetch Action-Specific Parameters
         user_prompt = siemplify.extract_action_param("User Prompt")

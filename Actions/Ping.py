@@ -20,7 +20,7 @@ def main():
     try:
         # 1. Extract Config Params (The credentials we are testing)
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
-        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.1-flash-lite-preview")
+        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
 
         # 2. Initialize Manager
         manager = GoogleADKManager(

@@ -50,7 +50,7 @@ def main():
         cust_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Customer ID")
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
         proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
-        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.5-flash")
+        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
 
         # Action parameters
         dry_run_raw = siemplify.extract_action_param("Dry Run", default_value="False")

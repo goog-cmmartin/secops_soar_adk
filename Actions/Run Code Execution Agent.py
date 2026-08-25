@@ -21,7 +21,7 @@ def main():
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
         # Defaulting to the latest high-performance, cost-effective model (gemini-3.5-flash) with built-in interpreter execution capabilities
-        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.5-flash")
+        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
 
         # 2. Extract Action Parameters (Specific to this playbook step)
         raw_agent_name = siemplify.extract_action_param("Agent Name", default_value="Builtin_Code_Agent")

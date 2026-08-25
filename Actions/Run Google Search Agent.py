@@ -22,7 +22,7 @@ def main():
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
         # Defaulting to the latest high-performance, cost-effective model (gemini-3.5-flash) for standard orchestration and search summarization
-        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.5-flash")
+        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
         
         # 2. Action Parameters (Simplified for OSINT)
         raw_agent_name = siemplify.extract_action_param("Agent Name", default_value="OSINT_Agent")

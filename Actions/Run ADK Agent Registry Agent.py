@@ -42,7 +42,7 @@ def main():
         # 1. Configuration (Integration Level)
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
         sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
-        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.5-flash")
+        model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
         
         # Optional Environment Context
         proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
