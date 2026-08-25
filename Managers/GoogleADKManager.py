@@ -108,7 +108,7 @@ class GoogleADKManager:
                         self.logger.info(f"ADK Manager: Resolved fallback Project ID from Service Account JSON: {self.project_id}")
             except Exception as e:
                 if self.logger:
-                    self.logger.warning(f"ADK Manager: Failed to parse project_id from Service Account JSON: {e}")
+                    self.logger.warn(f"ADK Manager: Failed to parse project_id from Service Account JSON: {e}")
         
         self._creds = None
         self._gcs_client = None
@@ -130,7 +130,7 @@ class GoogleADKManager:
                 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_creds_path
                 self.logger.info(f"ADK Manager: Set GOOGLE_APPLICATION_CREDENTIALS to temporary file: {temp_creds_path}")
             except Exception as e:
-                self.logger.warning(f"ADK Manager: Failed to write service account to temp file for ADC: {e}")
+                self.logger.warn(f"ADK Manager: Failed to write service account to temp file for ADC: {e}")
 
         # Vertex AI SDK initialization is no longer needed since we use REST-lite for RAG operations
         pass
@@ -361,7 +361,7 @@ class GoogleADKManager:
                         resolved_id = full_name.split("/")[-1]
                         self.logger.info(f"Resolved display name '{identifier}' to ID: {resolved_id}")
                         return resolved_id
-            self.logger.warning(f"ADK Manager: RAG Corpus with display name '{identifier}' was not found in location '{location}'.")
+            self.logger.warn(f"ADK Manager: RAG Corpus with display name '{identifier}' was not found in location '{location}'.")
             return None
         except Exception as e:
             self.logger.error(f"Failed to list RAG corpora via REST: {str(e)}")
@@ -595,7 +595,7 @@ class GoogleADKManager:
                         resolved_tool_names.append(str(t))
             self.logger.info(f"Agent [{agent_name}] registering resolved tools: {resolved_tool_names}")
         except Exception as tool_err:
-            self.logger.warning(f"Error while inspecting agent tools: {str(tool_err)}")
+            self.logger.warn(f"Error while inspecting agent tools: {str(tool_err)}")
 
         # Configure Generation Parameters (to minimize hallucination and enforce low variance)
         config = types.GenerateContentConfig(
@@ -973,7 +973,7 @@ description: {description}
             try:
                 memory_service = self.init_memory_bank_service(agent_engine_id=agent_engine_id)
             except Exception as mb_err:
-                self.logger.warning(
+                self.logger.warn(
                     f"Vertex AI Memory Bank initialization failed ({str(mb_err)}). Falling back to InMemoryMemoryService."
                 )
                 memory_service = self.init_in_memory_memory_service()

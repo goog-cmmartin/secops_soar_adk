@@ -95,7 +95,7 @@ Focus on identifying specific indicators, threat actor aliases, and mitigation s
         # 6. Harvest Results
         result_value = results.get("final_response", "")
         if not result_value:
-            siemplify.LOGGER.warning("Agent returned an empty or missing final_response.")
+            siemplify.LOGGER.warn("Agent returned an empty or missing final_response.")
 
         output_message = f"OSINT Search Agent {agent_name} successfully completed its research."
         
