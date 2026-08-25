@@ -147,12 +147,13 @@ class GoogleADKManager:
             return "Error: RAG Corpus Name not configured."
 
         try:
-            corpus_id = self._get_rag_corpus_id(self.rag_corpus_name)
+            target_proj, target_loc, parsed_id = self._parse_rag_resource_name(self.rag_corpus_name)
+            corpus_id = self._get_rag_corpus_id(parsed_id, target_project=target_proj, target_location=target_loc)
             if not corpus_id:
                 return f"Error: Could not find RAG Corpus with name '{self.rag_corpus_name}'"
 
             token = self.get_valid_token()
-            url = f"https://{self.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.location}:retrieveContexts"
+            url = f"https://{target_loc}-aiplatform.googleapis.com/v1/projects/{target_proj}/locations/{target_loc}:retrieveContexts"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -168,7 +169,7 @@ class GoogleADKManager:
                 "vertex_rag_store": {
                     "rag_resources": [
                         {
-                            "rag_corpus": f"projects/{self.project_id}/locations/{self.location}/ragCorpora/{corpus_id}"
+                            "rag_corpus": f"projects/{target_proj}/locations/{target_loc}/ragCorpora/{corpus_id}"
                         }
                     ]
                 }
@@ -248,12 +249,13 @@ class GoogleADKManager:
             return "Error: RAG configuration incomplete (missing Corpus Name or GCS Bucket)."
 
         try:
-            corpus_id = self._get_rag_corpus_id(self.rag_corpus_name)
+            target_proj, target_loc, parsed_id = self._parse_rag_resource_name(self.rag_corpus_name)
+            corpus_id = self._get_rag_corpus_id(parsed_id, target_project=target_proj, target_location=target_loc)
             if not corpus_id:
                 return "Error: RAG configuration incomplete (missing or unresolved Corpus)."
 
             token = self.get_valid_token()
-            url = f"https://{self.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.location}/ragCorpora/{corpus_id}/ragFiles:import"
+            url = f"https://{target_loc}-aiplatform.googleapis.com/v1/projects/{target_proj}/locations/{target_loc}/ragCorpora/{corpus_id}/ragFiles:import"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -302,7 +304,25 @@ class GoogleADKManager:
 
     # --- END OF TOOLS ---
 
-    def _get_rag_corpus_id(self, identifier: str) -> str:
+    def _parse_rag_resource_name(self, identifier: str):
+        """
+        Parses a RAG identifier which may be:
+        1. Full Resource Name: projects/{project}/locations/{location}/ragCorpora/{corpus_id}
+        2. Numeric ID
+        3. Display Name
+        Returns (resolved_project, resolved_location, corpus_name_or_id).
+        """
+        if not identifier:
+            return self.project_id, self.location, identifier
+        
+        clean_id = str(identifier).strip()
+        match = re.match(r"^projects/([^/]+)/locations/([^/]+)/ragCorpora/([^/]+)$", clean_id)
+        if match:
+            return match.group(1), match.group(2), match.group(3)
+        
+        return self.project_id, self.location, clean_id
+
+    def _get_rag_corpus_id(self, identifier: str, target_project: str = None, target_location: str = None) -> str:
         """
         Resolves a RAG Corpus ID from a variety of input formats:
         1. Full Resource Name: projects/.../ragCorpora/123 -> returns 123
@@ -311,20 +331,21 @@ class GoogleADKManager:
         """
         if not identifier: return None
         
+        project = target_project or self.project_id
+        location = target_location or self.location
+
         # 1. Handle Full Resource Name or Numeric ID directly
-        # If it's a full path, the ID is the last part
         if "/" in identifier:
             return identifier.split('/')[-1]
         
-        # If it's a pure numeric string, it's likely already the ID
-        if identifier.isdigit():
-            return identifier
+        if str(identifier).isdigit():
+            return str(identifier)
 
         # 2. Lookup by Display Name via REST
         try:
-            self.logger.info(f"Searching for RAG Corpus with display name: {identifier}")
+            self.logger.info(f"Searching for RAG Corpus with display name: {identifier} in projects/{project}/locations/{location}")
             token = self.get_valid_token()
-            url = f"https://{self.location}-aiplatform.googleapis.com/v1/projects/{self.project_id}/locations/{self.location}/ragCorpora"
+            url = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/ragCorpora"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -340,7 +361,7 @@ class GoogleADKManager:
                         resolved_id = full_name.split("/")[-1]
                         self.logger.info(f"Resolved display name '{identifier}' to ID: {resolved_id}")
                         return resolved_id
-            self.logger.warning(f"ADK Manager: RAG Corpus with display name '{identifier}' was not found.")
+            self.logger.warning(f"ADK Manager: RAG Corpus with display name '{identifier}' was not found in location '{location}'.")
             return None
         except Exception as e:
             self.logger.error(f"Failed to list RAG corpora via REST: {str(e)}")

@@ -2,12 +2,31 @@ from SiemplifyAction import SiemplifyAction
 from SiemplifyUtils import output_handler
 from ScriptResult import EXECUTION_STATE_COMPLETED, EXECUTION_STATE_FAILED
 import json
+import re
 import urllib.request
 import urllib.error
 import unicodedata
 
 INTEGRATION_NAME = "Google ADK"
 SCRIPT_NAME = "Query Vertex RAG REST-Lite"
+
+def parse_rag_resource_name(identifier, default_project, default_location):
+    """
+    Parses a RAG identifier which may be:
+    1. Full resource name: projects/{project}/locations/{location}/ragCorpora/{corpus_id}
+    2. Numeric ID
+    3. Display name
+    Returns (resolved_project, resolved_location, corpus_name_or_id).
+    """
+    if not identifier:
+        return default_project, default_location, identifier
+    
+    clean_id = str(identifier).strip()
+    match = re.match(r"^projects/([^/]+)/locations/([^/]+)/ragCorpora/([^/]+)$", clean_id)
+    if match:
+        return match.group(1), match.group(2), match.group(3)
+    
+    return default_project, default_location, clean_id
 
 def get_bearer_token(sa_json, logger):
     """
@@ -28,19 +47,15 @@ def get_bearer_token(sa_json, logger):
 
 def resolve_rag_corpus_id(location, project_id, corpus_display_name, token, logger):
     """
-    Queries the RAG Corpora REST endpoint to resolve a user-friendly display name (e.g., 'My Corpus')
-    to its unique numeric RAG Corpus ID. Supports full resource paths and numeric IDs directly.
+    Queries the ragCorpora REST API to resolve a display name or numeric ID into a corpus ID.
+    If corpus_display_name is already a numeric ID, it is returned directly.
     """
-    # 1. Handle Full Resource Name (e.g., 'projects/.../ragCorpora/123')
-    if "/" in corpus_display_name:
-        corpus_id = corpus_display_name.split("/")[-1].strip()
-        logger.info(f"Detected full resource path in parameter. Extracted Corpus ID directly: '{corpus_id}'")
-        return corpus_id
+    if not corpus_display_name:
+        raise ValueError("RAG Corpus Name cannot be empty.")
         
-    # 2. Handle pure numeric string directly
-    if corpus_display_name.isdigit():
-        logger.info(f"Using provided numeric ID directly: {corpus_display_name}")
-        return corpus_display_name
+    # If it's already a numeric ID, return directly
+    if str(corpus_display_name).strip().isdigit():
+        return str(corpus_display_name).strip()
 
     url = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{location}/ragCorpora"
     headers = {
@@ -144,7 +159,14 @@ def main():
         safe_region = str(region).strip() if region and str(region).strip() else "us-central1"
         rag_corpus_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "RAG Corpus Name")
 
-        # 2. Validation Checks
+        # 2. Parse RAG Resource Name (if full path provided, extract project, location, and corpus identifier)
+        target_project, target_location, parsed_corpus_identifier = parse_rag_resource_name(
+            rag_corpus_name,
+            default_project=proj_id,
+            default_location=safe_region
+        )
+
+        # 3. Validation Checks
         if not sa_json or not str(sa_json).strip():
             raise ValueError("The global configuration parameter 'Service Account JSON' is required.")
         try:
@@ -152,13 +174,13 @@ def main():
         except json.JSONDecodeError:
             raise ValueError("The global configuration parameter 'Service Account JSON' is malformed JSON.")
 
-        if not proj_id or not str(proj_id).strip():
+        if not target_project or not str(target_project).strip():
             raise ValueError("A Google Cloud Project ID ('GCP Project ID' or 'SecOps Project ID') is required.")
 
-        if not rag_corpus_name or not str(rag_corpus_name).strip():
+        if not parsed_corpus_identifier or not str(parsed_corpus_identifier).strip():
             raise ValueError("The global configuration parameter 'RAG Corpus Name' is required.")
 
-        # 3. Fetch Action-Specific Parameters
+        # 4. Fetch Action-Specific Parameters
         query_text = siemplify.extract_action_param("Query Text")
         if not query_text or not str(query_text).strip():
             raise ValueError("The 'Query Text' parameter is required and cannot be empty.")
@@ -171,22 +193,22 @@ def main():
         except ValueError:
             raise ValueError(f"'Top K' must be a positive integer, got: '{raw_top_k}'")
 
-        # 4. Auth & Request Processing
+        # 5. Auth & Request Processing
         token = get_bearer_token(sa_json, siemplify.LOGGER)
         
-        # Resolve display name to numeric corpus ID
+        # Resolve display name or numeric corpus ID
         corpus_id = resolve_rag_corpus_id(
-            location=safe_region,
-            project_id=proj_id,
-            corpus_display_name=rag_corpus_name,
+            location=target_location,
+            project_id=target_project,
+            corpus_display_name=parsed_corpus_identifier,
             token=token,
             logger=siemplify.LOGGER
         )
         
         # Query contexts via REST
         raw_results = retrieve_rag_contexts(
-            location=safe_region,
-            project_id=proj_id,
+            location=target_location,
+            project_id=target_project,
             corpus_id=corpus_id,
             query_text=query_text,
             top_k=top_k,

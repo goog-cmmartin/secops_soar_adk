@@ -8,9 +8,28 @@ import urllib.parse
 import hashlib
 import unicodedata
 import os
+import re
 
 INTEGRATION_NAME = "Google ADK"
 SCRIPT_NAME = "Ingest to RAG REST-Lite"
+
+def parse_rag_resource_name(identifier, default_project, default_location):
+    """
+    Parses a RAG identifier which may be:
+    1. Full resource name: projects/{project}/locations/{location}/ragCorpora/{corpus_id}
+    2. Numeric ID
+    3. Display name
+    Returns (resolved_project, resolved_location, corpus_name_or_id).
+    """
+    if not identifier:
+        return default_project, default_location, identifier
+    
+    clean_id = str(identifier).strip()
+    match = re.match(r"^projects/([^/]+)/locations/([^/]+)/ragCorpora/([^/]+)$", clean_id)
+    if match:
+        return match.group(1), match.group(2), match.group(3)
+    
+    return default_project, default_location, clean_id
 
 def get_bearer_token(sa_json, logger):
     """
@@ -31,19 +50,15 @@ def get_bearer_token(sa_json, logger):
 
 def resolve_rag_corpus_id(location, project_id, corpus_display_name, token, logger):
     """
-    Queries the RAG Corpora REST endpoint to resolve a user-friendly display name (e.g., 'My Corpus')
-    to its unique numeric RAG Corpus ID. Supports full resource paths and numeric IDs directly.
+    Queries the ragCorpora REST API to resolve a display name or numeric ID into a corpus ID.
+    If corpus_display_name is already a numeric ID, it is returned directly.
     """
-    # 1. Handle Full Resource Name (e.g., 'projects/.../ragCorpora/123')
-    if "/" in corpus_display_name:
-        corpus_id = corpus_display_name.split("/")[-1].strip()
-        logger.info(f"Detected full resource path in parameter. Extracted Corpus ID directly: '{corpus_id}'")
-        return corpus_id
+    if not corpus_display_name:
+        raise ValueError("RAG Corpus Name cannot be empty.")
         
-    # 2. Handle pure numeric string directly
-    if corpus_display_name.isdigit():
-        logger.info(f"Using provided numeric ID directly: {corpus_display_name}")
-        return corpus_display_name
+    # If it's already a numeric ID, return directly
+    if str(corpus_display_name).strip().isdigit():
+        return str(corpus_display_name).strip()
 
     url = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{location}/ragCorpora"
     headers = {
@@ -201,7 +216,14 @@ def main():
         rag_corpus_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "RAG Corpus Name")
         rag_gcs_bucket = siemplify.extract_configuration_param(INTEGRATION_NAME, "RAG GCS Bucket")
 
-        # 2. Validation Checks
+        # 2. Parse RAG Resource Name (if full path provided, extract project, location, and corpus identifier)
+        target_project, target_location, parsed_corpus_identifier = parse_rag_resource_name(
+            rag_corpus_name,
+            default_project=proj_id,
+            default_location=safe_region
+        )
+
+        # 3. Validation Checks
         if not sa_json or not str(sa_json).strip():
             raise ValueError("The global configuration parameter 'Service Account JSON' is required.")
         try:
@@ -209,16 +231,16 @@ def main():
         except json.JSONDecodeError:
             raise ValueError("The global configuration parameter 'Service Account JSON' is malformed.")
 
-        if not proj_id or not str(proj_id).strip():
+        if not target_project or not str(target_project).strip():
             raise ValueError("A Google Cloud Project ID ('GCP Project ID' or 'SecOps Project ID') is required.")
 
-        if not rag_corpus_name or not str(rag_corpus_name).strip():
+        if not parsed_corpus_identifier or not str(parsed_corpus_identifier).strip():
             raise ValueError("The global configuration parameter 'RAG Corpus Name' is required.")
 
         if not rag_gcs_bucket or not str(rag_gcs_bucket).strip():
             raise ValueError("The global configuration parameter 'RAG GCS Bucket' is required.")
 
-        # 3. Fetch Action-Specific Parameters
+        # 4. Fetch Action-Specific Parameters
         content = siemplify.extract_action_param("Content")
         if not content or not str(content).strip():
             raise ValueError("The 'Content' parameter is required.")
@@ -246,25 +268,25 @@ def main():
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid 'Metadata JSON' format: {e.msg}")
 
-        # 4. Generate token & resolve corpus ID
+        # 5. Generate token & resolve corpus ID
         token = get_bearer_token(sa_json, siemplify.LOGGER)
         
         corpus_id = resolve_rag_corpus_id(
-            location=safe_region,
-            project_id=proj_id,
-            corpus_display_name=rag_corpus_name,
+            location=target_location,
+            project_id=target_project,
+            corpus_display_name=parsed_corpus_identifier,
             token=token,
             logger=siemplify.LOGGER
         )
 
-        # 5. Prepare payload structure
+        # 6. Prepare payload structure
         payload_line = {
             "content": content,
             "metadata": metadata
         }
         new_jsonl_line = json.dumps(payload_line) + "\n"
 
-        # 6. GCS Operations (Append vs Overwrite)
+        # 7. GCS Operations (Append vs Overwrite)
         final_gcs_content = new_jsonl_line
         mode_str = "Overwrite"
 
@@ -281,7 +303,7 @@ def main():
                 final_gcs_content = existing_content + new_jsonl_line
                 mode_str = "Append"
 
-        # 7. Upload to GCS
+        # 8. Upload to GCS
         upload_gcs_content(
             bucket=rag_gcs_bucket,
             filename=filename,
@@ -290,10 +312,10 @@ def main():
             logger=siemplify.LOGGER
         )
 
-        # 8. Trigger RAG Import via REST
+        # 9. Trigger RAG Import via REST
         import_rag_file(
-            location=safe_region,
-            project_id=proj_id,
+            location=target_location,
+            project_id=target_project,
             corpus_id=corpus_id,
             bucket=rag_gcs_bucket,
             filename=filename,
