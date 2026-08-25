@@ -48,12 +48,12 @@ def main():
         proj_id = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
         region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
 
-        # 2. Action Parameters (With updated gus-sdl defaults)
-        registry_project_id = siemplify.extract_action_param("Agent Registry Project ID", default_value="gus-sdl")
+        # 2. Action Parameters
+        registry_project_id = siemplify.extract_action_param("Agent Registry Project ID", default_value="my-gcp-project")
         registry_location = siemplify.extract_action_param("Agent Registry Location", default_value="us-central1")
-        agent_name = siemplify.extract_action_param("Agent Name", default_value="projects/gus-sdl/locations/us-central1/agents/agentregistry-00000000-0000-0000-9fad-9fca5ba05f30")
-        reasoning_engine_name = siemplify.extract_action_param("Reasoning Engine Name", default_value="projects/288909297183/locations/us-central1/reasoningEngines/5540974004770177024")
-        user_query = siemplify.extract_action_param("User Query", default_value="Can you pull the overview details for security case ID 16999?")
+        agent_name = siemplify.extract_action_param("Agent Name", default_value="projects/my-gcp-project/locations/us-central1/agents/sample-agent-id")
+        reasoning_engine_name = siemplify.extract_action_param("Reasoning Engine Name", default_value="projects/123456789012/locations/us-central1/reasoningEngines/1234567890123456789")
+        user_query = siemplify.extract_action_param("User Query", default_value="Can you pull the overview details for security case ID 10001?")
 
         if not user_query or not str(user_query).strip():
             raise ValueError("The 'User Query' parameter is required and cannot be empty.")

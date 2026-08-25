@@ -6,7 +6,34 @@ _archive/
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.egg-info/
+.installed.cfg
+*.egg
 .venv/
 venv/
+ENV/
+.pytest_cache/
+.coverage
+.mypy_cache/
+
+# Local Secrets, Credentials & Environment Files
+*.pem
+*.key
+*service_account*.json
+*sa*.json
+.env
+.env.*
+!.env.example
+
+# SecOps SOAR Package Exports
+*.zip
+
+# Operating System & IDE Artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
