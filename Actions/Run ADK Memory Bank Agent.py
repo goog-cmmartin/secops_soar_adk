@@ -31,7 +31,8 @@ def main():
         user_prompt = siemplify.extract_action_param("User Prompt")
         raw_session_id = siemplify.extract_action_param("Session ID")
         memory_mode = siemplify.extract_action_param("Memory Mode", default_value="Memory Bank") # Memory Bank or InMemory
-        preload_memory = siemplify.extract_action_param("Preload Memory", default_value="True").lower() == "true"
+        preload_memory = siemplify.extract_action_param("Preload Memory", input_type=bool, default_value=True)
+        agent_engine_id = siemplify.extract_action_param("Agent Engine ID")
         raw_budget = siemplify.extract_action_param("Thinking Budget", default_value="0")
         try:
             thinking_budget = int(raw_budget) if raw_budget else 0
@@ -55,6 +56,7 @@ def main():
             enable_memory=True,
             session_id=raw_session_id,
             memory_mode=memory_mode,
+            agent_engine_id=agent_engine_id,
             preload=preload_memory,
             case_id=getattr(siemplify, "case_id", None)
         )
@@ -65,9 +67,9 @@ def main():
             You have access to a persistent, long-term memory service allowing you to remember important details from past conversations.
             
             Core Behavior:
-            - If you are asked questions about past interactions, or if you need context from previous conversations, use your pre-equipped memory tools to lookup historical snippets.
-            - Answer the user's question accurately.
-            - When saving information, you do not need to do anything extra; your completed session details are automatically consolidated into long-term memory by the system at the end of the run.
+            - If you need to search past conversations, call your memory tool with clear, descriptive search terms (never use empty strings).
+            - Answer the user's question accurately based on remembered context.
+            - When saving information, your completed session details are automatically consolidated into long-term memory at the end of the run.
         """
 
         # 6. Run Runbook agent with Memory Service and Memory Tools

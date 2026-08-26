@@ -960,14 +960,23 @@ description: {description}
         """
         Returns the appropriate pre-built ADK memory tools.
         If preload is True, returns [preload_memory].
-        Otherwise, returns [load_memory].
+        Otherwise, returns [load_memory] wrapped with empty-query guardrails.
         """
         if preload:
             from google.adk.tools import preload_memory
             return [preload_memory]
         else:
             from google.adk.tools import load_memory
-            return [load_memory]
+            
+            # Wrap load_memory to protect against empty query strings that trigger Vertex AI 400s
+            def safe_load_memory(query: str = "context", *args, **kwargs):
+                """Queries long-term memory for relevant historical details using a non-empty query string."""
+                safe_q = str(query).strip() if query and str(query).strip() else "context"
+                return load_memory(query=safe_q, *args, **kwargs)
+
+            safe_load_memory.__name__ = "load_memory"
+            safe_load_memory.__doc__ = getattr(load_memory, "__doc__", "Queries long-term memory for relevant historical details.")
+            return [safe_load_memory]
 
     def resolve_memory_configuration(self, enable_memory: bool = False, session_id: str = "", memory_mode: str = "Memory Bank", agent_engine_id: str = "", preload: bool = True, case_id: str = None):
         """
