@@ -623,10 +623,28 @@ class GoogleADKManager:
         )
 
         from google.adk.runners import Runner
-        from google.adk.sessions.in_memory_session_service import InMemorySessionService
         from google.adk.artifacts.in_memory_artifact_service import InMemoryArtifactService
 
-        session_service = InMemorySessionService()
+        # Configure session service: Use VertexAiSessionService for Vertex AI Memory Bank, else InMemory
+        session_service = None
+        if memory_service and hasattr(memory_service, "_agent_engine_id") or (memory_service and hasattr(memory_service, "agent_engine_id")):
+            try:
+                from google.adk.sessions import VertexAiSessionService
+                engine_id = getattr(memory_service, "agent_engine_id", None) or getattr(memory_service, "_agent_engine_id", None)
+                self.logger.info(f"ADK Manager: Initializing VertexAiSessionService for Agent Engine ID: {engine_id}")
+                session_service = VertexAiSessionService(
+                    project=self.project_id,
+                    location=self.location,
+                    agent_engine_id=engine_id
+                )
+            except Exception as ss_err:
+                self.logger.warn(f"ADK Manager: Failed to initialize VertexAiSessionService ({str(ss_err)}). Falling back to InMemorySessionService.")
+                from google.adk.sessions.in_memory_session_service import InMemorySessionService
+                session_service = InMemorySessionService()
+        else:
+            from google.adk.sessions.in_memory_session_service import InMemorySessionService
+            session_service = InMemorySessionService()
+
         artifact_service = InMemoryArtifactService()
 
         runner = Runner(
