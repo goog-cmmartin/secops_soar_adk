@@ -87,6 +87,23 @@ def main():
             case_id=case_id
         )
 
+        # Build environmental context to steer tool calling
+        safe_cust_id = str(cust_id).strip() if cust_id and str(cust_id).strip() else None
+        safe_proj_id = str(proj_id).strip() if proj_id and str(proj_id).strip() else None
+        safe_region = str(region).strip() if region and str(region).strip() else None
+
+        env_context_lines = []
+        if safe_cust_id:
+            env_context_lines.append(f"- customerId: {safe_cust_id}")
+        if safe_region:
+            env_context_lines.append(f"- region: {safe_region}")
+        if safe_proj_id:
+            env_context_lines.append(f"- projectId: {safe_proj_id}")
+        
+        env_context = ""
+        if env_context_lines:
+            env_context = "\nENVIRONMENT CONTEXT (use these values ONLY if required, NEVER pass empty string '' for omitted parameters):\n" + "\n".join(env_context_lines) + "\n"
+
         # Equip read-only toolset
         read_toolset = manager.init_mcp_toolset(
             mcp_url=mcp_url, 
@@ -102,12 +119,10 @@ def main():
         # ---------------------------------------------------------------------
         siemplify.LOGGER.info("Executing pre-flight validation...")
         
-        # We can run a micro-agent to do the validation or fetch case details first.
-        # To be highly robust and fast, we run an explicit data gathering agent.
-        case_info_prompt = f"Call get_case(caseId='{case_id}') and return its result in JSON."
+        case_info_prompt = f"Call get_case(caseId='{case_id}') and return its result in JSON. Do not provide empty strings for optional parameters."
         case_info_res = manager.run_agent(
             agent_name="Triage_Preflight_Fetcher",
-            instructions="You are a read-only metadata fetcher. Call get_case and format as JSON.",
+            instructions=f"You are a read-only metadata fetcher. Call get_case and format as JSON.{env_context}",
             input_text=case_info_prompt,
             tools=[read_toolset]
         )
@@ -138,7 +153,7 @@ def main():
             write_toolset = manager.init_mcp_toolset(mcp_url=mcp_url, user_project=proj_id, tool_filter=["update_case"])
             manager.run_agent(
                 agent_name="Triage_Claim_Writer",
-                instructions="You are a state-update agent. Call update_case to assign the case assignee.",
+                instructions=f"You are a state-update agent. Call update_case to assign the case assignee. Never pass empty strings for unused arguments.{env_context}",
                 input_text=f"Call update_case(caseId='{case_id}', assignee='{triage_identity}')",
                 tools=[write_toolset]
             )
@@ -149,7 +164,7 @@ def main():
         siemplify.LOGGER.info("Phase 1 GATHER: Extracting alert metadata, local entities, and prior investigations...")
         
         gather_instructions = f"""You are a Security Data Gathering Agent.
-Your goal is to collect all local facts and alerts for Case {case_id}.
+Your goal is to collect all local facts and alerts for Case {case_id}.{env_context}
 
 You MUST execute the following sequence of read actions:
 1. Call list_case_alerts(caseId='{case_id}') to fetch all alerts.
@@ -158,6 +173,7 @@ You MUST execute the following sequence of read actions:
    b. Call list_involved_entities(caseId='{case_id}', caseAlertId=...) using its caseAlertId.
    c. Call list_connector_events(caseId='{case_id}', caseAlertId=..., expandEventJsonData=true) to get raw event context.
 
+IMPORTANT: Do not send empty string '' arguments for parameters that are not specified. Only pass defined values.
 Output your gathered facts in a well-structured JSON format inside a single ```json block.
 Do NOT attempt to write comments or change the case stage. ONLY retrieve and dump the raw JSON."""
 
@@ -253,13 +269,14 @@ limit: 10
 """
 
             historical_instructions = f"""You are a Security History Gathering Agent.
-Your job is to fetch historical prevalence and prior case dispositions.
+Your job is to fetch historical prevalence and prior case dispositions.{env_context}
 
 You MUST use your available tools to run:
 1. Call summarize_entity(entityType='{pivot_type}', entityValue='{pivot_entity}') to check global prevalence.
 2. Call udm_search(query=\"\"\"{family_a_query}\"\"\", startTime='{start_time}', endTime='{end_time}') to query prior cases.
 3. Call udm_search(query=\"\"\"{family_b_query}\"\"\", startTime='{start_time}', endTime='{end_time}') to query detections prevalence.
 
+IMPORTANT: Do not pass empty strings '' for unused parameters.
 Format your responses inside a single ```json block. Handle any empty values or errors gracefully (just record the error inside the JSON)."""
 
             siemplify.LOGGER.info(f"Running historical queries for Pivot: {pivot_entity} ({pivot_type}) and Rule: {rule_id}")
@@ -385,7 +402,7 @@ Next: {decision.get('next_steps')}"""
             comment_toolset = manager.init_mcp_toolset(mcp_url=mcp_url, user_project=proj_id, tool_filter=["create_case_comment"])
             manager.run_agent(
                 agent_name="Triage_Comment_Writer",
-                instructions="You are a comment writer. Call create_case_comment with the exact text provided.",
+                instructions=f"You are a comment writer. Call create_case_comment with the exact text provided. Do not pass empty strings for unused parameters.{env_context}",
                 input_text=f"Call create_case_comment(caseId='{case_id}', comment=\"\"\"{report_comment}\"\"\")",
                 tools=[comment_toolset]
             )
@@ -408,7 +425,7 @@ Next: {decision.get('next_steps')}"""
             route_toolset = manager.init_mcp_toolset(mcp_url=mcp_url, user_project=proj_id, tool_filter=["update_case"])
             manager.run_agent(
                 agent_name="Triage_Router",
-                instructions="You are a routing agent. Call update_case to change the stage.",
+                instructions=f"You are a routing agent. Call update_case to change the stage. Do not pass empty strings for unused parameters.{env_context}",
                 input_text=f"Call update_case(caseId='{case_id}', stage='{target_stage}')",
                 tools=[route_toolset]
             )
