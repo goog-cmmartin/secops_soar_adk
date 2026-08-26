@@ -20,12 +20,21 @@ def main():
     try:
         # 1. Extract Config Params (The credentials we are testing)
         api_key = siemplify.extract_configuration_param(INTEGRATION_NAME, "Gemini API Key")
+        sa_json = siemplify.extract_configuration_param(INTEGRATION_NAME, "Service Account JSON")
         model_name = siemplify.extract_configuration_param(INTEGRATION_NAME, "Model Name", default_value="gemini-3.7-flash")
+        proj_id = (
+            siemplify.extract_configuration_param(INTEGRATION_NAME, "GCP Project ID")
+            or siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Project ID")
+        )
+        region = siemplify.extract_configuration_param(INTEGRATION_NAME, "SecOps Region")
 
         # 2. Initialize Manager
         manager = GoogleADKManager(
             api_key=api_key,
+            service_account_json=sa_json,
             model_name=model_name,
+            project_id=proj_id,
+            location=region,
             logger=siemplify.LOGGER
         )
 

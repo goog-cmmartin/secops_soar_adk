@@ -85,7 +85,7 @@ class GoogleADKManager:
     Handles tool exclusivity rules for Gemini models.
     """
 
-    def __init__(self, api_key=None, service_account_json=None, logger=None, project_id=None, location=None, model_name="gemini-2.5-flash", agent_engine_resource_name=None, rag_corpus_name=None, rag_gcs_bucket=None):
+    def __init__(self, api_key=None, service_account_json=None, logger=None, project_id=None, location=None, model_name="gemini-3.7-flash", agent_engine_resource_name=None, rag_corpus_name=None, rag_gcs_bucket=None):
         self.logger = logger
         self.api_key = api_key
         self.service_account_json = service_account_json
