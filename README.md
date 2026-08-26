@@ -80,9 +80,18 @@ Configure the instance settings under **Integrations > Google ADK > Configure In
 ├── Managers/                 # Shared manager modules and business logic
 │   └── GoogleADKManager.py   # Core ADK manager, token cache, and toolset provider
 ├── Dependencies/             # Vendored Python wheels for offline SOAR deployment
+├── docs/                     # Documentation and reference guides
+│   └── resources/            # Supplementary reference artifacts and tool catalogs
+│       └── google_secops_mcp_tools.md  # Google SecOps MCP server tool categories and filtering guide
 ├── Integration-Google ADK.json # Master integration manifest and instance parameter schema
 └── metadata.json             # Integration metadata
 ```
+
+---
+
+## Documentation & Resources
+
+- [Google SecOps MCP Tool Reference Guide](docs/resources/google_secops_mcp_tools.md): Comprehensive catalog of SecOps MCP tools grouped by category (Case Management, Playbooks & Actions, UDM Search, Reference Lists, Detection Rules, Parsers, Feeds, Data Tables, and Investigations) for configuring `Tool Filter` parameters in `Run Hosted MCP ADK Agent`.
 
 ---
 
