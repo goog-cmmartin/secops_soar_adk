@@ -605,15 +605,6 @@ class GoogleADKManager:
             top_k=top_k
         )
 
-        # Configure Memory Auto-Save Callback if Memory Service is provided
-        after_agent_callback = None
-        if memory_service:
-            async def auto_save_session_to_memory_callback(callback_context):
-                self.logger.info("ADK Manager Hook: Saving completed session to long-term memory...")
-                await callback_context.add_session_to_memory()
-                return None
-            after_agent_callback = auto_save_session_to_memory_callback
-
         # Initialize the Agent
         agent = LlmAgent(
             name=agent_name,
@@ -622,8 +613,7 @@ class GoogleADKManager:
             tools=all_tools,
             planner=planner,
             code_executor=code_executor,
-            generate_content_config=config,
-            after_agent_callback=after_agent_callback
+            generate_content_config=config
         )
 
         # Initialize the App
@@ -743,6 +733,23 @@ class GoogleADKManager:
                     elif part.text and not event.partial and not event.is_final_response():
                         if part.text not in results["thoughts"]:
                             results["thoughts"].append(part.text)
+
+        # Post-Run Memory Consolidation: If memory service is enabled, fetch completed session and persist
+        if memory_service and hasattr(memory_service, "add_session_to_memory"):
+            try:
+                self.logger.info(f"ADK Manager: Fetching completed session '{session_id}' to consolidate into Memory Bank...")
+                completed_session = await runner.session_service.get_session(
+                    app_name=self.app_name, user_id=user_id, session_id=str(session_id)
+                )
+                if completed_session:
+                    num_events = len(getattr(completed_session, "events", []))
+                    self.logger.info(f"ADK Manager: Consolidating session with {num_events} events into Vertex AI Memory Bank...")
+                    await memory_service.add_session_to_memory(completed_session)
+                    self.logger.info("ADK Manager: Successfully submitted session to Vertex AI Memory Bank.")
+                else:
+                    self.logger.warn(f"ADK Manager: Completed session '{session_id}' not found in session service.")
+            except Exception as mem_save_err:
+                self.logger.error(f"ADK Manager: Error consolidating session to Memory Bank: {str(mem_save_err)}")
 
         return results
 
