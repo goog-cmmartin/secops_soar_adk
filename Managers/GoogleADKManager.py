@@ -443,16 +443,25 @@ class GoogleADKManager:
         )
 
     def test_connection(self):
-        """Validates connectivity and credentials by executing a live lightweight LLM prompt."""
+        """Validates API Key or Vertex AI credentials directly without spinning up an ADK runner."""
         try:
-            self.logger.info(f"Verifying ADK connectivity and credentials with model {self.model_name}...")
-            # Execute a minimal synchronous agent run to verify API key / ADC auth against Google endpoints
-            self.run_agent(
-                agent_name="ping_tester",
-                instructions="You are a health-check responder. Respond strictly with 'pong'.",
-                input_text="ping",
-                max_output_tokens=10
-            )
+            self.logger.info(f"Validating credentials against Google GenAI API with model '{self.model_name}'...")
+            from google import genai
+
+            if self.api_key:
+                client = genai.Client(api_key=self.api_key)
+            else:
+                creds = self._get_cached_credentials()
+                client = genai.Client(
+                    vertexai=True,
+                    project=self.project_id,
+                    location=self.location,
+                    credentials=creds
+                )
+
+            # Metadata verification (0 token cost, tests auth & connectivity)
+            client.models.get(model=self.model_name)
+            self.logger.info("ADK Manager: Credentials successfully verified against Google GenAI API.")
             return True
         except Exception as e:
             self.logger.error(f"ADK Connection test failed: {str(e)}")
