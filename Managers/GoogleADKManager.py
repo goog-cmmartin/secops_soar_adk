@@ -443,13 +443,15 @@ class GoogleADKManager:
         )
 
     def test_connection(self):
-        """Validates connectivity by initializing a minimal agent."""
+        """Validates connectivity and credentials by executing a live lightweight LLM prompt."""
         try:
-            self.logger.info(f"Verifying ADK connectivity with model {self.model_name}...")
-            LlmAgent(
-                name="ping_tester",
-                model=self.model_name,
-                instruction="Health check agent."
+            self.logger.info(f"Verifying ADK connectivity and credentials with model {self.model_name}...")
+            # Execute a minimal synchronous agent run to verify API key / ADC auth against Google endpoints
+            self.run_agent(
+                agent_name="ping_tester",
+                instructions="You are a health-check responder. Respond strictly with 'pong'.",
+                input_text="ping",
+                max_output_tokens=10
             )
             return True
         except Exception as e:
