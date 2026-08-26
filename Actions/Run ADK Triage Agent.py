@@ -20,14 +20,77 @@ ENTITY_FIELD_MAP = {
     "dns_query": "detection.collection_elements.references.event.network.dns.questions.name"
 }
 
+import re
+
 def extract_json_block(text):
-    """Extracts and parses a JSON block from LLM output, handling markdown wrappers."""
-    text = text.strip()
-    if "```json" in text:
-        text = text.split("```json")[1].split("```")[0].strip()
-    elif "```" in text:
-        text = text.split("```")[1].split("```")[0].strip()
-    return json.loads(text)
+    """Extracts and parses a JSON block from LLM output with robust fallbacks and sanitization."""
+    if not text:
+        return {}
+    raw = str(text).strip()
+    
+    # Strip markdown block quotes
+    if "```json" in raw:
+        raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in raw:
+        raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
+        
+    # Attempt 1: Direct JSON parsing
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    # Attempt 2: Relaxed control character parsing
+    try:
+        return json.loads(raw, strict=False)
+    except Exception:
+        pass
+
+    # Attempt 3: Locate outer brackets
+    start_brace = raw.find('{')
+    end_brace = raw.rfind('}')
+    if start_brace != -1 and end_brace != -1 and end_brace > start_brace:
+        candidate = raw[start_brace:end_brace+1]
+        try:
+            return json.loads(candidate, strict=False)
+        except Exception:
+            pass
+
+    # Attempt 4: Clean unescaped internal newlines inside strings using regex
+    try:
+        cleaned = re.sub(r'[\x00-\x1f\x7f-\x9f]', lambda m: ' ' if m.group(0) in '\n\r\t' else '', raw)
+        return json.loads(cleaned, strict=False)
+    except Exception:
+        pass
+
+    # Attempt 5: Recover truncated JSON objects by closing brackets
+    if start_brace != -1:
+        truncated = raw[start_brace:]
+        # Close open quotes and braces
+        for suffix in ['"}', '"]}', '}', '"]}}', '"]']:
+            try:
+                return json.loads(truncated + suffix, strict=False)
+            except Exception:
+                continue
+
+    # Attempt 6: Fallback heuristic key-value extraction for essential fields
+    extracted = {}
+    for key in ["verdict", "disposition", "rationale", "next_steps", "prevalence_entity", "prevalence_rule", "simulated", "status", "stage", "alerts"]:
+        pattern = rf'"{key}"\s*:\s*(?:"([^"]*)"|([^,\n\}}]+))'
+        match = re.search(pattern, raw)
+        if match:
+            val = match.group(1) if match.group(1) is not None else match.group(2).strip()
+            if val.lower() == "true":
+                extracted[key] = True
+            elif val.lower() == "false":
+                extracted[key] = False
+            else:
+                extracted[key] = val.strip('"\'')
+
+    if extracted:
+        return extracted
+
+    return {"raw_text": raw}
 
 @output_handler
 def main():
@@ -181,7 +244,8 @@ Do NOT attempt to write comments or change the case stage. ONLY retrieve and dum
             agent_name="Triage_Data_Gatherer",
             instructions=gather_instructions,
             input_text="Gather all alert and event metadata.",
-            tools=[read_toolset]
+            tools=[read_toolset],
+            max_output_tokens=8192
         )
         
         local_facts = extract_json_block(gather_res["final_response"])
@@ -285,7 +349,8 @@ Format your responses inside a single ```json block. Handle any empty values or 
                     agent_name="Triage_Historical_Gatherer",
                     instructions=historical_instructions,
                     input_text="Execute historical udm searches.",
-                    tools=[read_toolset]
+                    tools=[read_toolset],
+                    max_output_tokens=8192
                 )
                 historical_results = extract_json_block(hist_res["final_response"])
             except Exception as hist_err:
@@ -345,7 +410,8 @@ Do not write any other text outside the json block."""
             input_text=json.dumps(decision_payload, indent=2),
             tools=memory_tools if memory_tools else [],
             session_id=session_id,
-            memory_service=memory_service
+            memory_service=memory_service,
+            max_output_tokens=4096
         )
 
         decision = extract_json_block(decision_res["final_response"])
