@@ -1,6 +1,6 @@
 # Google SecOps SOAR - Google ADK Integration
 
-This repository contains the official custom integration package for orchestrating **Google Agent Development Kit (ADK)** agents directly within **Google Security Operations (SecOps) SOAR** playbooks.
+This repository contains an un-official custom integration package for orchestrating **Google Agent Development Kit (ADK)** agents directly within **Google Security Operations (SecOps) SOAR** playbooks.
 
 It equips SOC teams and security engineers with autonomous, tool-augmented Gemini agents that run natively or in isolated cloud sandboxes to investigate alerts, execute complex triage workflows, search the open web (OSINT), interact with Model Context Protocol (MCP) servers, query knowledge bases via Vertex AI RAG, and store multi-turn investigation memories.
 
