@@ -1,0 +1,34 @@
+creator: admin
+description: Invokes remote agents and reasoning engines published in Vertex AI Agent
+  Registry (A2A).
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run ADK Agent Registry Agent
+parameters:
+- default_value: ''
+  description: GCP Project ID hosting the Agent Registry (defaults to integration
+    project ID).
+  is_mandatory: false
+  name: Agent Registry Project ID
+  type: string
+- default_value: us-central1
+  description: GCP Location/Region for the registry (e.g. us-central1).
+  is_mandatory: false
+  name: Agent Registry Location
+  type: string
+- default_value: ''
+  description: Remote agent resource name or alias.
+  is_mandatory: false
+  name: Agent Name
+  type: string
+- default_value: ''
+  description: Full Vertex AI Reasoning Engine resource path (projects/.../locations/.../reasoningEngines/...).
+  is_mandatory: false
+  name: Reasoning Engine Name
+  type: string
+- default_value: ''
+  description: Query to send to the remote registered agent.
+  is_mandatory: true
+  name: User Query
+  type: string

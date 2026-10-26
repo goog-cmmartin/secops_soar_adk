@@ -1,0 +1,28 @@
+creator: admin
+description: Interacts with central Google Cloud Skill Registry to search, load, and
+  register security skills.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run ADK Skill Registry Agent
+parameters:
+- default_value: ''
+  description: The prompt or directive for the Skill Registry agent.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string
+- default_value: false
+  description: Whether to maintain memory context across executions.
+  is_mandatory: false
+  name: Enable Memory
+  type: boolean
+- default_value: ''
+  description: Optional custom session identifier for memory persistence.
+  is_mandatory: false
+  name: Session ID
+  type: string

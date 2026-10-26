@@ -1,0 +1,38 @@
+creator: admin
+description: Cloud storage assistant equipped with Google Cloud Storage read, write,
+  and admin toolsets.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run ADK GCS Agent
+parameters:
+- default_value: ''
+  description: Cloud storage request or directive.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: false
+  description: Allows the agent to write and upload objects to GCS buckets.
+  is_mandatory: false
+  name: Allow GCS Write
+  type: boolean
+- default_value: false
+  description: Allows the agent to create buckets and manage ACLs.
+  is_mandatory: false
+  name: Allow GCS Admin
+  type: boolean
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string
+- default_value: false
+  description: Whether to maintain memory context across executions.
+  is_mandatory: false
+  name: Enable Memory
+  type: boolean
+- default_value: ''
+  description: Optional custom session identifier for memory persistence.
+  is_mandatory: false
+  name: Session ID
+  type: string

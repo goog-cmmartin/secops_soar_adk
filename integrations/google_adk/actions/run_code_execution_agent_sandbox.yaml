@@ -1,0 +1,33 @@
+creator: admin
+description: Runs an agent equipped with dynamic Python code execution in a secure
+  sandbox.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run Code Execution Agent Sandbox
+parameters:
+- default_value: Code_Execution_Sandbox_Agent
+  description: Display name for the sandbox agent.
+  is_mandatory: false
+  name: Agent Name
+  type: string
+- default_value: ''
+  description: Problem, math, or log parsing request for Python execution.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string
+- default_value: false
+  description: Whether to maintain memory context across executions.
+  is_mandatory: false
+  name: Enable Memory
+  type: boolean
+- default_value: ''
+  description: Optional custom session identifier for memory persistence.
+  is_mandatory: false
+  name: Session ID
+  type: string

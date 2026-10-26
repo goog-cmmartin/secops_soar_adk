@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google ADK Agent Analysis</title>
+
+    <!-- 1. External Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- 2. Configure Tailwind Theming -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'background': 'var(--widget-bg-color)',
+                        'foreground': 'var(--widget-foreground-color)',
+                        'card': 'var(--widget-card-color)',
+                        'card-foreground': 'var(--widget-card-foreground-color)',
+                        'primary': 'var(--widget-primary-color)',
+                        'primary-foreground': 'var(--widget-primary-foreground-color)',
+                        'secondary': 'var(--widget-secondary-color)',
+                        'secondary-foreground': 'var(--widget-secondary-foreground-color)',
+                        'muted': 'var(--widget-muted-color)',
+                        'muted-foreground': 'var(--widget-muted-foreground-color)',
+                        'accent': 'var(--widget-accent-color)',
+                        'accent-foreground': 'var(--widget-accent-foreground-color)',
+                        'border': 'var(--widget-border-color)',
+                        'input': 'var(--widget-input-color)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- 3. Base Styles & Markdown Resets -->
+    <style type="text/tailwindcss">
+        @layer base {
+            body {
+                --widget-bg-color: #ffffff;
+                --widget-foreground-color: #020817;
+                --widget-card-color: #ffffff;
+                --widget-card-foreground-color: #020817;
+                --widget-primary-color: #1a73e8;
+                --widget-primary-foreground-color: #ffffff;
+                --widget-secondary-color: #f1f5f9;
+                --widget-secondary-foreground-color: #0f172a;
+                --widget-muted-color: #f1f5f9;
+                --widget-muted-foreground-color: #64748b;
+                --widget-accent-color: #f1f5f9;
+                --widget-accent-foreground-color: #0f172a;
+                --widget-border-color: #e2e8f0;
+                --widget-input-color: #e2e8f0;
+                @apply bg-background text-foreground;
+            }
+
+            /* Markdown Content Styling */
+            #content h1 { @apply text-xl font-bold mt-4 mb-2 text-foreground; }
+            #content h2 { @apply text-lg font-bold mt-4 mb-2 text-foreground; }
+            #content h3 { @apply text-base font-bold mt-4 mb-2 border-b border-border pb-1 text-primary; }
+            #content p { @apply mb-3 leading-relaxed; }
+            #content ul { @apply list-disc pl-5 mb-3 space-y-1; }
+            #content ol { @apply list-decimal pl-5 mb-3 space-y-1; }
+            #content code { @apply bg-muted text-secondary-foreground px-1.5 py-0.5 rounded font-mono text-sm; }
+            #content pre { @apply bg-muted text-secondary-foreground p-3 rounded-lg font-mono text-xs overflow-x-auto mb-3; }
+            #content blockquote { @apply border-l-4 border-primary pl-3 italic text-muted-foreground my-2; }
+            #content table { @apply w-full border-collapse my-3 text-xs md:text-sm; }
+            #content th { @apply border border-border px-3 py-1.5 bg-muted font-semibold text-left; }
+            #content td { @apply border border-border px-3 py-1.5; }
+            #content strong { @apply font-semibold text-foreground; }
+        }
+    </style>
+</head>
+<body class="font-sans antialiased">
+
+    <div class="p-3 md:p-5">
+        <!-- ADK AGENT REPORT CARD -->
+        <div class="bg-card text-card-foreground border border-border rounded-xl shadow-md overflow-hidden">
+            <div class="p-5 md:p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-2">
+                        <div class="h-6 w-1 bg-primary rounded-full"></div>
+                        <h1 id="report-title" class="text-xl md:text-2xl font-bold tracking-tight">ADK Agent Analysis</h1>
+                    </div>
+                    <button id="copy-btn" onclick="copyReportText()" class="hidden text-xs bg-muted hover:bg-muted/80 text-muted-foreground px-2.5 py-1 rounded border border-border transition-colors">
+                        Copy Markdown
+                    </button>
+                </div>
+
+                <!-- Target div for Rendered Markdown -->
+                <div id="content" class="text-sm md:text-base leading-relaxed">
+                    <div class="flex justify-center p-8">
+                        <span class="text-muted-foreground animate-pulse">Waiting for agent analysis...</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-muted/30 px-5 py-2.5 border-t border-border flex justify-between items-center text-xs text-muted-foreground">
+                <span class="flex items-center space-x-1">
+                    <svg class="w-3.5 h-3.5 text-primary inline" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                    <span>Google SecOps ADK Agent</span>
+                </span>
+                <span id="report-status">Autonomous AI Reasoning</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden container holding Siemplify action output placeholder -->
+    <!-- Analysts can bind this placeholder in Playbook Views: [ActionName.JsonResult| "final_response"] -->
+    <div id="raw-data" style="display:none;">[Run ADK Agent.JsonResult| "final_response"]</div>
+
+    <script>
+        // --- 1. Theme Configuration ---
+        const themes = {
+            light: {
+                '--widget-bg-color': '#ffffff',
+                '--widget-foreground-color': '#020817',
+                '--widget-card-color': '#ffffff',
+                '--widget-card-foreground-color': '#020817',
+                '--widget-primary-color': '#1a73e8',
+                '--widget-primary-foreground-color': '#ffffff',
+                '--widget-secondary-color': '#f1f5f9',
+                '--widget-secondary-foreground-color': '#0f172a',
+                '--widget-muted-color': '#f1f5f9',
+                '--widget-muted-foreground-color': '#64748b',
+                '--widget-accent-color': '#f1f5f9',
+                '--widget-accent-foreground-color': '#0f172a',
+                '--widget-border-color': '#e2e8f0',
+                '--widget-input-color': '#e2e8f0',
+            },
+            dark: {
+                '--widget-bg-color': '#020817',
+                '--widget-foreground-color': '#f8fafc',
+                '--widget-card-color': '#0a101f',
+                '--widget-card-foreground-color': '#f8fafc',
+                '--widget-primary-color': '#8ab4f8',
+                '--widget-primary-foreground-color': '#020817',
+                '--widget-secondary-color': '#0f172a',
+                '--widget-secondary-foreground-color': '#f8fafc',
+                '--widget-muted-color': '#0f172a',
+                '--widget-muted-foreground-color': '#94a3b8',
+                '--widget-accent-color': '#0f172a',
+                '--widget-accent-foreground-color': '#f8fafc',
+                '--widget-border-color': '#1e293b',
+                '--widget-input-color': '#1e293b',
+            }
+        };
+
+        function applyTheme(themeObject) {
+            for (const [key, value] of Object.entries(themeObject)) {
+                document.body.style.setProperty(key, value);
+            }
+        }
+
+        function isColorDark(hexColor) {
+            if (!hexColor || hexColor.length < 4) return false;
+            let hex = hexColor.replace('#', '');
+            if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            return (0.299 * r + 0.587 * g + 0.114 * b) < 140;
+        }
+
+        let rawMarkdownCache = "";
+
+        function copyReportText() {
+            if (!rawMarkdownCache) return;
+            navigator.clipboard.writeText(rawMarkdownCache).then(() => {
+                const btn = document.getElementById('copy-btn');
+                const orig = btn.textContent;
+                btn.textContent = "Copied!";
+                setTimeout(() => { btn.textContent = orig; }, 1800);
+            });
+        }
+
+        // Listen for parent iframe postMessage events (theming & dynamic data payloads)
+        window.addEventListener('message', evt => {
+            if (!evt || !evt.data) return;
+
+            // Theme sync from Chronicle SOAR host container
+            if (evt.data.background) {
+                applyTheme(isColorDark(evt.data.background) ? themes.dark : themes.light);
+            }
+
+            // Direct data payload injection (if dispatched via playbook view event)
+            if (evt.data.actionResult || evt.data.final_response || evt.data.response) {
+                const data = evt.data.actionResult || evt.data;
+                renderReportFromPayload(data);
+            }
+        });
+
+        function extractMarkdownText(raw) {
+            if (!raw) return "";
+            let trimmed = raw.trim();
+
+            // Check if placeholder was not substituted (e.g. preview mode or unexecuted action)
+            if (trimmed.startsWith("[") && trimmed.includes(".JsonResult")) {
+                return null;
+            }
+
+            // If payload is a JSON string, extract relevant response fields
+            if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (parsed && typeof parsed === 'object') {
+                        return parsed.final_response || parsed.response || parsed.output || parsed.analysis || parsed.summary || JSON.stringify(parsed, null, 2);
+                    }
+                } catch (e) {
+                    // Not valid JSON, treat as raw markdown
+                }
+            }
+
+            return trimmed;
+        }
+
+        function renderReportFromPayload(payload) {
+            let markdownText = "";
+            if (typeof payload === "string") {
+                markdownText = extractMarkdownText(payload);
+            } else if (payload && typeof payload === "object") {
+                markdownText = payload.final_response || payload.response || payload.output || payload.analysis || JSON.stringify(payload, null, 2);
+            }
+
+            renderMarkdown(markdownText);
+        }
+
+        function renderMarkdown(rawText) {
+            const contentDiv = document.getElementById('content');
+            const copyBtn = document.getElementById('copy-btn');
+
+            if (!rawText) {
+                contentDiv.innerHTML = `
+                    <div class="text-center py-8 text-muted-foreground">
+                        <p class="font-medium">No ADK agent output available for this alert.</p>
+                        <p class="text-xs mt-1">Execute any Google ADK action (e.g., Run ADK Agent, Run Google Search Agent) in your playbook to populate this view.</p>
+                    </div>
+                `;
+                copyBtn.classList.add('hidden');
+                return;
+            }
+
+            rawMarkdownCache = rawText;
+            copyBtn.classList.remove('hidden');
+
+            // Format markdown headers, lists, and indentation
+            const formattedMarkdown = rawText
+                .replace(/(###)/g, '\n\n$1')           
+                .replace(/(\* \*\*)/g, '\n$1')          
+                .replace(/(\s\d\.\s\*\*)/g, '\n\n$1')   
+                .replace(/(\s\d\.\s)/g, '\n$1')         
+                .trim();
+
+            contentDiv.innerHTML = marked.parse(formattedMarkdown);
+        }
+
+        function renderReport() {
+            const rawElement = document.getElementById('raw-data');
+            const rawContent = rawElement ? rawElement.textContent : "";
+            const extracted = extractMarkdownText(rawContent);
+            renderMarkdown(extracted);
+        }
+
+        // Run rendering on load
+        window.addEventListener('DOMContentLoaded', renderReport);
+    </script>
+</body>
+</html>

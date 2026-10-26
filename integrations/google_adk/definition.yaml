@@ -1,0 +1,142 @@
+api_version: "2.0"
+identifier: GoogleADK
+name: "GoogleADK"
+description: "Google Agent Development Kit (ADK) integration for Google SecOps SOAR. Provides autonomous agent reasoning, tool calling, memory banks, code execution, MCP connectivity, and agent registry integration."
+categories:
+  - "Artificial Intelligence"
+author: "Christopher Martin"
+version: 2.1
+python_version: "3.11"
+is_custom: true
+svg_logo_path: resources/logo.svg
+image_path: resources/image.png
+
+parameters:
+  - name: "Gemini API Key"
+    description: "API Key for direct Google Gemini API authentication (optional if Service Account or ADC is used)."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "Service Account JSON"
+    description: "Google Cloud Service Account JSON key credentials for Vertex AI and GCP services."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "Workload Identity Email"
+    description: "Target Google Cloud Service Account email for keyless authentication via Workload Identity Federation or Service Account Impersonation."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "Model Name"
+    description: "Default Gemini model for agent execution (e.g., gemini-3.8-flash, gemini-4-argon)."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: "gemini-3.8-flash"
+  - name: "GCP Project ID"
+    description: "Google Cloud Project ID for Vertex AI and Agent Engine."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "SecOps Project ID"
+    description: "SecOps GCP Project ID fallback."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "SecOps Region"
+    description: "Google Cloud region for Vertex AI and SecOps."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "SecOps Customer ID"
+    description: "SecOps Customer ID GUID."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "Agent Engine Resource Name"
+    description: "Optional Vertex AI Agent Engine resource path."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "MCP Server URL"
+    description: "Hosted Model Context Protocol (MCP) server URL for tool integration."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "Skills GCS Path"
+    description: "Google Cloud Storage bucket/prefix for custom skill runbooks."
+    integration_identifier: GoogleADK
+    is_mandatory: false
+    type: string
+    default_value: ""
+
+configuration:
+  - name: "Gemini API Key"
+    description: "API Key for direct Google Gemini API authentication (optional if Service Account or ADC is used)."
+    type: string
+    is_mandatory: false
+    is_password: true
+    default_value: ""
+  - name: "Service Account JSON"
+    description: "Google Cloud Service Account JSON key credentials for Vertex AI and GCP services."
+    type: string
+    is_mandatory: false
+    is_password: true
+    default_value: ""
+  - name: "Workload Identity Email"
+    description: "Target Google Cloud Service Account email for keyless authentication via Workload Identity Federation or Service Account Impersonation."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "Model Name"
+    description: "Default Gemini model for agent execution."
+    type: string
+    is_mandatory: false
+    default_value: "gemini-3.8-flash"
+  - name: "GCP Project ID"
+    description: "Google Cloud Project ID for Vertex AI and Agent Engine."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "SecOps Project ID"
+    description: "SecOps GCP Project ID fallback."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "SecOps Region"
+    description: "Google Cloud region for Vertex AI and SecOps."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "SecOps Customer ID"
+    description: "SecOps Customer ID GUID."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "Agent Engine Resource Name"
+    description: "Optional Vertex AI Agent Engine resource path."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "MCP Server URL"
+    description: "Hosted Model Context Protocol (MCP) server URL for tool integration."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "Skills GCS Path"
+    description: "Google Cloud Storage bucket/prefix for custom skill runbooks."
+    type: string
+    is_mandatory: false
+    default_value: ""
+
+simulation_data:
+  provider_name: "GoogleADK"

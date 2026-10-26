@@ -1,0 +1,33 @@
+creator: admin
+description: Deploys an OSINT researcher agent grounded with real-time Google Search
+  results.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run Google Search Agent
+parameters:
+- default_value: Google_Search_Analyst
+  description: Display name for the research agent instance.
+  is_mandatory: false
+  name: Agent Name
+  type: string
+- default_value: ''
+  description: Cyber threat intelligence or research query to search for.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string
+- default_value: false
+  description: Whether to maintain memory context across executions.
+  is_mandatory: false
+  name: Enable Memory
+  type: boolean
+- default_value: ''
+  description: Optional custom session identifier for memory persistence.
+  is_mandatory: false
+  name: Session ID
+  type: string

@@ -1,0 +1,33 @@
+creator: admin
+description: Executes an ADK agent dynamically connected to hosted Model Context Protocol
+  (MCP) server toolsets.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run Hosted MCP ADK Agent
+parameters:
+- default_value: ''
+  description: Operational query or request for the MCP agent.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string
+- default_value: ''
+  description: Optional comma-separated list of tool names to filter/expose.
+  is_mandatory: false
+  name: Tool Filter
+  type: string
+- default_value: false
+  description: Whether to maintain memory context across executions.
+  is_mandatory: false
+  name: Enable Memory
+  type: boolean
+- default_value: ''
+  description: Optional custom session identifier for memory persistence.
+  is_mandatory: false
+  name: Session ID
+  type: string

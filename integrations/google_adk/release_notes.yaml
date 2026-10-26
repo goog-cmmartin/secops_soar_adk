@@ -1,0 +1,54 @@
+- description: "Enabled native Google Search Grounding and Code Execution tool attachment in live Gemini generate_content calls, plus grounding metadata and query capture."
+  version: 2.1
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-26"
+- description: "Refined Workload Identity token validation and error handling to ensure failed token pre-refresh halts and reports actionable IAM remediation instructions."
+  version: 2.0
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-26"
+- description: "Added SafeLogger wrapper around SiemplifyLogger to prevent AttributeError on missing warning/debug methods in Chronicle runtime."
+  version: 1.9
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-26"
+- description: "Fixed Workload Identity credentials forwarding to genai.Client, enabled automatic project ID inference from Workload Identity email, and added pre-refresh token validation."
+  version: 1.8
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-26"
+- description: "Enabled global endpoint routing for Gemini 3.8 Flash, Gemini 3.7 Flash, and Gemini 4 Argon frontier reasoning models, and updated default model to gemini-3.8-flash."
+  version: 1.7
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-26"
+- description: "Added official Google ADK branding icons (SVG and PNG) and cleared tenant-specific default configuration parameters for multi-tenant portability."
+  version: 1.6
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-26"

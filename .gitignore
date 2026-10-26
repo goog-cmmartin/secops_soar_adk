@@ -29,6 +29,7 @@ ENV/
 
 # SecOps SOAR Package Exports
 *.zip
+!dist/*.zip
 
 # Operating System & IDE Artifacts
 .DS_Store

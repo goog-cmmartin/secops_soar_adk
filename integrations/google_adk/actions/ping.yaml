@@ -1,0 +1,12 @@
+creator: admin
+description: Tests connectivity to Google ADK and verifies API authentication.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: false
+name: Ping
+parameters:
+- default_value: ''
+  description: Gemini model to ping (defaults to configured model if empty).
+  is_mandatory: false
+  name: Model Name
+  type: string

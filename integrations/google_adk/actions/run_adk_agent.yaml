@@ -1,0 +1,37 @@
+creator: admin
+description: General autonomous reasoning agent powered by Google ADK and Gemini.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run ADK Agent
+parameters:
+- default_value: Logic_Analyst_Agent
+  description: Display name for the agent.
+  is_mandatory: false
+  name: Agent Name
+  type: string
+- default_value: ''
+  description: Directive or query for the agent.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string
+- default_value: false
+  description: Enables real-time Google Search grounding tool.
+  is_mandatory: false
+  name: Enable Google Search
+  type: boolean
+- default_value: false
+  description: Whether to maintain memory context across executions.
+  is_mandatory: false
+  name: Enable Memory
+  type: boolean
+- default_value: ''
+  description: Optional custom session identifier for memory persistence.
+  is_mandatory: false
+  name: Session ID
+  type: string

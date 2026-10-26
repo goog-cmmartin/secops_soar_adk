@@ -1,0 +1,38 @@
+creator: admin
+description: Maintains cross-turn memory and historical context across security incident
+  investigations.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run ADK Memory Bank Agent
+parameters:
+- default_value: ''
+  description: Directive or question for the memory agent.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: ''
+  description: Unique session identifier for memory state retention.
+  is_mandatory: false
+  name: Session ID
+  type: string
+- default_value: Memory Bank
+  description: Memory persistence mode (Memory Bank or Local).
+  is_mandatory: false
+  name: Memory Mode
+  type: string
+- default_value: true
+  description: Whether to preload prior session history.
+  is_mandatory: false
+  name: Preload Memory
+  type: boolean
+- default_value: ''
+  description: Optional Vertex AI Agent Engine identifier.
+  is_mandatory: false
+  name: Agent Engine ID
+  type: string
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string

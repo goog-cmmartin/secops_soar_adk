@@ -1,0 +1,32 @@
+creator: admin
+description: Runs an agent with Gemini built-in code execution capabilities.
+dynamic_results_metadata: []
+integration_identifier: GoogleADK
+is_async: true
+name: Run Code Execution Agent
+parameters:
+- default_value: Builtin_Code_Execution_Agent
+  description: Display name for the built-in code execution agent.
+  is_mandatory: false
+  name: Agent Name
+  type: string
+- default_value: ''
+  description: Prompt requesting mathematical calculation, code logic, or data transform.
+  is_mandatory: true
+  name: User Prompt
+  type: string
+- default_value: '0'
+  description: Thinking budget token count (0 to disable).
+  is_mandatory: false
+  name: Thinking Budget
+  type: string
+- default_value: false
+  description: Whether to maintain memory context across executions.
+  is_mandatory: false
+  name: Enable Memory
+  type: boolean
+- default_value: ''
+  description: Optional custom session identifier for memory persistence.
+  is_mandatory: false
+  name: Session ID
+  type: string
