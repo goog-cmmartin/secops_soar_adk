@@ -371,7 +371,7 @@ def main():
             "- Silent Detection Correlation & UDM/Entity Hunting (`correlate_silent_detections`, `search_udm_events`, `aggregate_udm_events`, `investigate_entity`)\n"
             "- YARA-L 2.0 Detection Rules & Tuning (`get_detection_rule`, `list_detection_rules`, `find_top_noisy_rules`)\n"
             "- Chronicle Data Tables (`list_data_tables`, `get_data_table`, `create_data_table`, `list_data_table_rows`, `add_data_table_rows`, `delete_data_table_row`, `audit_data_table_health`)\n"
-            "- Chronicle Native Dashboards (`search_dashboards`, `get_dashboard`, `execute_dashboard_query`, `create_dashboard`, `update_dashboard`, `add_dashboard_chart`, `update_dashboard_chart`, `remove_dashboard_chart`, `audit_dashboard_health`)\n"
+            "- Chronicle Native Dashboards (`search_dashboards`, `get_dashboard`, `execute_dashboard_query`, `create_dashboard`, `update_dashboard`, `add_dashboard_chart`, `update_dashboard_chart`, `remove_dashboard_chart`, `audit_dashboard_health`, `sync_secops_homepage_dashboard`)\n"
             "- SOAR Playbooks (`search_playbooks`, `get_playbook`, `audit_playbook_health`, `audit_playbook_decay`)\n\n"
             "Execute the user's mission systematically using the available tools, verify every finding with real telemetry, "
             "and synthesize a well-structured, actionable Markdown report."

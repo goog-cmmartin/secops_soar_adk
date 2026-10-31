@@ -1,0 +1,85 @@
+creator: Christopher Martin
+description: Correlates case entities with silent (non-alerting) detections and UDM events, with optional native case evidence attachment and Case Wall posting.
+dynamic_results_metadata:
+- result_example_path: resources/correlate_silent_detections_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: SecOpsSDKEngine
+is_async: false
+name: Correlate Silent Detections
+parameters:
+- default_value: ''
+  description: Case ID or Chronicle Case identifier to correlate. If left empty, uses current Case context.
+  is_mandatory: false
+  name: Case ID
+  type: string
+- default_value: '24'
+  description: Number of hours prior to case creation / current time to search in UDM.
+  is_mandatory: false
+  name: Lookback Hours
+  type: string
+- default_value: false
+  description: If true, automatically attaches discovered silent detections and events to the case as evidence.
+  is_mandatory: false
+  name: Attach to Case
+  type: boolean
+- default_value: true
+  description: If true and Attach to Case is enabled, automatically attaches newly discovered entities to the Case alert.
+  is_mandatory: false
+  name: Attach Entities
+  type: boolean
+- default_value: true
+  description: If true, posts an automated correlation findings summary note to the Case Wall.
+  is_mandatory: false
+  name: Post Wall Comment
+  type: boolean
+- default_value: ''
+  description: Optional comma-separated list of SOAR Entity Types (e.g., DESTINATIONURL, FILENAME, PROCESS, ADDRESS, HOSTNAME, USERUNIQNAME) or specific entity identifiers to filter. Also supports inline '-'/'!' (exclude) and '+' (include) prefixes.
+  is_mandatory: false
+  name: Entity Filter
+  type: string
+- default_value: Filter Out (Exclude)
+  description: Determines whether unprefixed entries in Entity Filter are excluded (Filter Out) or strictly required (Filter In).
+  is_mandatory: false
+  name: Entity Filter Mode
+  type: ddl
+  optional_values:
+  - Filter Out (Exclude)
+  - Filter In (Include)
+- default_value: '1000'
+  description: Maximum number of UDM events to scan.
+  is_mandatory: false
+  name: Max Events
+  type: string
+- default_value: true
+  description: If true, correlates silent (non-alerting) detections matching case entities.
+  is_mandatory: false
+  name: Correlate Detections
+  type: boolean
+- default_value: false
+  description: If true, also correlates raw non-detection UDM telemetry events matching case entities.
+  is_mandatory: false
+  name: Correlate UDM Events
+  type: boolean
+- default_value: false
+  description: If true and Attach to Case is enabled, attaches raw UDM events as case evidence (EVIDENCE_TYPE_EVENT).
+  is_mandatory: false
+  name: Attach UDM Events
+  type: boolean
+- default_value: false
+  description: If true and Attach Entities is enabled, extracts candidate entities from raw UDM events in addition to detections.
+  is_mandatory: false
+  name: Extract Entities From Events
+  type: boolean
+- default_value: "Google Chronicle"
+  description: Filters case alerts so only those originating from this vendor (e.g. Google Chronicle) are used for correlation and anchor extraction.
+  is_mandatory: false
+  name: Alert Vendor Filter
+  type: string
+- default_value: '5'
+  description: Maximum number of delta entities to attach to the case alert to avoid entity graph pollution.
+  is_mandatory: false
+  name: Max Entities to Attach
+  type: string
+
+

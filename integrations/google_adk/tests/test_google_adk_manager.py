@@ -90,6 +90,16 @@ class TestGoogleADKManager(unittest.TestCase):
         self.assertIn("Code Execution", res["final_response"])
         self.assertTrue(len(res["thoughts"]) > 0)
 
+    def test_init_secops_engine_toolset_includes_homepage_dashboard(self):
+        tools = self.manager.init_secops_engine_toolset(
+            customer_id="a556547c-1cff-43ef-a2e4-cf5b12a865df",
+            project_id="sdl-preview-americas",
+            region="us",
+        )
+        tool_names = [t.__name__ for t in tools]
+        self.assertIn("sync_secops_homepage_dashboard", tool_names)
+        self.assertGreaterEqual(len(tools), 30)
+
 
 if __name__ == "__main__":
     unittest.main()

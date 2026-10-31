@@ -1,0 +1,98 @@
+{
+  "case_id": "108542",
+  "case_title": "ATI High Fidelity: Hash Delivery To Execution",
+  "case_status": "OPEN",
+  "case_priority": "CRITICAL",
+  "lookback_days": 90,
+  "case_status_scope": "ALL",
+  "min_shared_entities": 1,
+  "has_related_cases": true,
+  "total_related_cases": 12,
+  "active_related_cases_count": 4,
+  "closed_related_cases_count": 8,
+  "incident_related_cases_count": 1,
+  "entities_searched_count": 5,
+  "entities_with_hits_count": 5,
+  "entities_searched": [
+    {
+      "identifier": "E16A60A10EBACD0B8AF5320E9582ABD6B1EC86B459BD35FD4E69BD37807F4A47",
+      "entity_type": "FILEHASH",
+      "display_name": "E16A60A10EBACD0B8AF5320E9582ABD6B1EC86B459BD35FD4E69BD37807F4A47",
+      "role": null,
+      "is_suspicious": true
+    }
+  ],
+  "entity_precedents": [
+    {
+      "identifier": "E16A60A10EBACD0B8AF5320E9582ABD6B1EC86B459BD35FD4E69BD37807F4A47",
+      "entity_type": "FILEHASH",
+      "is_suspicious": true,
+      "total_related_cases": 12,
+      "total_historical_matches": 161,
+      "active_cases_count": 4,
+      "closed_cases_count": 8,
+      "related_case_ids": [
+        "108541",
+        "108471",
+        "108468",
+        "108462"
+      ]
+    }
+  ],
+  "related_cases": [
+    {
+      "case_id": "108471",
+      "title": "ATI High Fidelity: Hash Delivery To Execution",
+      "status": "OPEN",
+      "is_closed": false,
+      "is_incident": true,
+      "is_important": true,
+      "priority": "CRITICAL",
+      "stage": "Investigation",
+      "alerts_count": 2,
+      "create_time": "2026-10-28T14:22:10.403000+00:00",
+      "user_assigned": "@Tier2",
+      "environment": "Default Environment",
+      "products": [
+        "RULE"
+      ],
+      "tags": [
+        "ATI"
+      ],
+      "ticket_ids": [
+        "de_89e7d7c9-ec3d-d47d-debe-c0c9c818ef1b"
+      ],
+      "shared_entities": [
+        {
+          "identifier": "E16A60A10EBACD0B8AF5320E9582ABD6B1EC86B459BD35FD4E69BD37807F4A47",
+          "entity_type": "FILEHASH",
+          "is_suspicious": true
+        },
+        {
+          "identifier": "HTTP://BILLIEELLISH.ORG/SCANDALE/DOWNLOAD/1/123.DLL",
+          "entity_type": "DESTINATIONURL",
+          "is_suspicious": true
+        }
+      ],
+      "shared_entity_identifiers": [
+        "E16A60A10EBACD0B8AF5320E9582ABD6B1EC86B459BD35FD4E69BD37807F4A47",
+        "HTTP://BILLIEELLISH.ORG/SCANDALE/DOWNLOAD/1/123.DLL"
+      ],
+      "shared_entities_count": 2,
+      "overlap_ratio": 0.4,
+      "case_url": "/cases/108471"
+    }
+  ],
+  "comment_id": null,
+  "secops_ui_base_url": "",
+  "summary_markdown": "## [SecOps SDK Engine] Related Cases by Entity",
+  "provenance": {
+    "workflow": "case.related_by_entity",
+    "lookback_days": 90,
+    "case_status_scope": "ALL",
+    "min_shared_entities": 1,
+    "entities_searched": 5,
+    "total_related_cases": 12,
+    "returned_related_cases": 12
+  }
+}

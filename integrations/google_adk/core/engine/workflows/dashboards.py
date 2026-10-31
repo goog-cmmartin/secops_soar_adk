@@ -562,10 +562,11 @@ class AddDashboardChartWorkflow:
             "displayName": display_name,
             "tileType": tile_type,
             "visualization": visualization or {},
-            "chartDatasource": {
-                "dataSources": data_sources or ["UDM"],
-            },
         }
+        if tile_type == "TILE_TYPE_VISUALIZATION" or data_sources is not None or query:
+            dashboard_chart["chartDatasource"] = {
+                "dataSources": data_sources or ["UDM"],
+            }
         if description is not None:
             dashboard_chart["description"] = description
         if drill_down_config is not None:

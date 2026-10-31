@@ -1,0 +1,67 @@
+creator: Christopher Martin
+description: Searches active and historical SOAR cases for shared entities involved in the current case, returning related cases, overlap metrics, per-entity precedents, and direct links to each related case.
+dynamic_results_metadata:
+- result_example_path: resources/related_cases_by_entity_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: SecOpsSDKEngine
+is_async: false
+name: Related Cases by Entity
+parameters:
+- default_value: ''
+  description: Case ID or Chronicle Case identifier to inspect. If left empty, uses the active Case context.
+  is_mandatory: false
+  name: Case ID
+  type: string
+- default_value: '90'
+  description: Number of days in the past to search for active and historical SOAR cases.
+  is_mandatory: false
+  name: Lookback Days
+  type: string
+- default_value: ALL
+  description: Filter related cases by status scope (ALL, ACTIVE_ONLY, or CLOSED_ONLY).
+  is_mandatory: false
+  name: Case Status Scope
+  type: ddl
+  optional_values:
+  - ALL
+  - ACTIVE_ONLY
+  - CLOSED_ONLY
+- default_value: '1'
+  description: Minimum number of shared entities required to include a related case in the results.
+  is_mandatory: false
+  name: Min Shared Entities
+  type: string
+- default_value: '50'
+  description: Maximum number of related cases to return.
+  is_mandatory: false
+  name: Max Related Cases
+  type: string
+- default_value: ''
+  description: Optional comma-separated list of SOAR Entity Types (e.g., DESTINATIONURL, FILENAME, PROCESS, ADDRESS, HOSTNAME, USERUNIQNAME) or specific entity identifiers to filter. Also supports inline '-'/'!' (exclude) and '+' (include) prefixes.
+  is_mandatory: false
+  name: Entity Filter
+  type: string
+- default_value: Filter Out (Exclude)
+  description: Determines whether unprefixed entries in Entity Filter are excluded (Filter Out) or strictly required (Filter In).
+  is_mandatory: false
+  name: Entity Filter Mode
+  type: ddl
+  optional_values:
+  - Filter Out (Exclude)
+  - Filter In (Include)
+- default_value: false
+  description: If true, includes high-level Threat Actor and Malware entities (e.g., UNC groups) in addition to concrete observables (IPs, Users, Hostnames, Hashes, URLs, Domains).
+  is_mandatory: false
+  name: Include Threat Actor Entities
+  type: boolean
+- default_value: false
+  description: If true, posts a Markdown summary table of related cases to the Case Wall.
+  is_mandatory: false
+  name: Post Wall Comment
+  type: boolean
+- default_value: ''
+  description: Optional SecOps UI base URL (e.g., https://your-tenant.chronicle.security) for Case links. If left empty, the HTML widget automatically resolves links from the active SecOps browser window.
+  is_mandatory: false
+  name: SecOps UI Base URL
+  type: string

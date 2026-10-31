@@ -1,3 +1,12 @@
+- description: "Added Sync SecOps Homepage Dashboard Job for scheduled hourly synchronization of the Google SecOps Homepage Native Dashboard (with Google Cloud Security Status, SecOps Release Notes, Security Community intelligence, Live Tenant Health telemetry, 3 native KPI counter cards, and ADK AI Executive Summary synthesis), plus sync_secops_homepage_dashboard tool in the ADK SecOps Engine toolset."
+  version: 3.5
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-31"
 - description: "Added Run ADK Autonomous Agent Job for scheduled and on-demand autonomous agent execution (with optional Open Case Sweep and Case Wall reporting), expanded the embedded SecOps SDK Engine toolset to 29 native tools (including SOAR Case & Alert management, Playbook search & health/decay audits, Data Table & Dashboard health audits, UDM statistical aggregation, Entity Investigation, and Noisy Rule discovery), and updated CorrelateSilentDetectionsWorkflow with case-age latency handling and stream detection metadata extraction."
   version: 3.3
   item_name: "GoogleADK"

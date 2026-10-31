@@ -1,0 +1,118 @@
+- description: "Added SyncSecOpsHomepageDashboardWorkflow (homepage_dashboard.py) with live Google Cloud Security Status, SecOps Release Notes, Security Community intelligence, Live Tenant Health telemetry, AI Executive Summary, and 3 native KPI counter cards, plus full chart layout grid patching on update_dashboard and query execution fixes on AddDashboardChartWorkflow."
+  version: 5.7
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-31"
+- description: "Added full SOAR Playbook, SOAR Job, and Native Dashboard CRUD and mutation capabilities to SecOpsEngine and GoogleSecOpsAdapter (save_playbook with automatic category synchronization, update_playbook_widget, delete_playbooks, export/import_playbooks, update_job with automatic active instance sync, update_job_instance, create_job_instance, create/update/delete/duplicate_dashboard, and add/update/remove_dashboard_chart)."
+  version: 5.2
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-30"
+- description: "Added 'Pre-Warm Case Triage Summaries Job' SOAR Job and manager workflow to periodically poll for newly created open SOAR cases and trigger the Gemini AI Case Triage Summary (:getOrCreateCaseSummary) and optional Alert Recommendations in advance."
+  version: 5.1
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-30"
+- description: "Upgraded Entity Filter across Related Cases by Entity and Correlate Silent Detections to support SOAR Entity Types (e.g. DESTINATIONURL, FILENAME, PROCESS, ADDRESS, HOSTNAME, USERUNIQNAME) as well as Entity Identifiers, added Entity Filter Mode (Filter Out / Exclude vs Filter In / Include, defaulting to Filter Out), and added inline '-'/'!'/'+' prefix support."
+  version: 5.0
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-29"
+- description: "Added 'Related Cases by Entity' action and interactive dark/light HTML widget to discover active and historical SOAR cases sharing entities with the current case, complete with overlap counts, per-entity precedents, and direct clickable links to related cases."
+  version: 4.0
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-29"
+- description: "Added custom SecOps SDK Engine vector logo (logo.svg) and PNG icon (image.png) featuring a SecOps shield and telemetry correlation graph."
+  version: 3.0
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-29"
+- description: "Enriched Correlate Silent Detections UDM event summaries, detection entries, case alert rule IDs, and time window metadata, and expanded prune_deep_object depth and list/string bounds."
+  version: 2.0
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-29"
+- description: "Updated HTML widgets with standardized generic --soar-* CSS variables and dynamic Google SecOps SOAR dark/light mode detection and synchronization bridge."
+  version: 1.9
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-27"
+- description: "Added alert vendor filtering (defaulting to Google Chronicle), high-signal anchor corroboration, parser event noise disqualification (Sysmon EventID/technique tagging), generic OS entity/binary denylisting, and maximum delta entity attachment guardrails."
+  version: 1.8
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-27"
+- description: "Added granular controls to differentiate Detections and raw UDM Events in Correlate Silent Detections action (Correlate Detections, Correlate UDM Events, Attach UDM Events, Extract Entities From Events), defaulting UDM Events correlation and attachment to false."
+  version: 1.7
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-27"
+- description: "Configured Action DynamicResultsMetadata schema for JsonResult and linked predefined Action Widget to Correlate Silent Detections."
+  version: 1.6
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-27"
+- description: "Added automatic Case entity extraction and delta attachment for correlated silent detections, plus SDK search_unique_entities and add_case_alert_entity methods."
+  version: 1.5
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-27"
+- description: "Initial release of SecOps SDK Engine integration with Ping and Correlate Silent Detections actions, native case evidence attachment, and HTML Result View."
+  version: 1.4
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: true
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-27"
+

@@ -1,0 +1,45 @@
+creator: Christopher Martin
+description: Synchronizes the Google SecOps Homepage Native Dashboard on a recurring schedule (default hourly) by fetching live Google Cloud Security Status, Google SecOps Release Notes, Google Cloud Security Community intelligence, and Live Tenant Health telemetry, optionally generating a custom AI Executive Summary via the Google ADK Agent, and updating all 12 dashboard widgets and layouts in-place.
+integration: GoogleADK
+name: Sync SecOps Homepage Dashboard Job
+parameters:
+  - default_value: Google SecOps Homepage
+    description: Display name of the Native Dashboard to create or update.
+    is_mandatory: false
+    name: Dashboard Name
+    type: string
+  - default_value: e99fee21-4f9b-4b6f-848d-4ba0a28be1c0
+    description: Optional existing Native Dashboard ID/UUID to update in-place. If blank, searches by Dashboard Name or creates a new dashboard.
+    is_mandatory: false
+    name: Dashboard ID
+    type: string
+  - default_value: '30'
+    description: Number of lookback days for Google Cloud Security Status incidents (status.cloud.google.com/security).
+    is_mandatory: false
+    name: Status Lookback Days
+    type: string
+  - default_value: '4'
+    description: Maximum number of Google SecOps Release Notes entries to display on the dashboard (1-10).
+    is_mandatory: false
+    name: Max Release Notes
+    type: string
+  - default_value: '6'
+    description: Maximum number of Google Cloud Security Community posts to display on the dashboard (1-15).
+    is_mandatory: false
+    name: Max Community Posts
+    type: string
+  - default_value: community-blog-42,news-announcements-9
+    description: Comma-separated Google Cloud Security Community category slugs or keywords to filter (e.g. community-blog-42,news-announcements-9,what-s-new-in-secops-91,tuesday-s-tip-of-the-week-93).
+    is_mandatory: false
+    name: Community Category Filters
+    type: string
+  - default_value: true
+    description: If enabled, queries live tenant telemetry (24h UDM volume, active log sources, 7d detections, open SOAR cases, rules, feeds, and data tables) to populate the Live Tenant Health & Operations Pulse tile.
+    is_mandatory: false
+    name: Include Live Tenant Health
+    type: boolean
+  - default_value: true
+    description: If enabled, runs the Google ADK Gemini Agent to synthesize a custom AI Executive Summary correlating external advisories and release notes with live tenant posture (falls back to deterministic executive synthesis if Gemini credentials are not configured).
+    is_mandatory: false
+    name: Generate AI Executive Summary via ADK Agent
+    type: boolean

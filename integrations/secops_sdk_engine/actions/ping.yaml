@@ -1,0 +1,7 @@
+creator: Christopher Martin
+description: Tests connectivity to Google SecOps API and verifies authentication credentials.
+dynamic_results_metadata: []
+integration_identifier: SecOpsSDKEngine
+is_async: false
+name: Ping
+parameters: []

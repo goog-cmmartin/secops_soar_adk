@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Related Cases by Entity - SecOps SOAR Widget</title>
+  <style>
+    /* ==========================================================================
+       Google SecOps SOAR Theme Variables (Self-contained, no CDN dependencies)
+       ========================================================================== */
+    :root,
+    [data-theme="light"],
+    body.light {
+      --soar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Rubik", Helvetica, Arial, sans-serif;
+      --soar-font-mono: ui-monospace, SFMono-Regular, "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+      --soar-bg-page: #ffffff;
+      --soar-bg-card: #ffffff;
+      --soar-bg-subtle: rgba(0, 0, 0, 0.04);
+      --soar-border: #e5e7eb;
+      --soar-border-strong: #d1d5db;
+      --soar-text-primary: #111827;
+      --soar-text-secondary: #4b5563;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #2563eb;
+      --soar-accent-hover: #1d4ed8;
+      --soar-accent-subtle: rgba(37, 99, 235, 0.1);
+
+      /* Verdicts */
+      --verdict-malicious-bg: #fee2e2;
+      --verdict-malicious-text: #dc2626;
+      --verdict-malicious-border: #fca5a5;
+
+      --verdict-benign-bg: #ecfdf5;
+      --verdict-benign-text: #059669;
+      --verdict-benign-border: #a7f3d0;
+
+      /* Severities */
+      --sev-critical-bg: #fef2f2;
+      --sev-critical-text: #dc2626;
+      --sev-critical-border: #fca5a5;
+      --sev-high-bg: #fff7ed;
+      --sev-high-text: #ea580c;
+      --sev-high-border: #fdba74;
+      --sev-medium-bg: #fffbeb;
+      --sev-medium-text: #d97706;
+      --sev-medium-border: #fde68a;
+      --sev-low-bg: #f3f4f6;
+      --sev-low-text: #6b7280;
+      --sev-low-border: #d1d5db;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --soar-bg-page: #161626;
+        --soar-bg-card: #161626;
+        --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+        --soar-border: #293140;
+        --soar-border-strong: #384357;
+        --soar-text-primary: #f3f4f6;
+        --soar-text-secondary: #9ca3af;
+        --soar-text-muted: #6b7280;
+        --soar-accent: #3b82f6;
+        --soar-accent-hover: #60a5fa;
+        --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+        --verdict-malicious-bg: #3b191d;
+        --verdict-malicious-text: #ff8589;
+        --verdict-malicious-border: #8c1d28;
+
+        --verdict-benign-bg: #132d21;
+        --verdict-benign-text: #6ee7b7;
+        --verdict-benign-border: #065f46;
+
+        --sev-critical-bg: #450a0a;
+        --sev-critical-text: #f87171;
+        --sev-critical-border: #7f1d1d;
+        --sev-high-bg: #431407;
+        --sev-high-text: #fb923c;
+        --sev-high-border: #7c2d12;
+        --sev-medium-bg: #451a03;
+        --sev-medium-text: #fbbf24;
+        --sev-medium-border: #78350f;
+        --sev-low-bg: #1f2937;
+        --sev-low-text: #9ca3af;
+        --sev-low-border: #374151;
+      }
+    }
+
+    [data-theme="dark"], body.dark {
+      --soar-bg-page: #161626;
+      --soar-bg-card: #161626;
+      --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+      --soar-border: #293140;
+      --soar-border-strong: #384357;
+      --soar-text-primary: #f3f4f6;
+      --soar-text-secondary: #9ca3af;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #3b82f6;
+      --soar-accent-hover: #60a5fa;
+      --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+      --verdict-malicious-bg: #3b191d;
+      --verdict-malicious-text: #ff8589;
+      --verdict-malicious-border: #8c1d28;
+
+      --verdict-benign-bg: #132d21;
+      --verdict-benign-text: #6ee7b7;
+      --verdict-benign-border: #065f46;
+
+      --sev-critical-bg: #450a0a;
+      --sev-critical-text: #f87171;
+      --sev-critical-border: #7f1d1d;
+      --sev-high-bg: #431407;
+      --sev-high-text: #fb923c;
+      --sev-high-border: #7c2d12;
+      --sev-medium-bg: #451a03;
+      --sev-medium-text: #fbbf24;
+      --sev-medium-border: #78350f;
+      --sev-low-bg: #1f2937;
+      --sev-low-text: #9ca3af;
+      --sev-low-border: #374151;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background-color: var(--soar-bg-page, #ffffff);
+      background: var(--soar-bg-page, #ffffff);
+      font-family: var(--soar-font);
+      color: var(--soar-text-primary);
+      padding: 0.75rem;
+      line-height: 1.5;
+      font-size: 0.8125rem;
+      width: 100%;
+      height: auto;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--soar-bg-page);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--soar-border-strong);
+      border-radius: 3px;
+    }
+
+    .widget-container {
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    /* Top Summary Header */
+    .widget-header-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .header-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--soar-accent-subtle);
+      border: 1px solid var(--soar-accent);
+      color: var(--soar-accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .header-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+    .header-title-group {
+      display: flex;
+      flex-direction: column;
+    }
+    .header-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--soar-text-primary);
+    }
+    .header-subtitle {
+      font-size: 0.75rem;
+      color: var(--soar-text-muted);
+    }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.75rem;
+    }
+    .metric-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .metric-label {
+      font-size: 0.6875rem;
+      color: var(--soar-text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .metric-value {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--soar-text-primary);
+      line-height: 1.2;
+    }
+
+    /* Status & Severity Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .badge-critical {
+      background: var(--sev-critical-bg);
+      color: var(--sev-critical-text);
+      border: 1px solid var(--sev-critical-border);
+    }
+    .badge-high {
+      background: var(--sev-high-bg);
+      color: var(--sev-high-text);
+      border: 1px solid var(--sev-high-border);
+    }
+    .badge-medium {
+      background: var(--sev-medium-bg);
+      color: var(--sev-medium-text);
+      border: 1px solid var(--sev-medium-border);
+    }
+    .badge-low {
+      background: var(--sev-low-bg);
+      color: var(--sev-low-text);
+      border: 1px solid var(--sev-low-border);
+    }
+    .badge-open {
+      background: var(--verdict-benign-bg);
+      color: var(--verdict-benign-text);
+      border: 1px solid var(--verdict-benign-border);
+    }
+    .badge-closed {
+      background: var(--sev-low-bg);
+      color: var(--sev-low-text);
+      border: 1px solid var(--sev-low-border);
+    }
+    .badge-incident {
+      background: var(--verdict-malicious-bg);
+      color: var(--verdict-malicious-text);
+      border: 1px solid var(--verdict-malicious-border);
+    }
+    .badge-alerting {
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      border: 1px solid var(--soar-accent);
+    }
+
+    /* Filter Toolbar */
+    .filter-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.55rem 0.85rem;
+    }
+    .filter-tabs {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .filter-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--soar-text-muted);
+      font-family: var(--soar-font);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.25rem 0.6rem;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .filter-btn:hover {
+      color: var(--soar-text-primary);
+      background: var(--soar-bg-subtle);
+    }
+    .filter-btn.active {
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      border-color: var(--soar-accent);
+    }
+    .search-input {
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      color: var(--soar-text-primary);
+      font-family: var(--soar-font);
+      font-size: 0.75rem;
+      padding: 0.3rem 0.65rem;
+      border-radius: 5px;
+      min-width: 210px;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+    .search-input::placeholder {
+      color: var(--soar-text-muted);
+    }
+    .search-input:focus {
+      border-color: var(--soar-accent);
+    }
+
+    /* Section Titles */
+    .section-title {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      margin: 0.25rem 0 0 0;
+      color: var(--soar-text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    /* Tables */
+    .table-container {
+      width: 100%;
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--soar-bg-card);
+    }
+    .table-scroll {
+      max-height: 360px;
+      overflow-y: auto;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th, td {
+      padding: 0.6rem 0.85rem;
+      border-bottom: 1px solid var(--soar-border);
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--soar-bg-card);
+      box-shadow: inset 0 -1px 0 var(--soar-border);
+      color: var(--soar-text-muted);
+      font-weight: 600;
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    th::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: var(--soar-bg-subtle);
+      z-index: -1;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    tr:hover td {
+      background: var(--soar-bg-subtle);
+    }
+
+    code {
+      font-family: var(--soar-font-mono);
+      font-size: 0.75rem;
+      background: var(--soar-bg-subtle);
+      padding: 0.15rem 0.35rem;
+      border-radius: 3px;
+      border: 1px solid var(--soar-border);
+      color: var(--soar-text-secondary);
+    }
+
+    /* Case Link & Copy Controls */
+    .case-link-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .case-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-family: var(--soar-font-mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--soar-accent);
+      background: var(--soar-accent-subtle);
+      border: 1px solid var(--soar-accent);
+      text-decoration: none;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .case-link:hover {
+      color: var(--soar-accent-hover);
+      border-color: var(--soar-accent-hover);
+    }
+    .case-link svg {
+      width: 11px;
+      height: 11px;
+      flex-shrink: 0;
+    }
+    .copy-id-btn {
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      color: var(--soar-text-secondary);
+      border-radius: 4px;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.65rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .copy-id-btn:hover {
+      background: var(--soar-accent-subtle);
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    /* Case Title & Submeta */
+    .case-title-text {
+      font-weight: 600;
+      color: var(--soar-text-primary);
+      display: block;
+      margin-bottom: 0.2rem;
+      line-height: 1.35;
+    }
+    .case-submeta {
+      font-size: 0.7rem;
+      color: var(--soar-text-muted);
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    /* Shared Entity Chips */
+    .entity-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      margin-top: 0.2rem;
+    }
+    .entity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-family: var(--soar-font-mono);
+      font-size: 0.72rem;
+      color: var(--soar-text-secondary);
+      max-width: 260px;
+    }
+    .entity-chip.suspicious {
+      border-color: var(--verdict-malicious-border);
+      background: var(--verdict-malicious-bg);
+      color: var(--verdict-malicious-text);
+    }
+    .entity-chip-type {
+      font-family: var(--soar-font);
+      font-size: 0.625rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--soar-text-muted);
+      padding-right: 0.3rem;
+      border-right: 1px solid var(--soar-border);
+    }
+    .entity-chip-val {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Expandable Details Section */
+    details {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+    }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.75rem;
+      color: var(--soar-text-secondary);
+      outline: none;
+      user-select: none;
+    }
+    summary:hover {
+      color: var(--soar-accent);
+    }
+    .details-body {
+      margin-top: 0.65rem;
+    }
+
+    .empty-banner {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      text-align: center;
+      color: var(--soar-text-muted);
+      font-size: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="content" class="widget-container"></div>
+
+  <script>
+    // =========================================================================
+    // Google SecOps SOAR Theme Synchronization Bridge
+    // =========================================================================
+    const SOAR_PALETTES = {
+      dark: {
+        theme: 'dark',
+        '--soar-bg-page': '#161626',
+        '--soar-bg-card': '#161626',
+        '--soar-border': '#293140',
+        '--soar-border-strong': '#384357',
+        '--soar-text-primary': '#f3f4f6',
+        '--soar-text-secondary': '#9ca3af',
+        '--soar-text-muted': '#6b7280'
+      },
+      light: {
+        theme: 'light',
+        '--soar-bg-page': '#ffffff',
+        '--soar-bg-card': '#ffffff',
+        '--soar-border': '#e5e7eb',
+        '--soar-border-strong': '#d1d5db',
+        '--soar-text-primary': '#111827',
+        '--soar-text-secondary': '#4b5563',
+        '--soar-text-muted': '#6b7280'
+      }
+    };
+
+    function isColorDark(color) {
+      if (!color) return false;
+      let r = 255, g = 255, b = 255;
+      color = String(color).trim();
+      if (color.startsWith('#')) {
+        let hex = color.replace('#', '');
+        if (hex.length === 3) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        if (hex.length >= 6) {
+          r = parseInt(hex.substring(0, 2), 16);
+          g = parseInt(hex.substring(2, 4), 16);
+          b = parseInt(hex.substring(4, 6), 16);
+        }
+      } else if (color.startsWith('rgb')) {
+        const parts = color.match(/\d+/g);
+        if (parts && parts.length >= 3) {
+          r = parseInt(parts[0], 10);
+          g = parseInt(parts[1], 10);
+          b = parseInt(parts[2], 10);
+        }
+      }
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+      return luminance < 140;
+    }
+
+    function applySoarTheme(themeKeyOrObj) {
+      const mode = typeof themeKeyOrObj === 'string' ? themeKeyOrObj : (themeKeyOrObj.theme || 'light');
+      document.documentElement.setAttribute('data-theme', mode);
+      document.body.className = mode;
+
+      const palette = typeof themeKeyOrObj === 'object' ? themeKeyOrObj : (SOAR_PALETTES[mode] || SOAR_PALETTES.light);
+      for (const [key, value] of Object.entries(palette)) {
+        if (key.startsWith('--')) {
+          document.documentElement.style.setProperty(key, value);
+          document.body.style.setProperty(key, value);
+        }
+      }
+      document.body.style.backgroundColor = palette['--soar-bg-page'] || (mode === 'dark' ? '#161626' : '#ffffff');
+    }
+
+    // Google SecOps SOAR message listeners
+    window.addEventListener('message', evt => {
+      if (evt.data && evt.data.background) {
+        const isDark = isColorDark(evt.data.background);
+        applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+      }
+    });
+
+    onmessage = evt => {
+      if (evt.data && evt.data.background) {
+        const isDark = isColorDark(evt.data.background);
+        applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+      }
+    };
+
+    // Initial mount fallback
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      applySoarTheme(SOAR_PALETTES.dark);
+    } else {
+      applySoarTheme(SOAR_PALETTES.light);
+    }
+
+    // =========================================================================
+    // Payload Extraction & Case Link Builder
+    // =========================================================================
+    function extractPayload(input) {
+      if (!input) return null;
+      let data = input;
+      if (typeof data === "string") {
+        const trimmed = data.trim();
+        if (trimmed.startsWith("[") && trimmed.includes(".JsonResult")) return null;
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+          try { data = JSON.parse(trimmed); } catch (e) {}
+        }
+      }
+      while (Array.isArray(data) && data.length > 0) {
+        data = data[0];
+      }
+      if (typeof data === "string") {
+        const trimmed = data.trim();
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+          try { data = JSON.parse(trimmed); } catch (e) {}
+        }
+      }
+      if (Array.isArray(data) && data.length > 0) {
+        data = data[0];
+      }
+      return data;
+    }
+
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return "";
+      const div = document.createElement("div");
+      div.innerText = String(text);
+      return div.innerHTML;
+    }
+
+    function buildCaseUrl(targetCaseId, currentCaseId, configuredBaseUrl) {
+      const cleanTarget = String(targetCaseId || "").trim();
+      const cleanCurrent = String(currentCaseId || "").trim();
+      if (configuredBaseUrl && String(configuredBaseUrl).trim()) {
+        const base = String(configuredBaseUrl).trim().replace(/\/+$/, "");
+        return `${base}/cases/${cleanTarget}`;
+      }
+
+      // 1. Try top/parent window URL if accessible (same-origin)
+      try {
+        if (window.top && window.top.location && window.top.location.href) {
+          const topHref = window.top.location.href;
+          if (cleanCurrent && topHref.includes(`/${cleanCurrent}`)) {
+            return topHref.replace(`/${cleanCurrent}`, `/${cleanTarget}`);
+          }
+          if (window.top.location.origin && window.top.location.origin !== "null") {
+            return `${window.top.location.origin}/cases/${cleanTarget}`;
+          }
+        }
+      } catch (e) {}
+
+      // 2. Try document.referrer
+      try {
+        if (document.referrer) {
+          if (cleanCurrent && document.referrer.includes(`/${cleanCurrent}`)) {
+            return document.referrer.replace(`/${cleanCurrent}`, `/${cleanTarget}`);
+          }
+          const refUrl = new URL(document.referrer);
+          if (refUrl.origin && refUrl.origin !== "null") {
+            return `${refUrl.origin}/cases/${cleanTarget}`;
+          }
+        }
+      } catch (e) {}
+
+      // 3. Try ancestorOrigins
+      try {
+        if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+          const topOrigin = window.location.ancestorOrigins[window.location.ancestorOrigins.length - 1];
+          if (topOrigin && topOrigin !== "null") {
+            return `${topOrigin}/cases/${cleanTarget}`;
+          }
+        }
+      } catch (e) {}
+
+      return `/cases/${cleanTarget}`;
+    }
+
+    function openCaseLink(evt, url) {
+      if (evt) evt.preventDefault();
+      try {
+        const win = window.open(url, "_blank", "noopener,noreferrer");
+        if (!win && window.top) {
+          window.top.open(url, "_blank", "noopener,noreferrer");
+        }
+      } catch (e) {
+        window.open(url, "_blank");
+      }
+      return false;
+    }
+
+    function copyCaseId(caseId, btnEl) {
+      navigator.clipboard.writeText(String(caseId)).then(() => {
+        if (btnEl) {
+          const orig = btnEl.innerText;
+          btnEl.innerText = "Copied";
+          setTimeout(() => { btnEl.innerText = orig; }, 1400);
+        }
+      });
+    }
+
+    function formatTimestamp(isoStr) {
+      if (!isoStr) return "N/A";
+      const clean = String(isoStr).replace("T", " ").substring(0, 19);
+      return clean + " UTC";
+    }
+
+    function getPriorityBadgeClass(prio) {
+      const p = String(prio || "").toUpperCase();
+      if (p.includes("CRIT")) return "badge-critical";
+      if (p.includes("HIGH")) return "badge-high";
+      if (p.includes("MED")) return "badge-medium";
+      return "badge-low";
+    }
+
+    // =========================================================================
+    // Interactive State & Rendering
+    // =========================================================================
+    let rawData = null;
+    try {
+      rawData = [{stepInstanceName}.JsonResult];
+    } catch (e) {
+      rawData = null;
+    }
+    rawData = extractPayload(rawData);
+
+    let currentFilter = "ALL";
+    let searchTerm = "";
+
+    function setFilter(filterMode) {
+      currentFilter = filterMode;
+      renderCasesTable();
+      document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.filter === filterMode);
+      });
+    }
+
+    function onSearchInput(val) {
+      searchTerm = String(val || "").trim().toLowerCase();
+      renderCasesTable();
+    }
+
+    function renderCasesTable() {
+      const tbodyContainer = document.getElementById("related-cases-table-container");
+      if (!tbodyContainer || !rawData) return;
+
+      const allCases = Array.isArray(rawData.related_cases) ? rawData.related_cases : [];
+      const filtered = allCases.filter(rc => {
+        if (currentFilter === "ACTIVE" && rc.is_closed) return false;
+        if (currentFilter === "CLOSED" && !rc.is_closed) return false;
+        if (currentFilter === "INCIDENT" && !rc.is_incident) return false;
+        if (searchTerm) {
+          const hay = [
+            rc.case_id,
+            rc.title,
+            rc.stage,
+            rc.priority,
+            rc.user_assigned,
+            ...(rc.shared_entity_identifiers || [])
+          ].join(" ").toLowerCase();
+          if (!hay.includes(searchTerm)) return false;
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbodyContainer.innerHTML = `
+          <div class="empty-banner">
+            No related cases match the selected filter criteria.
+          </div>
+        `;
+        return;
+      }
+
+      let rowsHtml = "";
+      for (const rc of filtered) {
+        const cid = escapeHtml(rc.case_id);
+        const caseUrl = buildCaseUrl(rc.case_id, rawData.case_id, rawData.secops_ui_base_url);
+        const statusBadge = rc.is_closed
+          ? `<span class="badge badge-closed">CLOSED</span>`
+          : `<span class="badge badge-open">OPEN</span>`;
+        const incidentBadge = rc.is_incident
+          ? ` <span class="badge badge-incident">INCIDENT</span>`
+          : "";
+        const prioClass = getPriorityBadgeClass(rc.priority);
+        const sharedList = Array.isArray(rc.shared_entities) ? rc.shared_entities : [];
+
+        const chipsHtml = sharedList.map(se => {
+          const suspClass = se.is_suspicious ? "suspicious" : "";
+          const etype = escapeHtml(se.entity_type || "ENTITY");
+          const ident = escapeHtml(se.identifier || "");
+          return `
+            <span class="entity-chip ${suspClass}" title="${etype}: ${ident}">
+              <span class="entity-chip-type">${etype}</span>
+              <span class="entity-chip-val">${ident}</span>
+            </span>
+          `;
+        }).join("");
+
+        rowsHtml += `
+          <tr>
+            <td style="white-space: nowrap;">
+              <div class="case-link-group">
+                <a class="case-link" href="${escapeHtml(caseUrl)}" target="_blank" rel="noopener noreferrer" onclick="return openCaseLink(event, '${escapeHtml(caseUrl)}')" title="Open Case #${cid} in Chronicle SecOps">
+                  #${cid}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                  </svg>
+                </a>
+                <button class="copy-id-btn" onclick="copyCaseId('${cid}', this)" title="Copy Case ID">Copy</button>
+              </div>
+            </td>
+            <td>
+              <span class="case-title-text">${escapeHtml(rc.title || "Untitled Case")}</span>
+              <div class="case-submeta">
+                <span>Stage: <strong>${escapeHtml(rc.stage || "Unknown")}</strong></span>
+                <span>&bull;</span>
+                <span>Alerts: <strong>${Number(rc.alerts_count || 0)}</strong></span>
+                <span>&bull;</span>
+                <span>Assignee: <strong>${escapeHtml(rc.user_assigned || "Unassigned")}</strong></span>
+                <span>&bull;</span>
+                <span>Created: ${escapeHtml(formatTimestamp(rc.create_time))}</span>
+              </div>
+            </td>
+            <td style="white-space: nowrap;">
+              ${statusBadge}${incidentBadge}
+            </td>
+            <td style="white-space: nowrap;">
+              <span class="badge ${prioClass}">${escapeHtml(rc.priority || "UNKNOWN")}</span>
+            </td>
+            <td>
+              <div style="font-size: 0.7rem; font-weight: 600; color: var(--soar-text-primary); margin-bottom: 0.15rem;">
+                ${Number(rc.shared_entities_count || sharedList.length)} Shared ${Number(rc.shared_entities_count || sharedList.length) === 1 ? "Entity" : "Entities"}
+              </div>
+              <div class="entity-chips">${chipsHtml}</div>
+            </td>
+          </tr>
+        `;
+      }
+
+      tbodyContainer.innerHTML = `
+        <div class="table-container">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Case ID</th>
+                  <th>Case Details</th>
+                  <th>Status</th>
+                  <th>Priority</th>
+                  <th>Shared Entities</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderWidget() {
+      const container = document.getElementById("content");
+      if (!rawData || !rawData.case_id) {
+        container.innerHTML = `
+          <div class="widget-header-card">
+            <div class="header-left">
+              <div class="header-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="18" cy="5" r="3"></circle>
+                  <circle cx="6" cy="12" r="3"></circle>
+                  <circle cx="18" cy="19" r="3"></circle>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+              </div>
+              <div class="header-title-group">
+                <span class="header-title">SecOps SDK Engine - Related Cases by Entity</span>
+                <span class="header-subtitle">Awaiting action execution or case data context...</span>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const totalRelated = Number(rawData.total_related_cases || 0);
+      const activeRelated = Number(rawData.active_related_cases_count || 0);
+      const closedRelated = Number(rawData.closed_related_cases_count || 0);
+      const incidentRelated = Number(rawData.incident_related_cases_count || 0);
+      const entitiesSearched = Number(rawData.entities_searched_count || 0);
+      const entitiesWithHits = Number(rawData.entities_with_hits_count || 0);
+      const lookbackDays = Number(rawData.lookback_days || 90);
+      const scope = escapeHtml(rawData.case_status_scope || "ALL");
+
+      const headerBadge = totalRelated > 0
+        ? `<span class="badge ${activeRelated > 0 ? 'badge-high' : 'badge-low'}">${totalRelated} Related ${totalRelated === 1 ? 'Case' : 'Cases'} Found</span>`
+        : `<span class="badge badge-low">No Related Cases</span>`;
+
+      const precedents = Array.isArray(rawData.entity_precedents) ? rawData.entity_precedents : [];
+      let precedentsHtml = "";
+      if (precedents.length > 0) {
+        const pRows = precedents.map(ep => {
+          const ident = escapeHtml(ep.identifier || "");
+          const etype = escapeHtml(ep.entity_type || "ENTITY");
+          const totalCnt = Number(ep.total_related_cases || 0);
+          const histTotal = Number(ep.total_historical_matches || totalCnt);
+          const openCnt = Number(ep.active_cases_count || 0);
+          const closedCnt = Number(ep.closed_cases_count || 0);
+          const cids = Array.isArray(ep.related_case_ids) ? ep.related_case_ids.slice(0, 6) : [];
+          const cidLinks = cids.length > 0
+            ? cids.map(id => {
+                const url = buildCaseUrl(id, rawData.case_id, rawData.secops_ui_base_url);
+                return `<a class="case-link" style="padding: 0.1rem 0.35rem; font-size: 0.7rem;" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" onclick="return openCaseLink(event, '${escapeHtml(url)}')">#${escapeHtml(id)}</a>`;
+              }).join(" ") + (ep.related_case_ids.length > 6 ? ` <span style="font-size:0.7rem;color:var(--soar-text-muted);">+${ep.related_case_ids.length - 6} more</span>` : "")
+            : `<span style="color: var(--soar-text-muted); font-size: 0.72rem;">None</span>`;
+
+          return `
+            <tr>
+              <td style="word-break: break-all;">
+                <code>${ident}</code>
+              </td>
+              <td><span class="badge badge-low">${etype}</span></td>
+              <td><strong>${totalCnt}</strong>${histTotal > totalCnt ? ` <span style="font-size:0.7rem;color:var(--soar-text-muted);">(${histTotal} total in ${lookbackDays}d)</span>` : ""}</td>
+              <td><span style="color: var(--verdict-benign-text); font-weight: 600;">${openCnt}</span> Open / <span style="color: var(--soar-text-muted); font-weight: 600;">${closedCnt}</span> Closed</td>
+              <td><div style="display:flex;flex-wrap:wrap;gap:0.25rem;align-items:center;">${cidLinks}</div></td>
+            </tr>
+          `;
+        }).join("");
+
+        precedentsHtml = `
+          <details>
+            <summary>Entity Precedent Breakdown (${precedents.length} Scanned Entities)</summary>
+            <div class="details-body">
+              <div class="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Entity Identifier</th>
+                      <th>Type</th>
+                      <th>Related Cases</th>
+                      <th>Active vs Closed</th>
+                      <th>Sample Linked Cases</th>
+                    </tr>
+                  </thead>
+                  <tbody>${pRows}</tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+        `;
+      }
+
+      container.innerHTML = `
+        <div class="widget-header-card">
+          <div class="header-left">
+            <div class="header-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+            </div>
+            <div class="header-title-group">
+              <span class="header-title">Related Cases by Entity</span>
+              <span class="header-subtitle">Case #${escapeHtml(rawData.case_id)} &bull; Lookback Window: ${lookbackDays}d (${scope})</span>
+            </div>
+          </div>
+          <div>${headerBadge}</div>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Related Cases</span>
+            <span class="metric-value" style="color: ${totalRelated > 0 ? 'var(--soar-accent)' : 'var(--soar-text-primary)'}">${totalRelated}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Active (Open)</span>
+            <span class="metric-value" style="color: ${activeRelated > 0 ? 'var(--sev-high-text)' : 'var(--verdict-benign-text)'}">${activeRelated}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Historical (Closed)</span>
+            <span class="metric-value">${closedRelated}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Incidents</span>
+            <span class="metric-value" style="color: ${incidentRelated > 0 ? 'var(--sev-critical-text)' : 'var(--soar-text-primary)'}">${incidentRelated}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Entities Matched</span>
+            <span class="metric-value" style="color: ${entitiesWithHits > 0 ? 'var(--soar-accent)' : 'var(--soar-text-primary)'}">${entitiesWithHits} / ${entitiesSearched}</span>
+          </div>
+        </div>
+
+        <div class="section-title">
+          <span>Discovered Related Cases (${totalRelated})</span>
+        </div>
+
+        <div class="filter-toolbar">
+          <div class="filter-tabs">
+            <button class="filter-btn active" data-filter="ALL" onclick="setFilter('ALL')">All (${totalRelated})</button>
+            <button class="filter-btn" data-filter="ACTIVE" onclick="setFilter('ACTIVE')">Active / Open (${activeRelated})</button>
+            <button class="filter-btn" data-filter="CLOSED" onclick="setFilter('CLOSED')">Historical / Closed (${closedRelated})</button>
+            <button class="filter-btn" data-filter="INCIDENT" onclick="setFilter('INCIDENT')">Incidents (${incidentRelated})</button>
+          </div>
+          <input type="text" class="search-input" placeholder="Filter by Case ID, title, or entity..." oninput="onSearchInput(this.value)" />
+        </div>
+
+        <div id="related-cases-table-container"></div>
+
+        ${precedentsHtml}
+      `;
+
+      renderCasesTable();
+    }
+
+    renderWidget();
+  </script>
+</body>
+</html>

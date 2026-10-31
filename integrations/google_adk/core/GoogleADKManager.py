@@ -931,7 +931,7 @@ class GoogleADKManager:
         def add_dashboard_chart(
             dashboard_id: str,
             display_name: str,
-            query: str,
+            query: Optional[str] = None,
             description: Optional[str] = None,
             time_unit: str = "DAY",
             time_value: str = "7",
@@ -939,9 +939,20 @@ class GoogleADKManager:
             span_y: int = 4,
             start_x: int = 0,
             start_y: int = 0,
+            tile_type: str = "TILE_TYPE_VISUALIZATION",
+            markdown_content: Optional[str] = None,
         ) -> dict:
-            """Adds a chart widget and analytical query to a Native Dashboard."""
+            """Adds a chart, Markdown ('TILE_TYPE_MARKDOWN'), or Button ('TILE_TYPE_BUTTON') widget to a Native Dashboard."""
             try:
+                vis = None
+                if markdown_content is not None or tile_type == "TILE_TYPE_MARKDOWN":
+                    tile_type = "TILE_TYPE_MARKDOWN"
+                    vis = {
+                        "markdown": {
+                            "content": markdown_content or "",
+                            "properties": {"backgroundColor": "transparent"},
+                        }
+                    }
                 res = engine.add_dashboard_chart(
                     dashboard_id=dashboard_id,
                     display_name=display_name,
@@ -953,6 +964,8 @@ class GoogleADKManager:
                     span_y=span_y,
                     start_x=start_x,
                     start_y=start_y,
+                    tile_type=tile_type,
+                    visualization=vis,
                 )
                 return prune_deep_object(res, max_depth=6)
             except Exception as err:
@@ -966,13 +979,23 @@ class GoogleADKManager:
             query: Optional[str] = None,
             time_unit: Optional[str] = None,
             time_value: Optional[str] = None,
+            markdown_content: Optional[str] = None,
         ) -> dict:
-            """Updates an existing chart widget and/or its query on a Native Dashboard."""
+            """Updates an existing chart or Markdown widget on a Native Dashboard."""
             try:
+                vis = None
+                if markdown_content is not None:
+                    vis = {
+                        "markdown": {
+                            "content": markdown_content,
+                            "properties": {"backgroundColor": "transparent"},
+                        }
+                    }
                 res = engine.update_dashboard_chart(
                     chart_id=chart_id,
                     display_name=display_name,
                     description=description,
+                    visualization=vis,
                     query_id=query_id,
                     query=query,
                     time_unit=time_unit,
@@ -981,6 +1004,44 @@ class GoogleADKManager:
                 return prune_deep_object(res, max_depth=6)
             except Exception as err:
                 return {"error": str(err), "chart_id": chart_id}
+
+        def sync_secops_homepage_dashboard(
+            dashboard_name: str = "Google SecOps Homepage",
+            dashboard_id: Optional[str] = None,
+            status_lookback_days: int = 30,
+            max_release_notes: int = 4,
+            max_community_posts: int = 6,
+            community_categories: Optional[List[str]] = None,
+            include_tenant_health: bool = True,
+            ai_executive_summary: Optional[str] = None,
+        ) -> dict:
+            """
+            Creates or refreshes the 'Google SecOps Homepage' Native Dashboard with a 12-tile executive & SOC command center:
+              - Row 0: SecOps Homepage Banner (TILE_TYPE_MARKDOWN)
+              - Row 1: 3 Live Native Telemetry KPI Counter Cards (TILE_TYPE_VISUALIZATION) for 24h UDM Events,
+                       24h Active Log Sources, and 7d Rule Detections Volume
+              - Row 2: AI Executive Summary & Actionable Advisories (TILE_TYPE_MARKDOWN) and
+                       Live Tenant Health & Operations Pulse (TILE_TYPE_MARKDOWN)
+              - Row 3: 3 Quick-Launch Navigation Buttons (TILE_TYPE_BUTTON)
+              - Row 4: 3 External Intelligence Feed Columns (Google Cloud Security Status, SecOps Release Notes RSS,
+                       and Google Cloud Security Community RSS filtered by category slugs).
+            Pass `ai_executive_summary` (Markdown string) to embed custom AI-authored executive commentary into the
+            AI Executive Summary tile alongside synthesized platform and tenant advisories.
+            """
+            try:
+                res = engine.sync_secops_homepage_dashboard(
+                    dashboard_name=dashboard_name,
+                    dashboard_id=dashboard_id,
+                    status_lookback_days=int(status_lookback_days or 30),
+                    max_release_notes=int(max_release_notes or 4),
+                    max_community_posts=int(max_community_posts or 6),
+                    community_categories=community_categories,
+                    include_tenant_health=bool(include_tenant_health),
+                    ai_executive_summary=ai_executive_summary,
+                )
+                return prune_deep_object(res, max_depth=6)
+            except Exception as err:
+                return {"error": str(err), "dashboard_name": dashboard_name}
 
         def remove_dashboard_chart(dashboard_id: str, chart_id: str) -> dict:
             """Removes a chart widget from a Native Dashboard."""
@@ -1072,6 +1133,7 @@ class GoogleADKManager:
             update_dashboard_chart,
             remove_dashboard_chart,
             audit_dashboard_health,
+            sync_secops_homepage_dashboard,
             search_playbooks,
             get_playbook,
             audit_playbook_health,

@@ -1,0 +1,87 @@
+api_version: "2.0"
+identifier: SecOpsSDKEngine
+name: "SecOps SDK Engine"
+description: "Google SecOps SDK Engine integration providing high-performance, deterministic SIEM/SOAR correlation, silent non-alerting detection discovery, entity investigation, and native case evidence attachment."
+categories:
+  - "Analytics & SIEM"
+  - "Security Operations"
+author: "Christopher Martin"
+version: 5.7
+python_version: "3.11"
+is_custom: true
+svg_logo_path: resources/logo.svg
+image_path: resources/image.png
+
+parameters:
+  - name: "SecOps Customer ID"
+    description: "Google SecOps (Chronicle) Customer ID GUID."
+    integration_identifier: SecOpsSDKEngine
+    is_mandatory: true
+    type: string
+    default_value: ""
+  - name: "GCP Project ID"
+    description: "Google Cloud Project ID hosting SecOps or target workload."
+    integration_identifier: SecOpsSDKEngine
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "SecOps Region"
+    description: "Google Cloud region for SecOps API (e.g., us, europe, asia-southeast1)."
+    integration_identifier: SecOpsSDKEngine
+    is_mandatory: false
+    type: string
+    default_value: "us"
+  - name: "Service Account JSON"
+    description: "Service Account JSON private key credentials for Google Cloud authentication."
+    integration_identifier: SecOpsSDKEngine
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "Workload Identity Email"
+    description: "Target Service Account email for keyless authentication via Workload Identity Federation or Service Account Impersonation."
+    integration_identifier: SecOpsSDKEngine
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "Verify SSL"
+    description: "Verify SSL certificates for API requests."
+    integration_identifier: SecOpsSDKEngine
+    is_mandatory: false
+    type: boolean
+    default_value: true
+
+configuration:
+  - name: "SecOps Customer ID"
+    description: "Google SecOps (Chronicle) Customer ID GUID."
+    type: string
+    is_mandatory: true
+    default_value: ""
+  - name: "GCP Project ID"
+    description: "Google Cloud Project ID hosting SecOps or target workload."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "SecOps Region"
+    description: "Google Cloud region for SecOps API."
+    type: string
+    is_mandatory: false
+    default_value: "us"
+  - name: "Service Account JSON"
+    description: "Service Account JSON private key credentials."
+    type: string
+    is_mandatory: false
+    is_password: true
+    default_value: ""
+  - name: "Workload Identity Email"
+    description: "Target Service Account email for keyless authentication via Workload Identity Federation."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "Verify SSL"
+    description: "Verify SSL certificates for API requests."
+    type: boolean
+    is_mandatory: false
+    default_value: true
+
+simulation_data:
+  provider_name: "SecOpsSDKEngine"

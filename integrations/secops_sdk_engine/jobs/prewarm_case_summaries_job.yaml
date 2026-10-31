@@ -1,0 +1,50 @@
+creator: Admin
+description: Periodically polls for newly created open SOAR cases and triggers the Gemini AI Case Triage Summary (:getOrCreateCaseSummary) in advance so the summary is pre-computed and ready in the GUI when an analyst opens the case.
+integration: SecOpsSDKEngine
+name: Pre-Warm Case Triage Summaries Job
+parameters:
+  - default_value: '60'
+    description: Lookback time window in minutes for newly created open cases (set to 0 to evaluate the latest Max Cases Per Run regardless of creation time).
+    is_mandatory: false
+    name: Lookback Minutes
+    type: string
+  - default_value: '25'
+    description: Maximum number of recent open cases to inspect and pre-warm per job run (1-200).
+    is_mandatory: false
+    name: Max Cases Per Run
+    type: string
+  - default_value: ''
+    description: Optional comma-separated case priorities to pre-warm (e.g. CRITICAL,HIGH,MEDIUM). Leave blank for all priorities.
+    is_mandatory: false
+    name: Priority Filter
+    type: string
+  - default_value: ''
+    description: Optional comma-separated SOAR environment names to filter by. Leave blank for all environments.
+    is_mandatory: false
+    name: Environment Filter
+    type: string
+  - default_value: false
+    description: Whether to also trigger asynchronous Gemini AI Alert Recommendations (:createRecommendationLongRunning) for the alerts inside each new case.
+    is_mandatory: false
+    name: Pre-Warm Alert Recommendations
+    type: boolean
+  - default_value: false
+    description: If false (default), remembers previously pre-warmed Case IDs in job context so each new case is only triggered once.
+    is_mandatory: false
+    name: Force Re-Check Processed Cases
+    type: boolean
+  - default_value: ''
+    description: Optional override for SecOps Customer ID GUID (uses integration configuration if blank).
+    is_mandatory: false
+    name: SecOps Customer ID
+    type: string
+  - default_value: ''
+    description: Optional override for GCP Project ID (uses integration configuration if blank).
+    is_mandatory: false
+    name: GCP Project ID
+    type: string
+  - default_value: ''
+    description: Optional override for Workload Identity Email (uses integration configuration if blank).
+    is_mandatory: false
+    name: Workload Identity Email
+    type: string

@@ -2235,6 +2235,23 @@ class GoogleSecOpsAdapter:
             return res
         return {"dashboardCharts": []}
 
+    def get_dashboard_chart(self, chart_id: str) -> Dict[str, Any]:
+        """Retrieves a single DashboardChart resource by ID or resource name."""
+        clean_id = str(chart_id).strip().split("/")[-1]
+        full_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_id}"
+        try:
+            path = f"/v1alpha/{full_name}"
+            res = self._request("GET", path)
+            if isinstance(res, dict) and res.get("name"):
+                return res
+        except Exception:
+            pass
+        batch_res = self.batch_get_dashboard_charts([full_name])
+        charts = batch_res.get("dashboardCharts", []) if isinstance(batch_res, dict) else []
+        if charts and isinstance(charts[0], dict):
+            return charts[0]
+        return {}
+
     def get_dashboard_query(self, query_id: str) -> Dict[str, Any]:
         """Retrieves definition of a dashboard query."""
         clean_id = query_id.split("/")[-1]
@@ -2458,19 +2475,20 @@ class GoogleSecOpsAdapter:
         display_name: str,
         description: Optional[str] = None,
         dashboard_type: str = "CUSTOM",
+        access: str = "DASHBOARD_PUBLIC",
         filters: Optional[List[Dict[str, Any]]] = None,
         charts: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Creates a new Native Dashboard via v1alpha REST API."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards"
-        definition: Dict[str, Any] = {}
-        if filters is not None:
-            definition["filters"] = filters
-        if charts is not None:
-            definition["charts"] = charts
+        definition: Dict[str, Any] = {
+            "filters": filters if filters is not None else [],
+            "charts": charts if charts is not None else [],
+        }
         body: Dict[str, Any] = {
             "displayName": display_name,
             "type": dashboard_type,
+            "access": access,
             "definition": definition,
         }
         if description is not None:
@@ -2568,12 +2586,49 @@ class GoogleSecOpsAdapter:
         chart_id: str,
         chart_payload: Dict[str, Any],
         update_mask: str,
+        dashboard_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Updates an existing DashboardChart resource via PATCH."""
+        """Updates an existing DashboardChart resource via nativeDashboards:editChart."""
         clean_id = str(chart_id).strip().split("/")[-1]
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_id}"
-        params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
-        res = self._request("PATCH", path, params=params, body=chart_payload)
+        full_chart_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_id}"
+        existing_chart = self.get_dashboard_chart(clean_id)
+        resolved_dash = dashboard_id
+        if not resolved_dash and existing_chart:
+            resolved_dash = existing_chart.get("nativeDashboard", "")
+        if not resolved_dash:
+            raise ValueError(f"Could not resolve nativeDashboard for chart '{clean_id}'.")
+        clean_dash = str(resolved_dash).strip().split("/")[-1]
+
+        merged_chart: Dict[str, Any] = dict(existing_chart) if existing_chart else {"name": full_chart_name}
+        merged_chart.update(chart_payload)
+        if "name" not in merged_chart:
+            merged_chart["name"] = full_chart_name
+
+        # Normalize update_mask into editChart's editMask paths (prefixed with dashboard_chart.)
+        mask_parts: List[str] = []
+        for raw_field in (update_mask or "").split(","):
+            field = raw_field.strip()
+            if not field:
+                continue
+            if field == "visualization" and isinstance(chart_payload.get("visualization"), dict):
+                vis = chart_payload["visualization"]
+                if "markdown" in vis:
+                    mask_parts.append("dashboard_chart.visualization.markdown")
+                elif "button" in vis:
+                    mask_parts.append("dashboard_chart.visualization.button")
+                else:
+                    mask_parts.append("dashboard_chart.visualization")
+            elif field.startswith("dashboard_chart.") or field.startswith("dashboard_query."):
+                mask_parts.append(field)
+            else:
+                mask_parts.append(f"dashboard_chart.{field}")
+
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_dash}:editChart"
+        body: Dict[str, Any] = {
+            "dashboardChart": merged_chart,
+            "editMask": ",".join(mask_parts) if mask_parts else "dashboard_chart.display_name",
+        }
+        res = self._request("POST", path, body=body)
         if isinstance(res, dict):
             return res
         return {}

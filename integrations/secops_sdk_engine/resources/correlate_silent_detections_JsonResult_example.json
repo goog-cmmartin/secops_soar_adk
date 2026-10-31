@@ -1,0 +1,53 @@
+{
+  "case_id": "108339",
+  "lookback_hours": 24,
+  "has_silent_detections": true,
+  "detections_count": 2,
+  "silent_detections_count": 2,
+  "events_count": 0,
+  "attached_count": 4,
+  "attached_entities_count": 2,
+  "entities_count": 6,
+  "correlate_detections": true,
+  "correlate_udm_events": false,
+  "attach_udm_events": false,
+  "comment_id": "1793117335080",
+  "query_used": "(principal.ip = \"149.40.62.33\")",
+  "detections_found": [
+    {
+      "rule_name": "Unusual user access to AWS through third-party VPN",
+      "rule_id": "ru_8212b7c0-a7d5-472d-bb91-9e8c455fc3ca",
+      "alert_state": "SILENT",
+      "is_alerting": false,
+      "event_id": "de_8212b7c0-a7d5-472d-bb91-9e8c455fc3ca",
+      "severity": "HIGH",
+      "summary": "Silent detection for unusual AWS access"
+    }
+  ],
+  "events_found": [
+    {
+      "event_id": "udm_event_uuid_123",
+      "event_type": "NETWORK_CONNECTION",
+      "product_log_id": "vpc_flow_456"
+    }
+  ],
+  "attached_evidences": [
+    {
+      "evidenceId": "de_8212b7c0-a7d5-472d-bb91-9e8c455fc3ca",
+      "evidenceType": "EVIDENCE_TYPE_DETECTION"
+    }
+  ],
+  "attached_entities": [
+    {
+      "identifier": "arn:aws:iam::498752334630:user/castor.troy@wizuniversity.com",
+      "type": "USERUNIQNAME",
+      "entity_id": "2942127",
+      "status": "ATTACHED"
+    }
+  ],
+  "entities_searched": [
+    "149.40.62.33",
+    "castor.troy@wizuniversity.com"
+  ],
+  "evidence_markdown": "## Correlation Report\nFound 2 silent detections."
+}
