@@ -5,7 +5,7 @@ description: "Google Agent Development Kit (ADK) integration for Google SecOps S
 categories:
   - "Artificial Intelligence"
 author: "Christopher Martin"
-version: 3.3
+version: 3.4
 python_version: "3.11"
 is_custom: true
 svg_logo_path: resources/logo.svg

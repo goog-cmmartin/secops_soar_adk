@@ -730,7 +730,7 @@ class CorrelateSilentDetectionsWorkflow:
             # Sort clauses so primary host/user/IP anchors always fit inside the first 10 clauses
             prioritized_clauses.sort(key=lambda item: (item[0], item[1]))
             bounded_clauses = [item[2] for item in prioritized_clauses[:10]]
-            combined_query = ' OR '.join(bounded_clauses)
+            combined_query = f"({' OR '.join(bounded_clauses)}) AND metadata.event_type != \"ENTITY_RISK_CHANGE\""
 
             # Calculate time window around case created_time or now
             ref_time = investigation.created_time or datetime.now(timezone.utc)
@@ -797,6 +797,7 @@ class CorrelateSilentDetectionsWorkflow:
             for ev in session.events:
                 meta = ev.get('metadata') or {}
                 event_id = meta.get('id')
+                event_type_upper = (meta.get('eventType') or meta.get('event_type') or '').strip().upper()
                 sec_results = ev.get('securityResult') or ev.get('security_result') or []
                 detection_objs = ev.get('detections') or []
 
@@ -820,7 +821,8 @@ class CorrelateSilentDetectionsWorkflow:
                         ev_anchors.add(ip.strip().upper())
 
                 is_corroborated = bool(ev_anchors.intersection(case_anchors))
-                has_genuine_detection = False
+                has_any_detection = False
+                has_silent_detection = False
 
                 if correlate_detections:
                     # Genuine detections from detections objects (ev["detections"])
@@ -828,7 +830,7 @@ class CorrelateSilentDetectionsWorkflow:
                         det_id = (det.get('id') or '').strip()
                         if not det_id:
                             continue
-                        has_genuine_detection = True
+                        has_any_detection = True
                         if det_id.lower() in existing_alert_ticket_ids:
                             continue
 
@@ -848,6 +850,10 @@ class CorrelateSilentDetectionsWorkflow:
                         ).upper()
                         is_alerting = alert_state == 'ALERTING'
                         is_silent = not is_alerting
+                        if not is_silent:
+                            continue
+
+                        has_silent_detection = True
 
                         if is_corroborated and det_id not in seen_evidence_ids:
                             seen_evidence_ids.add(det_id)
@@ -887,18 +893,21 @@ class CorrelateSilentDetectionsWorkflow:
                         if not is_genuine_yara_l_detection(sec, has_det_obj=bool(detection_objs)):
                             continue
 
+                        has_any_detection = True
                         rule_name = sec.get('ruleName') or sec.get('ruleId')
                         rule_id = sec.get('ruleId') or ''
                         alert_state = (sec.get('alertState') or 'NOT_ALERTING').upper()
                         is_alerting = alert_state == 'ALERTING'
                         is_silent = not is_alerting and rule_id not in existing_alert_rule_ids
+                        if not is_silent:
+                            continue
 
                         det_key = f"{rule_name}::{rule_id}::{event_id}"
                         if det_key in seen_det_keys:
                             continue
                         seen_det_keys.add(det_key)
 
-                        has_genuine_detection = True
+                        has_silent_detection = True
                         ev_summary = _summarize_udm_event(ev, is_corroborated)
                         detection_entry = {
                             'rule_name': rule_name,
@@ -927,8 +936,8 @@ class CorrelateSilentDetectionsWorkflow:
                                     'evidenceType': 'EVIDENCE_TYPE_EVENT',
                                 })
 
-                    # Extract entities only from genuine, corroborated detections
-                    if has_genuine_detection and is_corroborated:
+                    # Extract entities only from genuine, corroborated silent detections
+                    if has_silent_detection and is_corroborated:
                         for cand in _extract_event_entities(ev):
                             if not parsed_filter.matches(cand.get('identifier'), cand.get('type')):
                                 continue
@@ -936,7 +945,7 @@ class CorrelateSilentDetectionsWorkflow:
                             if cid_upper not in existing_identifiers and cid_upper not in case_anchors:
                                 discovered_candidates.append(cand)
 
-                if not has_genuine_detection:
+                if not has_any_detection and event_type_upper != 'ENTITY_RISK_CHANGE':
                     if correlate_udm_events and event_id:
                         events_found.append(_summarize_udm_event(ev, is_corroborated))
                         if attach_udm_events and is_corroborated and event_id not in seen_evidence_ids:
