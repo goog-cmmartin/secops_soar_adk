@@ -1,6 +1,6 @@
 [project]
 name = "soar-integration-logjammer"
-version = "2.8"
+version = "2.9"
 description = "LogJammer Integration for Google SecOps SOAR"
 readme = "README.md"
 requires-python = ">=3.11"

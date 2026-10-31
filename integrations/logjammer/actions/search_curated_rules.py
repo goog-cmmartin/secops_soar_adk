@@ -30,6 +30,7 @@ def main():
         technique = siemplify.extract_action_param("MITRE Technique", default_value="")
         tactic = siemplify.extract_action_param("MITRE Tactic", default_value="")
         category = siemplify.extract_action_param("Category", default_value="")
+        precision = siemplify.extract_action_param("Precision", default_value="ALL")
         raw_limit = siemplify.extract_action_param("Limit", default_value="20")
         try:
             limit = max(1, min(100, int(raw_limit)))
@@ -39,16 +40,19 @@ def main():
         # Instantiate Manager (no API key needed for local search)
         manager = LogJammerManager(logger=siemplify.LOGGER)
 
+        prec_val = str(precision).strip().upper() if precision else "ALL"
         matched_rules = manager.search_curated_rules(
             query=str(query).strip() if query else None,
             technique=str(technique).strip().upper() if technique else None,
             tactic=str(tactic).strip().upper() if tactic else None,
             category=str(category).strip() if category else None,
+            precision=prec_val if prec_val in ("PRECISE", "BROAD") else None,
+            alerting_only=(prec_val == "PRECISE"),
             limit=limit,
         )
 
         siemplify.result.add_result_json(matched_rules)
-        result_value = len(matched_rules) > 0
+        result_value = matched_rules[0].get("rule_id") if matched_rules else False
 
         if matched_rules:
             # Build tabular display
@@ -56,6 +60,8 @@ def main():
                 {
                     "Rule ID": r.get("rule_id"),
                     "Rule Name": r.get("display_name"),
+                    "Precision": r.get("precision", ""),
+                    "Alerting": str(r.get("alerting", False)),
                     "Severity": r.get("severity"),
                     "Category": r.get("category"),
                     "MITRE Techniques": ", ".join(r.get("techniques", [])),
@@ -63,7 +69,10 @@ def main():
                 for r in matched_rules
             ]
             siemplify.result.add_data_table("Curated Detection Rules", construct_csv(table_data))
-            output_message = f"Found {len(matched_rules)} matching Google SecOps curated detection rules."
+            output_message = (
+                f"Found {len(matched_rules)} matching Google SecOps curated detection rules "
+                f"(Top match: {matched_rules[0].get('rule_id')} - {matched_rules[0].get('display_name')})."
+            )
         else:
             output_message = "No matching curated detection rules found for the specified criteria."
 

@@ -28,6 +28,11 @@ parameters:
   is_mandatory: false
   name: Category
   type: string
+- default_value: 'ALL'
+  description: Filter by rule precision (PRECISE, BROAD, or ALL). Use PRECISE to find rules that generate Detection Alerts.
+  is_mandatory: false
+  name: Precision
+  type: string
 - default_value: '20'
   description: Maximum number of rules to return.
   is_mandatory: false

@@ -19,7 +19,7 @@ parameters:
   name: Log Types
   type: string
 - default_value: ''
-  description: Optional Curated or Custom YARA-L rule ID(s) (comma-separated, e.g. ur_1,ur_2) or rule name to reverse-engineer into telemetry.
+  description: Optional Curated or Custom YARA-L rule ID(s) (comma-separated, e.g. ur_1,ur_2), rule name, or 'AUTO_PRECISE' to automatically select the best-matching PRECISE alerting Curated Detection Rule for the scenario.
   is_mandatory: false
   name: Rule Identifier
   type: string

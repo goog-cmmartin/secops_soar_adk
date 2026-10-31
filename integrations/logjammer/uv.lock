@@ -649,7 +649,7 @@ wheels = [
 
 [[package]]
 name = "soar-integration-logjammer"
-version = "2.8"
+version = "2.9"
 source = { editable = "." }
 dependencies = [
     { name = "google-auth" },

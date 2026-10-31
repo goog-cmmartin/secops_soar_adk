@@ -297,6 +297,8 @@ class LogJammerManager:
         technique: Optional[str] = None,
         tactic: Optional[str] = None,
         category: Optional[str] = None,
+        precision: Optional[str] = None,
+        alerting_only: bool = False,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """Search across bundled curated detection rules."""
@@ -305,6 +307,8 @@ class LogJammerManager:
             technique=technique,
             tactic=tactic,
             rule_type="curated",
+            precision=precision,
+            alerting_only=alerting_only,
         )
 
         matched: List[Dict[str, Any]] = []
@@ -317,6 +321,8 @@ class LogJammerManager:
                 "rule_id": r.rule_id,
                 "display_name": r.display_name,
                 "severity": r.severity,
+                "precision": r.raw_data.get("precision", ""),
+                "alerting": r.raw_data.get("alerting", False),
                 "category": rule_cat,
                 "ruleset_name": r.raw_data.get("ruleset_name", ""),
                 "techniques": r.techniques,
@@ -386,56 +392,89 @@ class LogJammerManager:
             else:
                 self.logger.warning("GTI enrichment requested but GTI API Key is not configured.")
 
-        # 2. Rule Resolution & Scenario Generation (supports single or comma-separated rule IDs)
+        # 2. Rule Resolution & Scenario Generation (supports AUTO_PRECISE / AUTO or single/comma-separated rule IDs)
         rule_obj: Optional[SecOpsRule] = None
         unresolved_rules: List[str] = []
         if rule_identifier and rule_identifier.strip():
-            raw_ids = [r.strip() for r in rule_identifier.split(",") if r.strip()]
-            resolved_rules: List[SecOpsRule] = []
-            for rid in raw_ids:
-                r_match = self.rule_service.get_rule(rid)
-                if r_match:
-                    resolved_rules.append(r_match)
-                else:
-                    unresolved_rules.append(rid)
-
-            if len(resolved_rules) == 1:
-                rule_obj = resolved_rules[0]
-            elif len(resolved_rules) > 1:
-                combined_ids = ",".join(r.rule_id for r in resolved_rules)
-                combined_names = " + ".join(r.display_name for r in resolved_rules)
-                combined_text = "\n\n".join(
-                    f"// === STAGE RULE {idx + 1}: {r.display_name} ({r.rule_id}) ===\n{r.text}"
-                    for idx, r in enumerate(resolved_rules)
+            norm_rule_id = rule_identifier.strip().upper()
+            if norm_rule_id in ("AUTO_PRECISE", "AUTO", "PRECISE"):
+                self.logger.info(
+                    f"Auto-selecting best matching PRECISE (alerting=True) Curated Detection Rule for scenario..."
                 )
-                combined_tactics = sorted(list({t for r in resolved_rules for t in (r.tactics or [])}))
-                combined_techniques = sorted(list({t for r in resolved_rules for t in (r.techniques or [])}))
-                rule_obj = SecOpsRule(
-                    rule_id=combined_ids,
-                    display_name=combined_names,
-                    text=combined_text,
-                    severity=resolved_rules[0].severity,
-                    tactics=combined_tactics,
-                    techniques=combined_techniques,
-                    rule_owner=resolved_rules[0].rule_owner,
+                rule_obj = self.rule_service.find_best_curated_rule(
+                    scenario_text=scenario_prompt,
+                    log_types=log_types,
+                    precision="PRECISE",
+                    alerting_only=True,
+                    live_only=True,
                 )
-
-            if unresolved_rules:
-                self.logger.warning(
-                    f"Rule identifier(s) not found in local catalog or tenant API: {unresolved_rules}. "
-                    "Incorporating rule IDs and outcome objective into scenario narrative context."
-                )
-                prompt_to_use = (
-                    f"{prompt_to_use}\n\n"
-                    f"[Target Detection Rule IDs]: {', '.join(raw_ids)}\n"
-                    f"[Rule Simulation Objective]: {rule_outcome.upper()} "
-                    "(Ensure every stage, threshold, byte size, HTTP status, and process tree in the narrative is satisfied)."
-                )
-                if not resolved_rules and (not scenario_prompt or len(scenario_prompt.strip()) < 10):
-                    raise ValueError(
-                        f"Detection rule(s) '{rule_identifier}' could not be found in catalog or tenant API, "
-                        "and no detailed Scenario Prompt was provided for fallback generation."
+                if rule_obj:
+                    self.logger.info(
+                        f"Selected PRECISE Curated Rule: {rule_obj.rule_id} "
+                        f"('{rule_obj.display_name}', ruleset='{rule_obj.raw_data.get('ruleset_name', '')}', "
+                        f"alerting={rule_obj.raw_data.get('alerting', True)})"
                     )
+                else:
+                    self.logger.warning(
+                        "No matching PRECISE curated rule found for scenario; proceeding with free-form scenario generation."
+                    )
+            elif norm_rule_id in ("AUTO_BROAD", "BROAD"):
+                rule_obj = self.rule_service.find_best_curated_rule(
+                    scenario_text=scenario_prompt,
+                    log_types=log_types,
+                    precision="BROAD",
+                    alerting_only=False,
+                    live_only=True,
+                )
+                if rule_obj:
+                    self.logger.info(f"Selected BROAD Curated Rule: {rule_obj.rule_id} ('{rule_obj.display_name}')")
+            else:
+                raw_ids = [r.strip() for r in rule_identifier.split(",") if r.strip()]
+                resolved_rules: List[SecOpsRule] = []
+                for rid in raw_ids:
+                    r_match = self.rule_service.get_rule(rid)
+                    if r_match:
+                        resolved_rules.append(r_match)
+                    else:
+                        unresolved_rules.append(rid)
+
+                if len(resolved_rules) == 1:
+                    rule_obj = resolved_rules[0]
+                elif len(resolved_rules) > 1:
+                    combined_ids = ",".join(r.rule_id for r in resolved_rules)
+                    combined_names = " + ".join(r.display_name for r in resolved_rules)
+                    combined_text = "\n\n".join(
+                        f"// === STAGE RULE {idx + 1}: {r.display_name} ({r.rule_id}) ===\n{r.text}"
+                        for idx, r in enumerate(resolved_rules)
+                    )
+                    combined_tactics = sorted(list({t for r in resolved_rules for t in (r.tactics or [])}))
+                    combined_techniques = sorted(list({t for r in resolved_rules for t in (r.techniques or [])}))
+                    rule_obj = SecOpsRule(
+                        rule_id=combined_ids,
+                        display_name=combined_names,
+                        text=combined_text,
+                        severity=resolved_rules[0].severity,
+                        tactics=combined_tactics,
+                        techniques=combined_techniques,
+                        rule_owner=resolved_rules[0].rule_owner,
+                    )
+
+                if unresolved_rules:
+                    self.logger.warning(
+                        f"Rule identifier(s) not found in local catalog or tenant API: {unresolved_rules}. "
+                        "Incorporating rule IDs and outcome objective into scenario narrative context."
+                    )
+                    prompt_to_use = (
+                        f"{prompt_to_use}\n\n"
+                        f"[Target Detection Rule IDs]: {', '.join(raw_ids)}\n"
+                        f"[Rule Simulation Objective]: {rule_outcome.upper()} "
+                        "(Ensure every stage, threshold, byte size, HTTP status, and process tree in the narrative is satisfied)."
+                    )
+                    if not resolved_rules and (not scenario_prompt or len(scenario_prompt.strip()) < 10):
+                        raise ValueError(
+                            f"Detection rule(s) '{rule_identifier}' could not be found in catalog or tenant API, "
+                            "and no detailed Scenario Prompt was provided for fallback generation."
+                        )
 
         if rule_obj:
             self.logger.info(f"Generating logs from rule '{rule_obj.display_name}' (outcome: {rule_outcome})")
@@ -554,6 +593,9 @@ class LogJammerManager:
                 "rule_id": rule_obj.rule_id,
                 "display_name": rule_obj.display_name,
                 "severity": rule_obj.severity,
+                "precision": rule_obj.raw_data.get("precision", "PRECISE"),
+                "alerting": rule_obj.raw_data.get("alerting", True),
+                "ruleset_name": rule_obj.raw_data.get("ruleset_name", ""),
                 "outcome": rule_outcome,
                 "techniques": rule_obj.techniques,
                 "tactics": rule_obj.tactics,

@@ -227,6 +227,7 @@ class RuleAnalyzer:
     if any(k in text_lower for k in ("powershell", "cmd.exe", "rundll32", "reg.exe", "wmic", "sysmon")):
       candidates.append("WINDOWS_SYSMON")
       candidates.append("MICROSOFT_DEFENDER_ENDPOINT")
+      candidates.append("CS_EDR")
     if any(k in text_lower for k in ("aws.", "iam.amazonaws.com", "s3.amazonaws.com", "cloudtrail")):
       candidates.append("AWS_CLOUDTRAIL")
     if any(k in text_lower for k in ("workspace", "google workspace", "gsuite", "drive.google")):
@@ -238,9 +239,17 @@ class RuleAnalyzer:
     if any(k in text_lower for k in ("dns query", "dns_response")):
       candidates.append("WINDOWS_DNS")
       candidates.append("GCP_DNS")
-    if any(k in text_lower for k in ("auditd", "/bin/bash", "/bin/sh", "linux")):
+    if any(k in text_lower for k in ("auditd", "/bin/bash", "/bin/sh", "linux", "/ssh/")):
+      candidates.append("CS_EDR")
       candidates.append("AUDITD")
-      candidates.append("NIX_SYSTEM")
+
+    # Prioritize CS_EDR when PROCESS_LAUNCH requires principal.asset_id (CS_EDR populates principal.asset_id="CS:<aid>" on both Linux and Windows)
+    if "PROCESS_LAUNCH" in event_types and any("asset_id" in f for f in required_fields):
+      if "CS_EDR" not in candidates:
+        candidates.insert(0, "CS_EDR")
+      else:
+        candidates.remove("CS_EDR")
+        candidates.insert(0, "CS_EDR")
 
     # Match by UDM event types
     for et in event_types:

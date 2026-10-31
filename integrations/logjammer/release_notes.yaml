@@ -1,3 +1,12 @@
+- description: "Added AUTO_PRECISE Curated Detection Rule auto-selection and relevance ranking, Precision filter on Search Curated Rules, CS_EDR primary log source prioritization for PROCESS_LAUNCH + principal.asset_id rules, and combined trigger + multi-source surrounding telemetry synthesis in full-chain mode."
+  version: 2.9
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-31"
 - description: "Added Base Timestamp action parameter, automatic SOAR Alert timestamp backdating (WindowStartTime / StartTime / security_events), per-event offset log_entry_time resolution for SecOps ingestion, and structured SOAR alert context extraction."
   version: 2.8
   item_name: "LogJammer"

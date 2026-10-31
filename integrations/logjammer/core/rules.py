@@ -545,14 +545,18 @@ class RuleService:
       live_only: bool = False,
       rule_type: str = "all",
       rules: Optional[List[SecOpsRule]] = None,
+      precision: Optional[str] = None,
+      alerting_only: bool = False,
+      require_text: bool = False,
   ) -> List[SecOpsRule]:
-    """Search and filter rules."""
+    """Search and filter rules with optional precision, alerting, and relevance ranking."""
     corpus = rules if rules is not None else self.load_rules_from_cache(rule_type=rule_type)
     results = []
 
-    q_lower = query.lower() if query else None
-    t_upper = technique.upper() if technique else None
-    tac_upper = tactic.upper() if tactic else None
+    q_lower = query.strip().lower() if query and query.strip() else None
+    t_upper = technique.strip().upper() if technique and technique.strip() else None
+    tac_upper = tactic.strip().upper() if tactic and tactic.strip() else None
+    prec_upper = precision.strip().upper() if precision and precision.strip() else None
 
     for r in corpus:
       if rule_type != "all":
@@ -561,6 +565,14 @@ class RuleService:
         if rule_type == "custom" and r.rule_owner == "GOOGLE_CURATED":
           continue
       if live_only and not r.live_mode_enabled:
+        continue
+      if require_text and not (r.text and r.text.strip()):
+        continue
+      if prec_upper and prec_upper != "ALL":
+        rule_prec = str(r.raw_data.get("precision", "")).upper()
+        if rule_prec != prec_upper:
+          continue
+      if alerting_only and not r.raw_data.get("alerting", False):
         continue
       if t_upper and t_upper not in r.techniques:
         continue
@@ -577,4 +589,243 @@ class RuleService:
           continue
       results.append(r)
 
+    # Fallback: if multi-word query had zero exact substring matches, use smart relevance ranking
+    if q_lower and not results and len(q_lower.split()) > 1:
+      ranked = self.rank_curated_rules(
+          scenario_text=query,
+          precision=prec_upper or "ALL",
+          alerting_only=alerting_only,
+          live_only=live_only,
+          require_text=require_text,
+          technique=t_upper,
+          tactic=tac_upper,
+          corpus=corpus,
+      )
+      results = [item[0] for item in ranked]
+
     return results
+
+  def rank_curated_rules(
+      self,
+      scenario_text: str,
+      log_types: Optional[List[str]] = None,
+      precision: str = "PRECISE",
+      alerting_only: bool = True,
+      live_only: bool = True,
+      require_text: bool = True,
+      technique: Optional[str] = None,
+      tactic: Optional[str] = None,
+      corpus: Optional[List[SecOpsRule]] = None,
+      limit: int = 20,
+  ) -> List[tuple[SecOpsRule, float]]:
+    """Score and rank curated detection rules against a natural language scenario or alert summary."""
+    rules_pool = corpus if corpus is not None else self.load_rules_from_cache(rule_type="curated")
+    prec_upper = (precision or "PRECISE").strip().upper()
+    text_lower = (scenario_text or "").lower()
+
+    # Stopwords that appear in almost every alert triage summary and add noise
+    stopwords = {
+        "the", "and", "for", "with", "that", "this", "from", "was", "were", "are",
+        "has", "have", "had", "not", "but", "into", "over", "under", "between",
+        "alert", "alerts", "event", "events", "case", "summary", "detected", "detection",
+        "detections", "siem", "soar", "log", "logs", "investigation", "revealed",
+        "corroborating", "evidence", "suggests", "either", "transient", "blocked",
+        "lacked", "further", "malicious", "impact", "leading", "conclusion", "action",
+        "required", "associated", "artifacts", "include", "issue", "https", "http",
+        "demo", "despite", "initial", "thorough", "elsewhere", "network", "categorized",
+        "gti", "google", "secops", "chronicle", "host", "internal", "external", "source",
+        "target", "principal", "entity", "entities", "involved", "timestamp", "anchor",
+        "attached", "timeline", "product", "rule", "primary", "underlying", "attributes",
+    }
+
+    # Extract meaningful keywords from scenario_text
+    raw_tokens = re.findall(r"[a-zA-Z0-9_.-]{3,}", text_lower)
+    tokens: List[str] = []
+    for tok in raw_tokens:
+      clean_tok = tok.strip("._-")
+      if len(clean_tok) < 3 or clean_tok in stopwords:
+        continue
+      if re.match(r"^\d+$", clean_tok) or re.match(r"^i-[0-9a-f]{8,}$", clean_tok):
+        continue
+      if re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", clean_tok):
+        continue
+      if clean_tok not in tokens:
+        tokens.append(clean_tok)
+
+    # Extract MITRE technique/tactic IDs mentioned in scenario_text
+    mentioned_techs = set(t.upper() for t in re.findall(r"\b(T\d{4}(?:\.\d{3})?)\b", scenario_text, re.IGNORECASE))
+    if technique:
+      mentioned_techs.add(technique.strip().upper())
+    mentioned_tacs = set(t.upper() for t in re.findall(r"\b(TA\d{4})\b", scenario_text, re.IGNORECASE))
+    if tactic:
+      mentioned_tacs.add(tactic.strip().upper())
+
+    # Detect platform / OS / cloud environment cues in the scenario
+    is_linux_or_ec2 = any(
+        k in text_lower
+        for k in ("linux", "ubuntu", "debian", "centos", "rhel", "bastion", "ec2", "i-0", "sshd", "/bin/", "/usr/bin/ssh", "auditd", "nix_system")
+    ) and not any(k in text_lower for k in ("windows", "powershell", "sysmon", "cmd.exe", "active directory"))
+    is_windows = any(
+        k in text_lower
+        for k in ("windows", "powershell", "cmd.exe", "sysmon", "rundll32", "active directory", "kerberos", "lsass", "ntlm")
+    )
+    is_aws = any(k in text_lower for k in ("aws", "ec2", "s3", "iam", "cloudtrail", "guardduty", "vpc"))
+    is_gcp = any(k in text_lower for k in ("gcp", "gke", "compute engine", "cloud storage", "bigquery", "cloudaudit"))
+    is_azure = any(k in text_lower for k in ("azure", "entra", "office 365", "o365", "m365"))
+    has_ssh = any(k in text_lower for k in ("ssh", "sshd", "port 22", "bastion"))
+
+    scored: List[tuple[SecOpsRule, float]] = []
+    for r in rules_pool:
+      if live_only and not r.live_mode_enabled:
+        continue
+      if require_text and not (r.text and r.text.strip()):
+        continue
+      rule_prec = str(r.raw_data.get("precision", "")).upper()
+      if prec_upper and prec_upper != "ALL" and rule_prec != prec_upper:
+        continue
+      if alerting_only and not r.raw_data.get("alerting", False):
+        continue
+      if technique and technique.strip().upper() not in r.techniques:
+        continue
+      if tactic and tactic.strip().upper() not in r.tactics:
+        continue
+
+      score = 0.0
+      name_lower = (r.display_name or "").lower()
+      desc_lower = (r.description or "").lower()
+      rs_lower = str(r.raw_data.get("ruleset_name", "")).lower()
+      cat_lower = str(r.raw_data.get("category", "")).lower()
+      rule_text_lower = (r.text or "").lower()
+
+      # 1. Exact MITRE technique / tactic matches
+      for mt in mentioned_techs:
+        if mt in r.techniques:
+          score += 25.0
+      for mta in mentioned_tacs:
+        if mta in r.tactics:
+          score += 8.0
+
+      # 2. Token relevance scoring
+      for tok in tokens:
+        # High-value domain tokens (e.g., ssh, rdp, powershell, cloudtrail, guardduty, okta)
+        weight_mult = 2.5 if tok in (
+            "ssh", "rdp", "smb", "kerberos", "powershell", "wmi", "lsass", "mimikatz",
+            "cloudtrail", "guardduty", "s3", "iam", "ec2", "eks", "gke", "kubernetes",
+            "okta", "entra", "defender", "crowdstrike", "cobalt", "beacon", "ransomware",
+            "exfiltration", "tunnel", "forwarding", "bastion", "brute", "credential",
+        ) else 1.0
+
+        if re.search(rf"\b{re.escape(tok)}\b", name_lower):
+          score += 12.0 * weight_mult
+        elif tok in name_lower:
+          score += 6.0 * weight_mult
+
+        if re.search(rf"\b{re.escape(tok)}\b", desc_lower):
+          score += 5.0 * weight_mult
+        elif tok in desc_lower:
+          score += 2.5 * weight_mult
+
+        if tok in rs_lower or tok in cat_lower:
+          score += 4.0 * weight_mult
+
+        if tok in rule_text_lower:
+          score += 1.5 * weight_mult
+
+      # 3. Domain & Platform Affinity Adjustments
+      if has_ssh and "ssh" in name_lower:
+        score += 20.0
+        if any(k in text_lower for k in ("external", "bidirectional", "malicious ip", "communication")):
+          if any(k in name_lower or k in desc_lower for k in ("external", "port forwarding", "reverse", "tunnel", "outbound")):
+            score += 18.0
+
+      # Penalize strict OS / Cloud platform mismatches
+      if is_linux_or_ec2:
+        if "windows" in cat_lower or "windows" in rs_lower or "windows" in name_lower:
+          score -= 25.0
+        if "\\\\" in rule_text_lower and ".exe" in rule_text_lower and "/ssh/" not in rule_text_lower:
+          score -= 20.0
+        if "linux" in cat_lower or "linux" in rs_lower or "linux" in name_lower or "/ssh/" in rule_text_lower:
+          score += 12.0
+
+      if is_windows:
+        if "linux" in cat_lower or "linux" in rs_lower or "macos" in rs_lower:
+          score -= 25.0
+        if "windows" in cat_lower or "windows" in rs_lower:
+          score += 10.0
+
+      if is_aws and not is_gcp and not is_azure:
+        if any(c in cat_lower or c in rs_lower or c in name_lower for c in ("gcp", "azure", "google workspace", "office 365")):
+          score -= 20.0
+        if any(c in rs_lower or c in name_lower for c in ("aws", "cloudtrail", "guardduty", "s3", "ec2")):
+          score += 10.0
+
+      if is_gcp and not is_aws and not is_azure:
+        if any(c in rs_lower or c in name_lower for c in ("aws", "azure", "office 365")):
+          score -= 20.0
+        if any(c in rs_lower or c in name_lower for c in ("gcp", "google cloud", "gke")):
+          score += 10.0
+
+      # Skip composite detection-of-detection rules ($c1.detection.detection.rule_name) which cannot be triggered directly by raw logs
+      if ".detection.detection." in rule_text_lower or "collection_elements.references" in rule_text_lower:
+        continue
+
+      # Penalize un-synthesizable internal GCTI graph joins if another high-scoring rule exists
+      if "$gcti" in rule_text_lower or "graph.entity" in rule_text_lower:
+        score -= 25.0
+
+      # Penalize 3rd-party alert passthrough rules (GuardDuty, Defender for Cloud, SCC) unless explicitly mentioned in the scenario
+      if "aws guardduty" in name_lower and "guardduty" not in text_lower:
+        score -= 45.0
+      if "defender for cloud" in name_lower and "defender for cloud" not in text_lower:
+        score -= 45.0
+      if "scc:" in name_lower and "security command center" not in text_lower and "scc" not in text_lower:
+        score -= 45.0
+
+      # Prefer behavioral telemetry rules (PROCESS_LAUNCH, NETWORK_CONNECTION, USER_LOGIN, etc.)
+      if "metadata.event_type" in rule_text_lower:
+        score += 15.0
+
+      # Prefer rules in an actively alerting PRECISE ruleset
+      if r.raw_data.get("alerting", False):
+        score += 5.0
+
+      if score > 0:
+        scored.append((r, round(score, 2)))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:limit]
+
+  def find_best_curated_rule(
+      self,
+      scenario_text: str,
+      log_types: Optional[List[str]] = None,
+      precision: str = "PRECISE",
+      alerting_only: bool = True,
+      live_only: bool = True,
+  ) -> Optional[SecOpsRule]:
+    """Find the single best-matching Curated Detection Rule for a scenario or alert summary."""
+    ranked = self.rank_curated_rules(
+        scenario_text=scenario_text,
+        log_types=log_types,
+        precision=precision,
+        alerting_only=alerting_only,
+        live_only=live_only,
+        require_text=True,
+        limit=5,
+    )
+    if ranked:
+      return ranked[0][0]
+    # Fallback: relax alerting_only if no match found
+    if alerting_only:
+      ranked_fallback = self.rank_curated_rules(
+          scenario_text=scenario_text,
+          log_types=log_types,
+          precision=precision,
+          alerting_only=False,
+          live_only=live_only,
+          require_text=True,
+          limit=5,
+      )
+      if ranked_fallback:
+        return ranked_fallback[0][0]
+    return None
