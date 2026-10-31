@@ -91,14 +91,51 @@ class TestGoogleADKManager(unittest.TestCase):
         self.assertTrue(len(res["thoughts"]) > 0)
 
     def test_init_secops_engine_toolset_includes_homepage_dashboard(self):
+        from unittest.mock import patch
         tools = self.manager.init_secops_engine_toolset(
             customer_id="a556547c-1cff-43ef-a2e4-cf5b12a865df",
             project_id="sdl-preview-americas",
             region="us",
         )
-        tool_names = [t.__name__ for t in tools]
-        self.assertIn("sync_secops_homepage_dashboard", tool_names)
+        tool_map = {t.__name__: t for t in tools}
+        self.assertIn("sync_secops_homepage_dashboard", tool_map)
         self.assertGreaterEqual(len(tools), 30)
+
+        with patch("engine.facade.SecOpsEngine.sync_secops_homepage_dashboard") as mock_sync:
+            mock_sync.return_value = {"status": "SUCCESS", "dashboard_id": "dash-123"}
+            res1 = tool_map["sync_secops_homepage_dashboard"](
+                dashboard_name="Google SecOps Homepage",
+                dashboard_id="dash-123",
+                community_categories="community-blog-42,news-announcements-9",
+            )
+            self.assertEqual(res1["status"], "SUCCESS")
+            mock_sync.assert_called_with(
+                dashboard_name="Google SecOps Homepage",
+                dashboard_id="dash-123",
+                status_lookback_days=30,
+                max_release_notes=4,
+                max_community_posts=6,
+                community_categories=["community-blog-42", "news-announcements-9"],
+                include_tenant_health=True,
+                ai_executive_summary=None,
+            )
+
+            res2 = tool_map["sync_secops_homepage_dashboard"](
+                dashboard_title="Custom Title",
+                dashboard_id="dash-123",
+                community_categories=["community-blog-42"],
+            )
+            self.assertEqual(res2["status"], "SUCCESS")
+            mock_sync.assert_called_with(
+                dashboard_name="Custom Title",
+                dashboard_id="dash-123",
+                status_lookback_days=30,
+                max_release_notes=4,
+                max_community_posts=6,
+                community_categories=["community-blog-42"],
+                include_tenant_health=True,
+                ai_executive_summary=None,
+            )
 
 
 if __name__ == "__main__":

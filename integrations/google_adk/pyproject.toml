@@ -1,6 +1,6 @@
 [project]
 name = "soar-integration-google-adk"
-version = "3.5"
+version = "3.6"
 description = "GoogleADK Integration for Google SecOps SOAR"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -6,7 +6,7 @@ categories:
   - "Analytics & SIEM"
   - "Security Operations"
 author: "Christopher Martin"
-version: 5.7
+version: 5.8
 python_version: "3.11"
 is_custom: true
 svg_logo_path: resources/logo.svg

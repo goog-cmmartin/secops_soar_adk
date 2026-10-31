@@ -650,7 +650,7 @@ wheels = [
 
 [[package]]
 name = "soar-integration-google-adk"
-version = "3.2"
+version = "3.6"
 source = { editable = "." }
 dependencies = [
     { name = "google-auth" },

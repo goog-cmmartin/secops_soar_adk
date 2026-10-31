@@ -610,7 +610,7 @@ wheels = [
 
 [[package]]
 name = "soar-integration-secops-sdk-engine"
-version = "5.2"
+version = "5.8"
 source = { editable = "." }
 dependencies = [
     { name = "google-auth" },

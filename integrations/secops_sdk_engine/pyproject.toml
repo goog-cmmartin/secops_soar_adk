@@ -1,6 +1,6 @@
 [project]
 name = "soar-integration-secops-sdk-engine"
-version = "5.7"
+version = "5.8"
 description = "SecOps SDK Engine Integration for Google SecOps SOAR"
 readme = "README.md"
 requires-python = ">=3.11"

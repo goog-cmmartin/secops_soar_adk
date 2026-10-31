@@ -1014,6 +1014,7 @@ class GoogleADKManager:
             community_categories: Optional[List[str]] = None,
             include_tenant_health: bool = True,
             ai_executive_summary: Optional[str] = None,
+            dashboard_title: Optional[str] = None,
         ) -> dict:
             """
             Creates or refreshes the 'Google SecOps Homepage' Native Dashboard with a 12-tile executive & SOC command center:
@@ -1028,20 +1029,25 @@ class GoogleADKManager:
             Pass `ai_executive_summary` (Markdown string) to embed custom AI-authored executive commentary into the
             AI Executive Summary tile alongside synthesized platform and tenant advisories.
             """
+            effective_name = (dashboard_title or dashboard_name or "Google SecOps Homepage").strip()
+            if isinstance(community_categories, str):
+                normalized_categories = [c.strip() for c in community_categories.split(",") if c.strip()]
+            else:
+                normalized_categories = community_categories
             try:
                 res = engine.sync_secops_homepage_dashboard(
-                    dashboard_name=dashboard_name,
+                    dashboard_name=effective_name,
                     dashboard_id=dashboard_id,
                     status_lookback_days=int(status_lookback_days or 30),
                     max_release_notes=int(max_release_notes or 4),
                     max_community_posts=int(max_community_posts or 6),
-                    community_categories=community_categories,
+                    community_categories=normalized_categories,
                     include_tenant_health=bool(include_tenant_health),
                     ai_executive_summary=ai_executive_summary,
                 )
                 return prune_deep_object(res, max_depth=6)
             except Exception as err:
-                return {"error": str(err), "dashboard_name": dashboard_name}
+                return {"error": str(err), "dashboard_name": effective_name}
 
         def remove_dashboard_chart(dashboard_id: str, chart_id: str) -> dict:
             """Removes a chart widget from a Native Dashboard."""

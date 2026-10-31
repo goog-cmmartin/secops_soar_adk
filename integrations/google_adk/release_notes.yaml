@@ -1,3 +1,12 @@
+- description: "Fixed parameter alignment (dashboard_name / dashboard_title and comma-separated community_categories normalization) in Sync SecOps Homepage Dashboard Job and sync_secops_homepage_dashboard tool, and suppressed grpcio PQC FutureWarning."
+  version: 3.6
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-31"
 - description: "Added Sync SecOps Homepage Dashboard Job for scheduled hourly synchronization of the Google SecOps Homepage Native Dashboard (with Google Cloud Security Status, SecOps Release Notes, Security Community intelligence, Live Tenant Health telemetry, 3 native KPI counter cards, and ADK AI Executive Summary synthesis), plus sync_secops_homepage_dashboard tool in the ADK SecOps Engine toolset."
   version: 3.5
   item_name: "GoogleADK"

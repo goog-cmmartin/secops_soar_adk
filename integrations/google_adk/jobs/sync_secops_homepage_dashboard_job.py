@@ -16,6 +16,9 @@ the 'Google SecOps Homepage' Native Dashboard with:
 import json
 import os
 import sys
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Ensure core directory is on sys.path for SOAR runtime
 _current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -229,20 +232,26 @@ def main():
             raise RuntimeError("sync_secops_homepage_dashboard tool is not registered in GoogleADKManager.")
 
         # 4. Execute Initial Sync (fetches live external feeds + tenant health and updates dashboard)
+        community_categories_list = [
+            c.strip() for c in str(community_categories).split(",") if c.strip()
+        ] or ["community-blog-42", "news-announcements-9"]
+
         siemplify.LOGGER.info(
             f"Synchronizing Native Dashboard '{dashboard_name}' (id={dashboard_id or 'auto'}) "
-            f"with community_categories='{community_categories}', include_tenant_health={include_tenant_health}..."
+            f"with community_categories={community_categories_list}, include_tenant_health={include_tenant_health}..."
         )
         sync_result = tool_map["sync_secops_homepage_dashboard"](
-            dashboard_title=dashboard_name,
+            dashboard_name=dashboard_name,
             dashboard_id=dashboard_id or None,
-            community_categories=community_categories,
+            community_categories=community_categories_list,
             status_lookback_days=status_lookback_days,
             max_release_notes=max_release_notes,
             max_community_posts=max_community_posts,
             include_tenant_health=include_tenant_health,
             ai_executive_summary=None,
         )
+        if isinstance(sync_result, dict) and sync_result.get("error"):
+            raise RuntimeError(f"Dashboard sync returned error: {sync_result['error']}")
 
         resolved_dash_id = sync_result.get("dashboard_id") or dashboard_id
         feeds_summary = sync_result.get("feeds_summary", {})
@@ -280,16 +289,18 @@ def main():
                     siemplify.LOGGER.info(
                         f"Generated ADK AI Executive Commentary ({len(ai_commentary)} chars); updating dashboard tile..."
                     )
-                    sync_result = tool_map["sync_secops_homepage_dashboard"](
-                        dashboard_title=dashboard_name,
+                    second_sync = tool_map["sync_secops_homepage_dashboard"](
+                        dashboard_name=dashboard_name,
                         dashboard_id=resolved_dash_id,
-                        community_categories=community_categories,
+                        community_categories=community_categories_list,
                         status_lookback_days=status_lookback_days,
                         max_release_notes=max_release_notes,
                         max_community_posts=max_community_posts,
                         include_tenant_health=include_tenant_health,
                         ai_executive_summary=ai_commentary,
                     )
+                    if isinstance(second_sync, dict) and not second_sync.get("error"):
+                        sync_result = second_sync
             except Exception as adk_exc:
                 siemplify.LOGGER.info(
                     f"Using built-in deterministic AI Executive Summary (ADK LLM synthesis skipped: {adk_exc})."

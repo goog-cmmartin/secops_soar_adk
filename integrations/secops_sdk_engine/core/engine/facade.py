@@ -7551,15 +7551,17 @@ class SecOpsEngine:
         status_lookback_days: int = 30,
         max_release_notes: int = 4,
         max_community_posts: int = 6,
-        community_categories: Optional[List[str]] = None,
+        community_categories: Optional[Any] = None,
         include_tenant_health: bool = True,
         ai_executive_summary: Optional[str] = None,
+        dashboard_title: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Creates or updates the Google SecOps Homepage Native Dashboard with Markdown, KPI Visualization, and Button widgets from live status, release notes, community feeds, and tenant telemetry."""
         from engine.workflows.homepage_dashboard import SyncSecOpsHomepageDashboardWorkflow
+        resolved_title = (dashboard_title or dashboard_name or "Google SecOps Homepage").strip()
         wf = SyncSecOpsHomepageDashboardWorkflow(adapter=self.adapter)
         return wf.execute(
-            dashboard_title=dashboard_name,
+            dashboard_title=resolved_title,
             dashboard_id=dashboard_id,
             status_lookback_days=status_lookback_days,
             max_release_notes=max_release_notes,

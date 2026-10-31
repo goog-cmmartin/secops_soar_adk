@@ -1,3 +1,12 @@
+- description: "Normalized dashboard_name / dashboard_title and comma-separated community_categories parameters in SyncSecOpsHomepageDashboardWorkflow and SecOpsEngine.sync_secops_homepage_dashboard."
+  version: 5.8
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-31"
 - description: "Added SyncSecOpsHomepageDashboardWorkflow (homepage_dashboard.py) with live Google Cloud Security Status, SecOps Release Notes, Security Community intelligence, Live Tenant Health telemetry, AI Executive Summary, and 3 native KPI counter cards, plus full chart layout grid patching on update_dashboard and query execution fixes on AddDashboardChartWorkflow."
   version: 5.7
   item_name: "SecOpsSDKEngine"

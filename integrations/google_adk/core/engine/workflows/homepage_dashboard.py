@@ -167,14 +167,21 @@ def fetch_secops_release_notes(
 
 
 def fetch_security_community_topics(
-    category_filters: Optional[List[str]] = None,
+    category_filters: Optional[Any] = None,
     max_items: int = 6,
     timeout_seconds: int = 15,
 ) -> Dict[str, Any]:
     """Fetches and filters the Google Cloud Security Community RSS feed by XML <link> path category."""
+    if isinstance(category_filters, str):
+        raw_filters = [p.strip() for p in category_filters.split(",") if p.strip()]
+    elif category_filters is not None:
+        raw_filters = list(category_filters)
+    else:
+        raw_filters = list(DEFAULT_COMMUNITY_CATEGORIES)
+
     allowed_categories = [
-        c.strip().lower().strip("/")
-        for c in (category_filters if category_filters is not None else DEFAULT_COMMUNITY_CATEGORIES)
+        str(c).strip().lower().strip("/")
+        for c in raw_filters
         if c and str(c).strip()
     ]
 
@@ -796,14 +803,17 @@ class SyncSecOpsHomepageDashboardWorkflow:
         self,
         dashboard_title: str = "Google SecOps Homepage",
         dashboard_id: Optional[str] = None,
-        community_categories: Optional[List[str]] = None,
+        community_categories: Optional[Any] = None,
         status_lookback_days: int = 30,
         max_release_notes: int = 4,
         max_community_posts: int = 6,
         include_tenant_health: bool = True,
         ai_executive_summary: Optional[str] = None,
+        dashboard_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Fetches live Status, Release Notes, Community feeds, and Tenant Health and syncs the Homepage Native Dashboard."""
+        if dashboard_name and str(dashboard_name).strip():
+            dashboard_title = str(dashboard_name).strip()
         now_utc = datetime.now(timezone.utc)
         refreshed_at_str = now_utc.strftime("%Y-%m-%d %H:%M UTC")
 
