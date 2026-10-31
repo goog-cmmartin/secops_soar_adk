@@ -105,7 +105,7 @@ The integration natively supports modern Gemini models:
 | Action | Description | Key Parameters |
 | :--- | :--- | :--- |
 | **`Ping`** | Validates API connectivity, credentials, and model availability. | `Model Name` |
-| **`Run ADK Agent`** | Executes a general-purpose ADK reasoning and analysis agent. | `User Prompt`, `Thinking Budget`, `Agent Name`, `Enable Google Search`, `Enable Memory` |
+| **`Run ADK Agent`** | Executes a general-purpose ADK reasoning and analysis agent with optional embedded `SecOpsEngine` (`32` native tools), Hosted MCP, Google Search, and Code Execution. | `User Prompt`, `Thinking Budget`, `Agent Name`, `Enable SecOps Engine Toolset`, `Enable Google Search`, `Enable Memory` |
 | **`Run Google Search Agent`** | Performs live web searches and OSINT threat intelligence research using native Google Search grounding. | `User Prompt`, `Thinking Budget`, `Enable Memory` |
 | **`Run Code Execution Agent`** | Executes dynamic Python code inside the Gemini model interpreter for rapid calculations and data analysis. | `User Prompt`, `Thinking Budget`, `Enable Memory` |
 | **`Run Code Execution Agent Sandbox`** | Executes Python code in a dedicated, isolated Vertex AI Agent Engine container sandbox. | `User Prompt`, `Thinking Budget`, `Agent Engine Resource Name` |
@@ -114,6 +114,27 @@ The integration natively supports modern Gemini models:
 | **`Run ADK GCS Agent`** | Autonomous agent equipped with Google Cloud Storage tools for reading and writing bucket artifacts. | `User Prompt`, `Thinking Budget`, `Bucket Name` |
 | **`Run ADK Skill Registry Agent`** | Dynamically discovers, loads, and executes remote security runbooks and skills from the GCP Skill Registry. | `User Prompt`, `Thinking Budget`, `Skill ID` |
 | **`Run ADK Agent Registry Agent`** | Discovers and invokes multi-agent configurations from the central GCP Agent Registry. | `User Prompt`, `Thinking Budget` |
+
+---
+
+## ⏱️ SOAR Scheduled & On-Demand Jobs
+
+| Job | Description | Key Parameters |
+| :--- | :--- | :--- |
+| **`Run ADK Autonomous Agent Job`** | Executes an autonomous Google ADK Agent on a recurring schedule or on-demand in SOAR Jobs Scheduler. Supports both **Autonomous Mission Mode** (auditing Data Tables, Native Dashboards, Playbooks, Rules, and UDM) and **Open Case Sweep Mode** (sweeping recent open SOAR cases, correlating silent detections, and posting Markdown reports to Case Walls). | `Prompt`, `Agent Name`, `Thinking Budget`, `Enable SecOps Engine Toolset`, `Enable Hosted MCP Toolset`, `Enable Google Search`, `Enable Code Execution`, `Sweep Recent Open Cases`, `Target Case IDs`, `Post Report to Case Wall` |
+
+---
+
+## 🛠️ Embedded `SecOpsEngine` Toolset (`32` Native Tools)
+
+When `Enable SecOps Engine Toolset` is enabled on **`Run ADK Agent`** or **`Run ADK Autonomous Agent Job`**, the agent is equipped with `32` native Python functions powered by the embedded `secops_engine_sdk`:
+
+- **UDM, Silent Detections & Entities (`4`)**: `correlate_silent_detections`, `search_udm_events`, `aggregate_udm_events`, `investigate_entity`
+- **YARA-L 2.0 Rules & Tuning (`3`)**: `get_detection_rule`, `list_detection_rules`, `find_top_noisy_rules`
+- **SOAR Cases & Case Wall (`5`)**: `list_soar_cases`, `investigate_soar_case`, `add_soar_case_comment`, `list_soar_case_comments`, `update_soar_case`
+- **Chronicle Data Tables (`7`)**: `list_data_tables`, `get_data_table`, `create_data_table`, `list_data_table_rows`, `add_data_table_rows`, `delete_data_table_row`, `audit_data_table_health`
+- **Chronicle Native Dashboards (`9`)**: `search_dashboards`, `get_dashboard`, `execute_dashboard_query`, `create_dashboard`, `update_dashboard`, `add_dashboard_chart`, `update_dashboard_chart`, `remove_dashboard_chart`, `audit_dashboard_health`
+- **SOAR Playbooks & Health Audits (`4`)**: `search_playbooks`, `get_playbook`, `audit_playbook_health`, `audit_playbook_decay`
 
 ---
 

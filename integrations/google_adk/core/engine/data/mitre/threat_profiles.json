@@ -1,0 +1,73 @@
+{
+  "global_baseline": {
+    "name": "Global Baseline (Generic Industry)",
+    "description": "A broad starting point covering the most prevalent techniques across all sectors.",
+    "relevant_techniques": 200,
+    "high_risk_techniques": {
+      "T1566": 5,
+      "T1059": 5,
+      "T1078": 5,
+      "T1021": 4,
+      "T1053": 4,
+      "T1133": 4,
+      "T1486": 5,
+      "T1003": 5,
+      "T1071": 4,
+      "T1547": 4
+    }
+  },
+  "financial_services": {
+    "name": "Financial Services (FIN7/APT38 Focus)",
+    "description": "Focus on credential access, lateral movement, and financial data exfiltration.",
+    "relevant_techniques": 120,
+    "high_risk_techniques": {
+      "T1059": 5,
+      "T1078": 5,
+      "T1566": 5,
+      "T1021": 4,
+      "T1003": 5
+    }
+  },
+  "cloud_native": {
+    "name": "Cloud-Native SaaS/PaaS Focus",
+    "description": "Focus on cloud API exploitation, container escapes, and SaaS identity theft.",
+    "relevant_techniques": 85,
+    "high_risk_techniques": {
+      "T1535": 5,
+      "T1098": 4,
+      "T1550": 5,
+      "T1537": 5,
+      "T1613": 4
+    }
+  },
+  "ransomware_defense": {
+    "name": "General Ransomware Mitigation",
+    "description": "Focus on initial access via phishing and large-scale data exfiltration/encryption.",
+    "relevant_techniques": 150,
+    "high_risk_techniques": {
+      "T1566": 5,
+      "T1486": 5,
+      "T1490": 5,
+      "T1083": 3,
+      "T1021": 4
+    }
+  },
+  "eu_public_finance": {
+    "name": "EU Public Financial Services (2025-2026 Focus)",
+    "description": "Prioritizes financially motivated extortion and state-sponsored espionage (RU/CN nexus).",
+    "relevant_techniques": 135,
+    "high_risk_techniques": {
+      "T1566.004": 5,
+      "T1190": 5,
+      "T1195": 5,
+      "T1059.001": 4,
+      "T1059.006": 4,
+      "T1219": 4,
+      "T1553": 4,
+      "T1557": 5,
+      "T1539": 5,
+      "T1530": 4,
+      "T1020": 4
+    }
+  }
+}

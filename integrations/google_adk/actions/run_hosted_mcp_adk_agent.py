@@ -75,14 +75,36 @@ def main():
             enable_memory=enable_memory, session_id=raw_session_id, case_id=getattr(siemplify, "case_id", None)
         )
 
-        mcp_toolset = manager.init_mcp_toolset(mcp_url=mcp_url, user_project=proj_id, tool_filter=tool_filter)
+        mcp_toolset = manager.init_mcp_toolset(
+            mcp_url=mcp_url,
+            user_project=proj_id,
+            tool_filter=tool_filter,
+            customer_id=cust_id,
+            region=region,
+        )
+
+        secops_engine_tools = manager.init_secops_engine_toolset(
+            customer_id=cust_id,
+            project_id=proj_id,
+            region=region,
+        )
 
         agent_instructions = (
-            f"You are a specialized MCP Agent connected to tools at {mcp_url or 'default gateway'}. "
-            f"Active Project: {proj_id}, Region: {region}. Execute MCP tools as needed to fulfill the request."
+            f"You are a specialized SecOps Incident Responder & Autonomous Agent. "
+            f"Active Project: {proj_id}, Region: {region}, Customer ID: {cust_id}. "
+            f"You are equipped with Google SecOps hosted MCP tools (executed via `mcp_executor(tool_name, arguments)`) "
+            f"AND direct SecOps SDK Engine tools:\n"
+            f"- `correlate_silent_detections(case_id, lookback_hours)`: Hunts for non-alerting detections and matching UDM events on case entities.\n"
+            f"- `search_udm_events(query, start_time, end_time, include_detections, receive_limit)`: Queries raw UDM telemetry and detection objects.\n"
+            f"- `get_detection_rule(rule_id)`: Fetches YARA-L 2.0 rule syntax and detection logic.\n"
+            f"- `mcp_executor(tool_name, arguments)`: Interacts with Google SecOps hosted MCP tools (e.g. get_case, list_case_alerts, add_case_comment).\n"
+            f"When investigating a case, start by checking the case and alerts, and ALWAYS correlate silent detections "
+            f"using `correlate_silent_detections` to discover the underlying payloads, execution logs, and full attack path."
         )
 
         tools = [mcp_toolset]
+        if secops_engine_tools:
+            tools.extend(secops_engine_tools)
         if memory_tools:
             tools.extend(memory_tools)
 
@@ -97,6 +119,8 @@ def main():
         )
 
         result_value = results.get("final_response", "")
+        if not result_value:
+            result_value = "Hosted MCP Agent completed analysis. (Check JSON Result for execution thoughts and metadata)."
         output_message = "Hosted MCP Agent successfully processed query."
 
         siemplify.result.add_result_json(results)

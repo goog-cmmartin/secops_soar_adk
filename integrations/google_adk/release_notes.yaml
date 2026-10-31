@@ -1,3 +1,84 @@
+- description: "Added Run ADK Autonomous Agent Job for scheduled and on-demand autonomous agent execution (with optional Open Case Sweep and Case Wall reporting), expanded the embedded SecOps SDK Engine toolset to 29 native tools (including SOAR Case & Alert management, Playbook search & health/decay audits, Data Table & Dashboard health audits, UDM statistical aggregation, Entity Investigation, and Noisy Rule discovery), and updated CorrelateSilentDetectionsWorkflow with case-age latency handling and stream detection metadata extraction."
+  version: 3.3
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-30"
+- description: "Synchronized embedded SecOps SDK Engine with Playbook, Job, and Native Dashboard write/mutation capabilities, and expanded Run ADK Agent toolset with 14 new Data Table CRUD/Read tools (list_data_tables, get_data_table, create_data_table, list_data_table_rows, add_data_table_rows, delete_data_table_row) and Native Dashboard CRUD/Query tools (search_dashboards, get_dashboard, execute_dashboard_query, create_dashboard, update_dashboard, add_dashboard_chart, update_dashboard_chart, remove_dashboard_chart)."
+  version: 3.2
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-30"
+- description: "Added 3-Tier Triage Classification taxonomy (Primary Verdict, Disposition/Sub-Classification, and Evidence Confidence) with disposition-driven remediation steps and interactive color-coded triage badges in the ADK Action Widget, plus per-turn HTTP timeout and 480s wall-clock budget protection against SOAR 629s process timeouts."
+  version: 3.1
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-30"
+- description: "Fixed UDM field redaction in search_udm_events and correlate_silent_detections caused by shallow prune_deep_object depth (max_depth=4), enriched correlate_silent_detections with full UDM event summaries, case alert rule IDs, and time window metadata, surfaced UDM search errors, and added a forced final synthesis pass when automatic function calling reaches maximum_remote_calls."
+  version: 3.0
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-29"
+- description: "Resolved empty final response bug during automatic function calling (AFC) with thinking budget enabled. Configured AutomaticFunctionCallingConfig with 25 remote calls, expanded token allowance to 8192 tokens to accommodate thinking budgets, added robust multi-layer response extraction with candidate/history/tool execution fallbacks, and wired SecOps SDK Engine tools into Run ADK Agent."
+  version: 2.6
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Integrated direct SecOps SDK Engine tools into Google ADK Agent: added correlate_silent_detections, search_udm_events, and get_detection_rule to overcome hosted Chronicle MCP detection limitations and enable autonomous end-to-end hunting for non-alerting malicious activity."
+  version: 2.5
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Resolved typing.Any isinstance runtime crash in Google GenAI automatic function calling for Hosted MCP Agent. Added live JSON-RPC tools/call execution against Chronicle MCP gateway with snake_case parameter normalization and default project/customer/region injection."
+  version: 2.4
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Added dedicated predefined HTML Action Widgets and dynamic JsonResult metadata across all Google ADK agent actions with standardized --soar-* CSS styling and automatic dark/light theme switching."
+  version: 2.3
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Linked predefined HTML Action Widget to Run ADK Agent, declared dynamic JsonResult schema metadata, and modernized styling with standardized --soar-* tokens and automatic light/dark mode theme synchronization."
+  version: 2.2
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
 - description: "Enabled native Google Search Grounding and Code Execution tool attachment in live Gemini generate_content calls, plus grounding metadata and query capture."
   version: 2.1
   item_name: "GoogleADK"

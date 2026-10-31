@@ -1,0 +1,80 @@
+creator: Christopher Martin
+description: Executes an autonomous Google ADK Agent on a recurring schedule or on-demand in Google SecOps SOAR with full access to the SecOps SDK Engine toolset (Silent Detection Correlation, UDM & Stats Search, Entity Investigation, Detection Rules, SOAR Cases, Data Tables, Native Dashboards, and Playbook Health Audits), optional Google Search grounding, Code Execution, and Hosted MCP.
+integration: GoogleADK
+name: Run ADK Autonomous Agent Job
+parameters:
+  - default_value: Autonomous_SecOps_ADK_Job_Agent
+    description: Identifier for the scheduled ADK agent execution.
+    is_mandatory: false
+    name: Agent Name
+    type: string
+  - default_value: Inspect recent open SOAR cases, correlate any unattached silent detections, check Data Tables and Native Dashboards for key findings, and produce a concise Markdown operational summary.
+    description: The mission instructions or analytical prompt for the ADK Agent to execute on each run.
+    is_mandatory: false
+    name: User Prompt
+    type: string
+  - default_value: ''
+    description: Optional comma-separated SOAR Case IDs (e.g. 108618,108462) to target or post the final Markdown report to.
+    is_mandatory: false
+    name: Target Case IDs
+    type: string
+  - default_value: false
+    description: If enabled (and Target Case IDs is blank), polls recent open SOAR cases within Lookback Minutes and runs the ADK Agent against each new case.
+    is_mandatory: false
+    name: Sweep Recent Open Cases
+    type: boolean
+  - default_value: false
+    description: If enabled, posts the ADK Agent's Markdown report to the SOAR Case Wall of each target/swept Case ID.
+    is_mandatory: false
+    name: Post Report to Case Wall
+    type: boolean
+  - default_value: '60'
+    description: Lookback time window in minutes when Sweep Recent Open Cases is enabled (set to 0 to evaluate the latest open cases regardless of age).
+    is_mandatory: false
+    name: Lookback Minutes
+    type: string
+  - default_value: '5'
+    description: Maximum number of open cases to evaluate per run when Sweep Recent Open Cases is enabled (1-25).
+    is_mandatory: false
+    name: Max Cases Per Run
+    type: string
+  - default_value: ''
+    description: Optional comma-separated case priorities when sweeping open cases (e.g. CRITICAL,HIGH). Leave blank for all priorities.
+    is_mandatory: false
+    name: Priority Filter
+    type: string
+  - default_value: false
+    description: If false (default), remembers previously processed Case IDs in job context when sweeping open cases so each case is only analyzed once.
+    is_mandatory: false
+    name: Force Re-Check Processed Cases
+    type: boolean
+  - default_value: true
+    description: Grants the ADK Agent access to the SecOps SDK Engine toolset (Silent Detection Correlation, UDM & Stats Search, Entity Investigation, Detection Rules, SOAR Cases, Data Tables, Native Dashboards, and Playbooks).
+    is_mandatory: false
+    name: Enable SecOps Engine Toolset
+    type: boolean
+  - default_value: false
+    description: Attaches the Hosted SecOps MCP gateway executor tool alongside local SecOps Engine tools.
+    is_mandatory: false
+    name: Enable Hosted MCP Toolset
+    type: boolean
+  - default_value: false
+    description: Enables Google Search OSINT grounding during the agent execution.
+    is_mandatory: false
+    name: Enable Google Search
+    type: boolean
+  - default_value: false
+    description: Enables the Gemini Python Code Execution sandbox during the agent execution.
+    is_mandatory: false
+    name: Enable Code Execution
+    type: boolean
+  - default_value: false
+    description: Enables persistent ADK session memory across scheduled job runs.
+    is_mandatory: false
+    name: Enable Memory
+    type: boolean
+  - default_value: '0'
+    description: Token budget for Gemini reasoning/thinking (0 for fast execution, or e.g. 2048 for deep multi-step reasoning).
+    is_mandatory: false
+    name: Thinking Budget
+    type: string

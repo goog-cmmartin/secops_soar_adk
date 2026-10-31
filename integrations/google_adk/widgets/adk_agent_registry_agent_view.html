@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Registry Agent Analysis - SecOps SOAR Widget</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* ==========================================================================
+       Google SecOps SOAR Theme Variables (Self-contained, no CDN dependencies)
+       ========================================================================== */
+    :root,
+    [data-theme="light"],
+    body.light {
+      --soar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Rubik", Helvetica, Arial, sans-serif;
+      --soar-font-mono: ui-monospace, SFMono-Regular, "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+      --soar-bg-page: #ffffff;
+      --soar-bg-card: #ffffff;
+      --soar-bg-subtle: rgba(0, 0, 0, 0.04);
+      --soar-border: #e5e7eb;
+      --soar-border-strong: #d1d5db;
+      --soar-text-primary: #111827;
+      --soar-text-secondary: #4b5563;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #2563eb;
+      --soar-accent-hover: #1d4ed8;
+      --soar-accent-subtle: rgba(37, 99, 235, 0.1);
+
+      /* Verdicts */
+      --verdict-malicious-bg: #fee2e2;
+      --verdict-malicious-text: #dc2626;
+      --verdict-malicious-border: #fca5a5;
+
+      --verdict-benign-bg: #ecfdf5;
+      --verdict-benign-text: #059669;
+      --verdict-benign-border: #a7f3d0;
+
+      /* Severities */
+      --sev-critical-bg: #fef2f2;
+      --sev-critical-text: #dc2626;
+      --sev-critical-border: #fca5a5;
+      --sev-high-bg: #fff7ed;
+      --sev-high-text: #ea580c;
+      --sev-high-border: #fdba74;
+      --sev-medium-bg: #fffbeb;
+      --sev-medium-text: #d97706;
+      --sev-medium-border: #fde68a;
+      --sev-low-bg: #f3f4f6;
+      --sev-low-text: #6b7280;
+      --sev-low-border: #d1d5db;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --soar-bg-page: #161626;
+        --soar-bg-card: #161626;
+        --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+        --soar-border: #293140;
+        --soar-border-strong: #384357;
+        --soar-text-primary: #f3f4f6;
+        --soar-text-secondary: #9ca3af;
+        --soar-text-muted: #6b7280;
+        --soar-accent: #3b82f6;
+        --soar-accent-hover: #60a5fa;
+        --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+        --verdict-malicious-bg: #3b191d;
+        --verdict-malicious-text: #ff8589;
+        --verdict-malicious-border: #8c1d28;
+
+        --verdict-benign-bg: #132d21;
+        --verdict-benign-text: #6ee7b7;
+        --verdict-benign-border: #065f46;
+
+        --sev-critical-bg: #450a0a;
+        --sev-critical-text: #f87171;
+        --sev-critical-border: #7f1d1d;
+        --sev-high-bg: #431407;
+        --sev-high-text: #fb923c;
+        --sev-high-border: #7c2d12;
+        --sev-medium-bg: #451a03;
+        --sev-medium-text: #fbbf24;
+        --sev-medium-border: #78350f;
+        --sev-low-bg: #1f2937;
+        --sev-low-text: #9ca3af;
+        --sev-low-border: #374151;
+      }
+    }
+
+    [data-theme="dark"], body.dark {
+      --soar-bg-page: #161626;
+      --soar-bg-card: #161626;
+      --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+      --soar-border: #293140;
+      --soar-border-strong: #384357;
+      --soar-text-primary: #f3f4f6;
+      --soar-text-secondary: #9ca3af;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #3b82f6;
+      --soar-accent-hover: #60a5fa;
+      --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+      --verdict-malicious-bg: #3b191d;
+      --verdict-malicious-text: #ff8589;
+      --verdict-malicious-border: #8c1d28;
+
+      --verdict-benign-bg: #132d21;
+      --verdict-benign-text: #6ee7b7;
+      --verdict-benign-border: #065f46;
+
+      --sev-critical-bg: #450a0a;
+      --sev-critical-text: #f87171;
+      --sev-critical-border: #7f1d1d;
+      --sev-high-bg: #431407;
+      --sev-high-text: #fb923c;
+      --sev-high-border: #7c2d12;
+      --sev-medium-bg: #451a03;
+      --sev-medium-text: #fbbf24;
+      --sev-medium-border: #78350f;
+      --sev-low-bg: #1f2937;
+      --sev-low-text: #9ca3af;
+      --sev-low-border: #374151;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background-color: var(--soar-bg-page, #ffffff);
+      background: var(--soar-bg-page, #ffffff);
+      font-family: var(--soar-font);
+      color: var(--soar-text-primary);
+      padding: 0.75rem;
+      line-height: 1.5;
+      font-size: 0.8125rem;
+      width: 100%;
+      height: auto;
+    }
+
+    .widget-container {
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    /* Main Card */
+    .adk-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header Row */
+    .card-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--soar-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .header-title-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .agent-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--soar-accent);
+      background: var(--soar-accent-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--soar-accent);
+      flex-shrink: 0;
+    }
+    .agent-avatar svg {
+      width: 20px;
+      height: 20px;
+    }
+    .title-texts {
+      display: flex;
+      flex-direction: column;
+    }
+    .agent-name-label {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--soar-text-primary);
+      letter-spacing: -0.01em;
+    }
+    .agent-subtitle {
+      font-size: 0.72rem;
+      color: var(--soar-text-muted);
+    }
+
+    /* Header Actions */
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .badge-accent {
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      border: 1px solid var(--soar-accent);
+    }
+    .badge-muted {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+    }
+    .btn-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-copy:hover {
+      background: var(--soar-accent-subtle);
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    /* Body Markdown Area */
+    .card-body {
+      padding: 1.25rem 1.5rem;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: var(--soar-text-primary);
+      word-break: break-word;
+    }
+
+    /* Markdown Styling */
+    .card-body h1, .card-body h2, .card-body h3, .card-body h4 {
+      color: var(--soar-text-primary);
+      font-weight: 700;
+      margin-top: 1rem;
+      margin-bottom: 0.5rem;
+      line-height: 1.3;
+    }
+    .card-body h1 { font-size: 1.15rem; }
+    .card-body h2 { font-size: 1.05rem; }
+    .card-body h3 { font-size: 0.95rem; border-bottom: 1px solid var(--soar-border); padding-bottom: 0.25rem; }
+    .card-body p { margin-bottom: 0.75rem; color: var(--soar-text-secondary); }
+    .card-body ul, .card-body ol { margin-bottom: 0.75rem; padding-left: 1.25rem; color: var(--soar-text-secondary); }
+    .card-body li { margin-bottom: 0.25rem; }
+    .card-body strong { color: var(--soar-text-primary); font-weight: 600; }
+    .card-body blockquote {
+      border-left: 3px solid var(--soar-accent);
+      padding-left: 0.75rem;
+      color: var(--soar-text-muted);
+      margin: 0.75rem 0;
+      font-style: italic;
+    }
+    .card-body code {
+      font-family: var(--soar-font-mono);
+      font-size: 0.78rem;
+      background: var(--soar-bg-subtle);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+      border: 1px solid var(--soar-border);
+      color: var(--soar-accent);
+    }
+    .card-body pre {
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      overflow-x: auto;
+      margin-bottom: 0.75rem;
+    }
+    .card-body pre code {
+      background: transparent;
+      padding: 0;
+      border: none;
+      color: var(--soar-text-primary);
+    }
+    .card-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.75rem 0;
+      font-size: 0.8rem;
+    }
+    .card-body th, .card-body td {
+      border: 1px solid var(--soar-border);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+    .card-body th {
+      background: var(--soar-bg-subtle);
+      font-weight: 600;
+      color: var(--soar-text-muted);
+    }
+
+    /* Thought Trace Accordion */
+    .thought-details {
+      margin-top: 1rem;
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 0.6rem 0.85rem;
+    }
+    .thought-summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.75rem;
+      color: var(--soar-text-secondary);
+      outline: none;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .thought-summary:hover {
+      color: var(--soar-accent);
+    }
+    .thought-list {
+      margin-top: 0.5rem;
+      padding-left: 1.25rem;
+      font-size: 0.75rem;
+      color: var(--soar-text-muted);
+      font-family: var(--soar-font-mono);
+      line-height: 1.5;
+    }
+
+    /* Footer Row */
+    .card-footer {
+      padding: 0.6rem 1.25rem;
+      background: var(--soar-bg-subtle);
+      border-top: 1px solid var(--soar-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      color: var(--soar-text-muted);
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .footer-left {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .ai-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-weight: 600;
+      color: var(--soar-accent);
+    }
+    .ai-badge svg {
+      width: 13px;
+      height: 13px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="widget-container">
+    <div class="adk-card">
+      <!-- Card Header -->
+      <div class="card-header">
+        <div class="header-title-group">
+          <div class="agent-avatar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="title-texts">
+            <span id="agent-title" class="agent-name-label">Agent Registry Agent Analysis</span>
+            <span id="agent-subtitle" class="agent-subtitle">Vertex AI Agent Registry (A2A) &bull; Distributed Reasoning</span>
+          </div>
+        </div>
+
+        <div class="header-actions">
+          <span id="model-badge" class="badge badge-accent">Agent Registry</span>
+          <span id="session-badge" class="badge badge-muted" style="display:none;"></span>
+          <button id="copy-btn" class="btn-copy" onclick="copyReportText()" style="display:none;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy Markdown</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Card Body Content -->
+      <div id="content" class="card-body">
+        <p style="color: var(--soar-text-muted); text-align: center; padding: 1.5rem 0;">
+          Waiting for ADK agent analysis...
+        </p>
+      </div>
+
+      <!-- Card Footer -->
+      <div class="card-footer">
+        <div class="footer-left">
+          <span class="ai-badge">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L13.8 8.2L20 10L13.8 11.8L12 18L10.2 11.8L4 10L10.2 8.2L12 2Z"/>
+            </svg>
+            <span>Google ADK Reasoning Engine</span>
+          </span>
+        </div>
+        <div id="status-indicator">
+          <span>Status: Completed</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Raw context holder -->
+  <div id="raw-data" style="display:none;">[{stepInstanceName}.JsonResult]</div>
+
+  <script>
+    // =========================================================================
+    // Google SecOps SOAR Theme Synchronization Bridge
+    // =========================================================================
+    const SOAR_PALETTES = {
+      dark: {
+        theme: 'dark',
+        '--soar-bg-page': '#161626',
+        '--soar-bg-card': '#161626',
+        '--soar-border': '#293140',
+        '--soar-border-strong': '#384357',
+        '--soar-text-primary': '#f3f4f6',
+        '--soar-text-secondary': '#9ca3af',
+        '--soar-text-muted': '#6b7280'
+      },
+      light: {
+        theme: 'light',
+        '--soar-bg-page': '#ffffff',
+        '--soar-bg-card': '#ffffff',
+        '--soar-border': '#e5e7eb',
+        '--soar-border-strong': '#d1d5db',
+        '--soar-text-primary': '#111827',
+        '--soar-text-secondary': '#4b5563',
+        '--soar-text-muted': '#6b7280'
+      }
+    };
+
+    function isColorDark(color) {
+      if (!color) return false;
+      let r = 255, g = 255, b = 255;
+      color = String(color).trim();
+      if (color.startsWith('#')) {
+        let hex = color.replace('#', '');
+        if (hex.length === 3) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        if (hex.length >= 6) {
+          r = parseInt(hex.substring(0, 2), 16);
+          g = parseInt(hex.substring(2, 4), 16);
+          b = parseInt(hex.substring(4, 6), 16);
+        }
+      } else if (color.startsWith('rgb')) {
+        const parts = color.match(/\d+/g);
+        if (parts && parts.length >= 3) {
+          r = parseInt(parts[0], 10);
+          g = parseInt(parts[1], 10);
+          b = parseInt(parts[2], 10);
+        }
+      }
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+      return luminance < 140;
+    }
+
+    function applySoarTheme(themeKeyOrObj) {
+      const mode = typeof themeKeyOrObj === 'string' ? themeKeyOrObj : (themeKeyOrObj.theme || 'light');
+      document.documentElement.setAttribute('data-theme', mode);
+      document.body.className = mode;
+
+      const palette = typeof themeKeyOrObj === 'object' ? themeKeyOrObj : (SOAR_PALETTES[mode] || SOAR_PALETTES.light);
+      for (const [key, value] of Object.entries(palette)) {
+        if (key.startsWith('--')) {
+          document.documentElement.style.setProperty(key, value);
+          document.body.style.setProperty(key, value);
+        }
+      }
+      document.body.style.backgroundColor = palette['--soar-bg-page'] || (mode === 'dark' ? '#161626' : '#ffffff');
+    }
+
+    // Google SecOps SOAR message listeners
+    window.addEventListener('message', evt => {
+      if (evt && evt.data) {
+        if (evt.data.background) {
+          const isDark = isColorDark(evt.data.background);
+          applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+        }
+        if (evt.data.actionResult || evt.data.final_response || evt.data.response) {
+          renderReport(evt.data.actionResult || evt.data);
+        }
+      }
+    });
+
+    onmessage = evt => {
+      if (evt && evt.data && evt.data.background) {
+        const isDark = isColorDark(evt.data.background);
+        applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+      }
+    };
+
+    // Initial mount fallback
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      applySoarTheme(SOAR_PALETTES.dark);
+    } else {
+      applySoarTheme(SOAR_PALETTES.light);
+    }
+
+    // =========================================================================
+    // Markdown Fallback Parser
+    // =========================================================================
+    function parseMarkdown(md) {
+      if (typeof marked !== "undefined" && marked.parse) {
+        try { return marked.parse(md); } catch (e) {}
+      }
+      // Simple offline regex renderer fallback
+      let html = md
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+        .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+        .replace(/`([^`]+)`/gim, '<code>$1</code>')
+        .replace(/^\s*\-\s+(.*$)/gim, '<li>$1</li>')
+        .replace(/^\s*\*\s+(.*$)/gim, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>)/gim, '<ul>$1</ul>')
+        .replace(/\n\n/gim, '<p></p>')
+        .replace(/\n/gim, '<br>');
+      return html;
+    }
+
+    let cachedMarkdown = "";
+    function copyReportText() {
+      if (!cachedMarkdown) return;
+      navigator.clipboard.writeText(cachedMarkdown).then(() => {
+        const btn = document.getElementById('copy-btn');
+        const orig = btn.innerHTML;
+        btn.innerHTML = "<span>Copied!</span>";
+        setTimeout(() => { btn.innerHTML = orig; }, 1800);
+      });
+    }
+
+    // =========================================================================
+    // Report Data Parsing & Rendering
+    // =========================================================================
+    function extractPayload(input) {
+      if (!input) return null;
+      let data = input;
+      if (typeof data === "string") {
+        let trimmed = data.trim();
+        if (trimmed.startsWith("[") && trimmed.includes(".JsonResult")) return null;
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+          try { data = JSON.parse(trimmed); } catch (e) {}
+        }
+      }
+      return data;
+    }
+
+    function renderReport(payloadOverride) {
+      let payload = payloadOverride;
+      if (!payload) {
+        let rawContent = "";
+        try {
+          rawContent = [{stepInstanceName}.JsonResult];
+        } catch (e) {
+          const rawEl = document.getElementById('raw-data');
+          rawContent = rawEl ? rawEl.textContent : "";
+        }
+        payload = extractPayload(rawContent);
+      }
+
+      const contentDiv = document.getElementById('content');
+      const copyBtn = document.getElementById('copy-btn');
+      const agentTitleEl = document.getElementById('agent-title');
+      const modelBadgeEl = document.getElementById('model-badge');
+      const sessionBadgeEl = document.getElementById('session-badge');
+
+      if (!payload) {
+        contentDiv.innerHTML = `<p style="color: var(--soar-text-muted); text-align: center; padding: 1.5rem 0;">Awaiting ADK agent execution or data context...</p>`;
+        copyBtn.style.display = "none";
+        return;
+      }
+
+      let agentName = "Agent Registry Agent Analysis";
+      let model = "Google ADK";
+      let sessionId = "";
+      let markdownText = "";
+      let thoughts = [];
+      let groundingSources = [];
+
+      if (typeof payload === "object") {
+        agentName = payload.agent_name || payload.name || "Agent Registry Agent Analysis";
+        model = payload.model || "Google ADK";
+        sessionId = payload.session_id || "";
+        markdownText = payload.final_response || payload.response || payload.output || payload.analysis || payload.summary || "";
+        thoughts = payload.thoughts || payload.thought_trace || [];
+        groundingSources = payload.grounding_sources || [];
+
+        if (!markdownText && !thoughts.length) {
+          markdownText = JSON.stringify(payload, null, 2);
+        }
+      } else if (typeof payload === "string") {
+        markdownText = payload;
+      }
+
+      agentTitleEl.textContent = agentName.replace(/_/g, ' ');
+      modelBadgeEl.textContent = model;
+      if (sessionId) {
+        sessionBadgeEl.textContent = "Session: " + (sessionId.length > 14 ? sessionId.substring(0, 14) + '...' : sessionId);
+        sessionBadgeEl.style.display = "inline-flex";
+      }
+
+      cachedMarkdown = markdownText;
+      copyBtn.style.display = markdownText ? "inline-flex" : "none";
+
+      let finalHtml = parseMarkdown(markdownText);
+
+      // Append thought trace accordion if present
+      if (Array.isArray(thoughts) && thoughts.length > 0) {
+        finalHtml += `
+          <details class="thought-details">
+            <summary class="thought-summary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 16v-4"></path>
+                <path d="M12 8h.01"></path>
+              </svg>
+              <span>Autonomous Reasoning Thought Trace (${thoughts.length} steps)</span>
+            </summary>
+            <ul class="thought-list">
+              ${thoughts.map(t => `<li>${typeof t === 'string' ? t : JSON.stringify(t)}</li>`).join('')}
+            </ul>
+          </details>
+        `;
+      }
+
+      // Append Grounded Sources if present
+      if (Array.isArray(groundingSources) && groundingSources.length > 0) {
+        finalHtml += `
+          <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--soar-border); font-size: 0.75rem;">
+            <strong style="color: var(--soar-text-primary);">Grounded Sources Referenced:</strong>
+            <ul style="margin-top: 0.35rem; padding-left: 1.25rem;">
+              ${groundingSources.map(s => `<li><a href="${s.uri || '#'}" target="_blank" style="color: var(--soar-accent); text-decoration: none;">${s.title || s.uri}</a></li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+
+      contentDiv.innerHTML = finalHtml || `<p style="color: var(--soar-text-muted);">Analysis completed without textual body.</p>`;
+    }
+
+    window.addEventListener('DOMContentLoaded', () => renderReport());
+  </script>
+
+</body>
+</html>

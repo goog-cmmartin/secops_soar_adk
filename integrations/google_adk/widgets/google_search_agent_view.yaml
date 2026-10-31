@@ -1,0 +1,18 @@
+action_identifier: Run Google Search Agent
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 500
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: half_width
+description: Renders Google Search OSINT agent thought trace, grounded citations,
+  and markdown research report.
+scope: alert
+title: Google Search OSINT Analysis
+type: html

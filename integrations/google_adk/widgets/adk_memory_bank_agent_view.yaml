@@ -1,0 +1,18 @@
+action_identifier: Run ADK Memory Bank Agent
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 500
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: half_width
+description: Renders ADK Memory Bank agent contextual recall trace, stateful investigation
+  analysis, and markdown report.
+scope: alert
+title: Memory Bank Agent Analysis
+type: html

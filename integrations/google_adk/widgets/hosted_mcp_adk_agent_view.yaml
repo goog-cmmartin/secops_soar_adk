@@ -1,0 +1,18 @@
+action_identifier: Run Hosted MCP ADK Agent
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 500
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: half_width
+description: Renders Hosted MCP ADK agent thought trace, tool execution results, and
+  markdown report.
+scope: alert
+title: Hosted MCP ADK Agent Analysis
+type: html

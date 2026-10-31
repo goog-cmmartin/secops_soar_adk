@@ -1,7 +1,10 @@
 creator: admin
 description: Deploys an OSINT researcher agent grounded with real-time Google Search
   results.
-dynamic_results_metadata: []
+dynamic_results_metadata:
+- result_example_path: resources/run_adk_agent_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
 integration_identifier: GoogleADK
 is_async: true
 name: Run Google Search Agent

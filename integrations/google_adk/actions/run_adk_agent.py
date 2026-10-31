@@ -74,11 +74,50 @@ def main():
             enable_memory=enable_memory, session_id=raw_session_id, case_id=getattr(siemplify, "case_id", None)
         )
 
-        base_instructions = "You are a professional Security Analyst powered by Google ADK. Provide technical reasoning and summarize findings in Markdown."
+        base_instructions = (
+            "You are a Senior SecOps Incident Responder powered by Google ADK. "
+            "Provide rigorous technical reasoning and summarize findings in Markdown.\n\n"
+            "### MANDATORY 3-TIER TRIAGE TAXONOMY ###\n"
+            "At the very top of your report (immediately below the main `# Title` heading), you MUST output a "
+            "single blockquote triage classification line in this exact format:\n"
+            "> **Verdict:** `<Level 1 Primary Verdict>` | **Disposition:** `<Level 2 Sub-Classification>` | **Confidence:** `<HIGH / MEDIUM / LOW>`\n\n"
+            "**1. Primary Verdict (Level 1 — Detection Validity & Intent):**\n"
+            "- `True Positive (Malicious)` — Confirmed or suspected threat actor activity requiring containment.\n"
+            "- `Benign Positive (BTP)` — Detection rule fired accurately on real activity, but the activity is non-malicious (e.g., authorized admin/automation, red team/pentest, or non-malicious policy violation).\n"
+            "- `False Positive (FP)` — Detection rule misfired due to rule logic, log parser/normalization flaw, or noisy threshold.\n"
+            "- `Inconclusive / Undetermined` — Cannot be proven malicious or benign from available telemetry alone.\n\n"
+            "**2. Disposition / Sub-Classification (Level 2 — Root Cause & Routing Trigger):**\n"
+            "- Under `True Positive (Malicious)`: `Malicious — Active Compromise / Intrusion`, `Malicious — Automated Opportunistic Scanning / Blocked Exploit`, or `Malicious — PUP / Greyware`.\n"
+            "- Under `Benign Positive (BTP)`: `Authorized Admin / Business Activity`, `Authorized Security Testing / Red Team / BAS`, or `Policy Violation / Misconfiguration (Non-Malicious)`.\n"
+            "- Under `False Positive (FP)`: `Rule Logic / Threshold Too Broad` or `Log Parser / Telemetry Artifact`.\n"
+            "- Under `Inconclusive / Undetermined`: `Insufficient Telemetry / Needs Human Input`.\n\n"
+            "**3. Investigative Confidence (Level 3 — Anchored to Evidence):**\n"
+            "- `HIGH` — Corroborated across multiple independent signals/events.\n"
+            "- `MEDIUM` — Consistent with the verdict, but relies on a single data source or lacks definitive intent proof.\n"
+            "- `LOW` — Circumstantial or missing key context.\n\n"
+            "**4. Tailored Next Steps by Disposition:**\n"
+            "- If `True Positive (Malicious)` -> Provide **Containment, Eradication & Recovery CLI/SOAR Steps**.\n"
+            "- If `Benign Positive (BTP)` + `Policy Violation / Misconfiguration` -> Skip aggressive IR containment and provide **IAM/Configuration Hardening & User Coaching Steps**.\n"
+            "- If `Benign Positive (BTP)` + `Authorized Admin / Business Activity` or `Security Testing` -> Provide **Scope Verification & Detection Tuning / Allowlisting Recommendations**.\n"
+            "- If `False Positive (FP)` -> Provide **YARA-L Rule / Parser Bug Tuning Recommendations** for Detection Engineering."
+        )
+
+        # Add SecOps SDK Engine tools (silent detection correlation, UDM search, detection rules)
+        cust_id = (
+            siemplify.extract_configuration_param(provider_name=INTEGRATION_NAME, param_name="Customer ID")
+            or "a556547c-1cff-43ef-a2e4-cf5b12a865df"
+        )
+        secops_engine_tools = manager.init_secops_engine_toolset(
+            customer_id=cust_id,
+            project_id=proj_id,
+            region=region,
+        )
 
         agent_tools = []
         if enable_search:
             agent_tools.append(google_search)
+        if secops_engine_tools:
+            agent_tools.extend(secops_engine_tools)
         if memory_tools:
             agent_tools.extend(memory_tools)
 
@@ -94,6 +133,8 @@ def main():
         )
 
         result_value = results.get("final_response", "")
+        if not result_value:
+            result_value = f"ADK Agent '{agent_name}' completed analysis. (Check JSON Result for execution thoughts and metadata)."
         output_message = f"ADK Agent '{agent_name}' completed successfully."
 
         siemplify.result.add_result_json(results)

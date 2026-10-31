@@ -1,272 +1,802 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google ADK Agent Analysis</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google ADK Agent Analysis - SecOps SOAR Widget</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* ==========================================================================
+       Google SecOps SOAR Theme Variables (Self-contained, no CDN dependencies)
+       ========================================================================== */
+    :root,
+    [data-theme="light"],
+    body.light {
+      --soar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Rubik", Helvetica, Arial, sans-serif;
+      --soar-font-mono: ui-monospace, SFMono-Regular, "Fira Code", Menlo, Monaco, Consolas, monospace;
 
-    <!-- 1. External Libraries -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+      --soar-bg-page: #ffffff;
+      --soar-bg-card: #ffffff;
+      --soar-bg-subtle: rgba(0, 0, 0, 0.04);
+      --soar-border: #e5e7eb;
+      --soar-border-strong: #d1d5db;
+      --soar-text-primary: #111827;
+      --soar-text-secondary: #4b5563;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #2563eb;
+      --soar-accent-hover: #1d4ed8;
+      --soar-accent-subtle: rgba(37, 99, 235, 0.1);
 
-    <!-- 2. Configure Tailwind Theming -->
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'background': 'var(--widget-bg-color)',
-                        'foreground': 'var(--widget-foreground-color)',
-                        'card': 'var(--widget-card-color)',
-                        'card-foreground': 'var(--widget-card-foreground-color)',
-                        'primary': 'var(--widget-primary-color)',
-                        'primary-foreground': 'var(--widget-primary-foreground-color)',
-                        'secondary': 'var(--widget-secondary-color)',
-                        'secondary-foreground': 'var(--widget-secondary-foreground-color)',
-                        'muted': 'var(--widget-muted-color)',
-                        'muted-foreground': 'var(--widget-muted-foreground-color)',
-                        'accent': 'var(--widget-accent-color)',
-                        'accent-foreground': 'var(--widget-accent-foreground-color)',
-                        'border': 'var(--widget-border-color)',
-                        'input': 'var(--widget-input-color)',
-                    }
-                }
-            }
-        }
-    </script>
+      /* Verdicts */
+      --verdict-malicious-bg: #fee2e2;
+      --verdict-malicious-text: #dc2626;
+      --verdict-malicious-border: #fca5a5;
 
-    <!-- 3. Base Styles & Markdown Resets -->
-    <style type="text/tailwindcss">
-        @layer base {
-            body {
-                --widget-bg-color: #ffffff;
-                --widget-foreground-color: #020817;
-                --widget-card-color: #ffffff;
-                --widget-card-foreground-color: #020817;
-                --widget-primary-color: #1a73e8;
-                --widget-primary-foreground-color: #ffffff;
-                --widget-secondary-color: #f1f5f9;
-                --widget-secondary-foreground-color: #0f172a;
-                --widget-muted-color: #f1f5f9;
-                --widget-muted-foreground-color: #64748b;
-                --widget-accent-color: #f1f5f9;
-                --widget-accent-foreground-color: #0f172a;
-                --widget-border-color: #e2e8f0;
-                --widget-input-color: #e2e8f0;
-                @apply bg-background text-foreground;
-            }
+      --verdict-benign-bg: #ecfdf5;
+      --verdict-benign-text: #059669;
+      --verdict-benign-border: #a7f3d0;
 
-            /* Markdown Content Styling */
-            #content h1 { @apply text-xl font-bold mt-4 mb-2 text-foreground; }
-            #content h2 { @apply text-lg font-bold mt-4 mb-2 text-foreground; }
-            #content h3 { @apply text-base font-bold mt-4 mb-2 border-b border-border pb-1 text-primary; }
-            #content p { @apply mb-3 leading-relaxed; }
-            #content ul { @apply list-disc pl-5 mb-3 space-y-1; }
-            #content ol { @apply list-decimal pl-5 mb-3 space-y-1; }
-            #content code { @apply bg-muted text-secondary-foreground px-1.5 py-0.5 rounded font-mono text-sm; }
-            #content pre { @apply bg-muted text-secondary-foreground p-3 rounded-lg font-mono text-xs overflow-x-auto mb-3; }
-            #content blockquote { @apply border-l-4 border-primary pl-3 italic text-muted-foreground my-2; }
-            #content table { @apply w-full border-collapse my-3 text-xs md:text-sm; }
-            #content th { @apply border border-border px-3 py-1.5 bg-muted font-semibold text-left; }
-            #content td { @apply border border-border px-3 py-1.5; }
-            #content strong { @apply font-semibold text-foreground; }
-        }
-    </style>
+      /* Severities */
+      --sev-critical-bg: #fef2f2;
+      --sev-critical-text: #dc2626;
+      --sev-critical-border: #fca5a5;
+      --sev-high-bg: #fff7ed;
+      --sev-high-text: #ea580c;
+      --sev-high-border: #fdba74;
+      --sev-medium-bg: #fffbeb;
+      --sev-medium-text: #d97706;
+      --sev-medium-border: #fde68a;
+      --sev-low-bg: #f3f4f6;
+      --sev-low-text: #6b7280;
+      --sev-low-border: #d1d5db;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --soar-bg-page: #161626;
+        --soar-bg-card: #161626;
+        --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+        --soar-border: #293140;
+        --soar-border-strong: #384357;
+        --soar-text-primary: #f3f4f6;
+        --soar-text-secondary: #9ca3af;
+        --soar-text-muted: #6b7280;
+        --soar-accent: #3b82f6;
+        --soar-accent-hover: #60a5fa;
+        --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+        --verdict-malicious-bg: #3b191d;
+        --verdict-malicious-text: #ff8589;
+        --verdict-malicious-border: #8c1d28;
+
+        --verdict-benign-bg: #132d21;
+        --verdict-benign-text: #6ee7b7;
+        --verdict-benign-border: #065f46;
+
+        --sev-critical-bg: #450a0a;
+        --sev-critical-text: #f87171;
+        --sev-critical-border: #7f1d1d;
+        --sev-high-bg: #431407;
+        --sev-high-text: #fb923c;
+        --sev-high-border: #7c2d12;
+        --sev-medium-bg: #451a03;
+        --sev-medium-text: #fbbf24;
+        --sev-medium-border: #78350f;
+        --sev-low-bg: #1f2937;
+        --sev-low-text: #9ca3af;
+        --sev-low-border: #374151;
+      }
+    }
+
+    [data-theme="dark"], body.dark {
+      --soar-bg-page: #161626;
+      --soar-bg-card: #161626;
+      --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+      --soar-border: #293140;
+      --soar-border-strong: #384357;
+      --soar-text-primary: #f3f4f6;
+      --soar-text-secondary: #9ca3af;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #3b82f6;
+      --soar-accent-hover: #60a5fa;
+      --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+      --verdict-malicious-bg: #3b191d;
+      --verdict-malicious-text: #ff8589;
+      --verdict-malicious-border: #8c1d28;
+
+      --verdict-benign-bg: #132d21;
+      --verdict-benign-text: #6ee7b7;
+      --verdict-benign-border: #065f46;
+
+      --sev-critical-bg: #450a0a;
+      --sev-critical-text: #f87171;
+      --sev-critical-border: #7f1d1d;
+      --sev-high-bg: #431407;
+      --sev-high-text: #fb923c;
+      --sev-high-border: #7c2d12;
+      --sev-medium-bg: #451a03;
+      --sev-medium-text: #fbbf24;
+      --sev-medium-border: #78350f;
+      --sev-low-bg: #1f2937;
+      --sev-low-text: #9ca3af;
+      --sev-low-border: #374151;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background-color: var(--soar-bg-page, #ffffff);
+      background: var(--soar-bg-page, #ffffff);
+      font-family: var(--soar-font);
+      color: var(--soar-text-primary);
+      padding: 0.75rem;
+      line-height: 1.5;
+      font-size: 0.8125rem;
+      width: 100%;
+      height: auto;
+    }
+
+    .widget-container {
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    /* Main Card */
+    .adk-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header Row */
+    .card-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--soar-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .header-title-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .agent-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--soar-accent);
+      background: var(--soar-accent-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--soar-accent);
+      flex-shrink: 0;
+    }
+    .agent-avatar svg {
+      width: 20px;
+      height: 20px;
+    }
+    .title-texts {
+      display: flex;
+      flex-direction: column;
+    }
+    .agent-name-label {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--soar-text-primary);
+      letter-spacing: -0.01em;
+    }
+    .agent-subtitle {
+      font-size: 0.72rem;
+      color: var(--soar-text-muted);
+    }
+
+    /* Header Actions */
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .badge-accent {
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      border: 1px solid var(--soar-accent);
+    }
+    .badge-muted {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+    }
+    .badge-malicious {
+      background: var(--verdict-malicious-bg);
+      color: var(--verdict-malicious-text);
+      border: 1px solid var(--verdict-malicious-border);
+    }
+    .badge-btp {
+      background: var(--sev-medium-bg);
+      color: var(--sev-medium-text);
+      border: 1px solid var(--sev-medium-border);
+    }
+    .badge-fp {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border-strong);
+    }
+    .badge-inconclusive {
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      border: 1px solid var(--soar-accent);
+    }
+    .triage-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      padding: 0.65rem 1.25rem;
+      background: var(--soar-bg-subtle);
+      border-bottom: 1px solid var(--soar-border);
+      font-size: 0.76rem;
+    }
+    .triage-pills {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .triage-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .triage-label {
+      color: var(--soar-text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.66rem;
+      letter-spacing: 0.03em;
+    }
+    .btn-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-copy:hover {
+      background: var(--soar-accent-subtle);
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    /* Body Markdown Area */
+    .card-body {
+      padding: 1.25rem 1.5rem;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: var(--soar-text-primary);
+      word-break: break-word;
+    }
+
+    /* Markdown Styling */
+    .card-body h1, .card-body h2, .card-body h3, .card-body h4 {
+      color: var(--soar-text-primary);
+      font-weight: 700;
+      margin-top: 1rem;
+      margin-bottom: 0.5rem;
+      line-height: 1.3;
+    }
+    .card-body h1 { font-size: 1.15rem; }
+    .card-body h2 { font-size: 1.05rem; }
+    .card-body h3 { font-size: 0.95rem; border-bottom: 1px solid var(--soar-border); padding-bottom: 0.25rem; }
+    .card-body p { margin-bottom: 0.75rem; color: var(--soar-text-secondary); }
+    .card-body ul, .card-body ol { margin-bottom: 0.75rem; padding-left: 1.25rem; color: var(--soar-text-secondary); }
+    .card-body li { margin-bottom: 0.25rem; }
+    .card-body strong { color: var(--soar-text-primary); font-weight: 600; }
+    .card-body blockquote {
+      border-left: 3px solid var(--soar-accent);
+      padding-left: 0.75rem;
+      color: var(--soar-text-muted);
+      margin: 0.75rem 0;
+      font-style: italic;
+    }
+    .card-body code {
+      font-family: var(--soar-font-mono);
+      font-size: 0.78rem;
+      background: var(--soar-bg-subtle);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+      border: 1px solid var(--soar-border);
+      color: var(--soar-accent);
+    }
+    .card-body pre {
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      overflow-x: auto;
+      margin-bottom: 0.75rem;
+    }
+    .card-body pre code {
+      background: transparent;
+      padding: 0;
+      border: none;
+      color: var(--soar-text-primary);
+    }
+    .card-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.75rem 0;
+      font-size: 0.8rem;
+    }
+    .card-body th, .card-body td {
+      border: 1px solid var(--soar-border);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+    .card-body th {
+      background: var(--soar-bg-subtle);
+      font-weight: 600;
+      color: var(--soar-text-muted);
+    }
+
+    /* Thought Trace Accordion */
+    .thought-details {
+      margin-top: 1rem;
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 0.6rem 0.85rem;
+    }
+    .thought-summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.75rem;
+      color: var(--soar-text-secondary);
+      outline: none;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .thought-summary:hover {
+      color: var(--soar-accent);
+    }
+    .thought-list {
+      margin-top: 0.5rem;
+      padding-left: 1.25rem;
+      font-size: 0.75rem;
+      color: var(--soar-text-muted);
+      font-family: var(--soar-font-mono);
+      line-height: 1.5;
+    }
+
+    /* Footer Row */
+    .card-footer {
+      padding: 0.6rem 1.25rem;
+      background: var(--soar-bg-subtle);
+      border-top: 1px solid var(--soar-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      color: var(--soar-text-muted);
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .footer-left {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .ai-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-weight: 600;
+      color: var(--soar-accent);
+    }
+    .ai-badge svg {
+      width: 13px;
+      height: 13px;
+    }
+  </style>
 </head>
-<body class="font-sans antialiased">
+<body>
 
-    <div class="p-3 md:p-5">
-        <!-- ADK AGENT REPORT CARD -->
-        <div class="bg-card text-card-foreground border border-border rounded-xl shadow-md overflow-hidden">
-            <div class="p-5 md:p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center space-x-2">
-                        <div class="h-6 w-1 bg-primary rounded-full"></div>
-                        <h1 id="report-title" class="text-xl md:text-2xl font-bold tracking-tight">ADK Agent Analysis</h1>
-                    </div>
-                    <button id="copy-btn" onclick="copyReportText()" class="hidden text-xs bg-muted hover:bg-muted/80 text-muted-foreground px-2.5 py-1 rounded border border-border transition-colors">
-                        Copy Markdown
-                    </button>
-                </div>
-
-                <!-- Target div for Rendered Markdown -->
-                <div id="content" class="text-sm md:text-base leading-relaxed">
-                    <div class="flex justify-center p-8">
-                        <span class="text-muted-foreground animate-pulse">Waiting for agent analysis...</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="bg-muted/30 px-5 py-2.5 border-t border-border flex justify-between items-center text-xs text-muted-foreground">
-                <span class="flex items-center space-x-1">
-                    <svg class="w-3.5 h-3.5 text-primary inline" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                    </svg>
-                    <span>Google SecOps ADK Agent</span>
-                </span>
-                <span id="report-status">Autonomous AI Reasoning</span>
-            </div>
+  <div class="widget-container">
+    <div class="adk-card">
+      <!-- Card Header -->
+      <div class="card-header">
+        <div class="header-title-group">
+          <div class="agent-avatar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="title-texts">
+            <span id="agent-title" class="agent-name-label">Google ADK Agent Analysis</span>
+            <span id="agent-subtitle" class="agent-subtitle">Autonomous Security Reasoning &bull; Gemini Powered</span>
+          </div>
         </div>
+
+        <div class="header-actions">
+          <span id="verdict-badge" class="badge" style="display:none;"></span>
+          <span id="model-badge" class="badge badge-accent">Google ADK</span>
+          <span id="session-badge" class="badge badge-muted" style="display:none;"></span>
+          <button id="copy-btn" class="btn-copy" onclick="copyReportText()" style="display:none;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy Markdown</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 3-Tier Triage Taxonomy Banner -->
+      <div id="triage-banner" class="triage-banner">
+        <div class="triage-pills">
+          <span class="triage-item">
+            <span class="triage-label">Verdict:</span>
+            <span id="triage-verdict-pill" class="badge"></span>
+          </span>
+          <span style="color: var(--soar-border-strong);">&bull;</span>
+          <span class="triage-item">
+            <span class="triage-label">Disposition:</span>
+            <span id="triage-disposition-pill" class="badge badge-muted"></span>
+          </span>
+          <span style="color: var(--soar-border-strong);">&bull;</span>
+          <span class="triage-item">
+            <span class="triage-label">Confidence:</span>
+            <span id="triage-confidence-pill" class="badge badge-muted"></span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Card Body Content -->
+      <div id="content" class="card-body">
+        <p style="color: var(--soar-text-muted); text-align: center; padding: 1.5rem 0;">
+          Waiting for ADK agent analysis...
+        </p>
+      </div>
+
+      <!-- Card Footer -->
+      <div class="card-footer">
+        <div class="footer-left">
+          <span class="ai-badge">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L13.8 8.2L20 10L13.8 11.8L12 18L10.2 11.8L4 10L10.2 8.2L12 2Z"/>
+            </svg>
+            <span>Google ADK Reasoning Engine</span>
+          </span>
+        </div>
+        <div id="status-indicator">
+          <span>Status: Completed</span>
+        </div>
+      </div>
     </div>
+  </div>
 
-    <!-- Hidden container holding Siemplify action output placeholder -->
-    <!-- Analysts can bind this placeholder in Playbook Views: [ActionName.JsonResult| "final_response"] -->
-    <div id="raw-data" style="display:none;">[Run ADK Agent.JsonResult| "final_response"]</div>
+  <!-- Raw context holder -->
+  <div id="raw-data" style="display:none;">[{stepInstanceName}.JsonResult]</div>
 
-    <script>
-        // --- 1. Theme Configuration ---
-        const themes = {
-            light: {
-                '--widget-bg-color': '#ffffff',
-                '--widget-foreground-color': '#020817',
-                '--widget-card-color': '#ffffff',
-                '--widget-card-foreground-color': '#020817',
-                '--widget-primary-color': '#1a73e8',
-                '--widget-primary-foreground-color': '#ffffff',
-                '--widget-secondary-color': '#f1f5f9',
-                '--widget-secondary-foreground-color': '#0f172a',
-                '--widget-muted-color': '#f1f5f9',
-                '--widget-muted-foreground-color': '#64748b',
-                '--widget-accent-color': '#f1f5f9',
-                '--widget-accent-foreground-color': '#0f172a',
-                '--widget-border-color': '#e2e8f0',
-                '--widget-input-color': '#e2e8f0',
-            },
-            dark: {
-                '--widget-bg-color': '#020817',
-                '--widget-foreground-color': '#f8fafc',
-                '--widget-card-color': '#0a101f',
-                '--widget-card-foreground-color': '#f8fafc',
-                '--widget-primary-color': '#8ab4f8',
-                '--widget-primary-foreground-color': '#020817',
-                '--widget-secondary-color': '#0f172a',
-                '--widget-secondary-foreground-color': '#f8fafc',
-                '--widget-muted-color': '#0f172a',
-                '--widget-muted-foreground-color': '#94a3b8',
-                '--widget-accent-color': '#0f172a',
-                '--widget-accent-foreground-color': '#f8fafc',
-                '--widget-border-color': '#1e293b',
-                '--widget-input-color': '#1e293b',
-            }
-        };
+  <script>
+    // =========================================================================
+    // Google SecOps SOAR Theme Synchronization Bridge
+    // =========================================================================
+    const SOAR_PALETTES = {
+      dark: {
+        theme: 'dark',
+        '--soar-bg-page': '#161626',
+        '--soar-bg-card': '#161626',
+        '--soar-border': '#293140',
+        '--soar-border-strong': '#384357',
+        '--soar-text-primary': '#f3f4f6',
+        '--soar-text-secondary': '#9ca3af',
+        '--soar-text-muted': '#6b7280'
+      },
+      light: {
+        theme: 'light',
+        '--soar-bg-page': '#ffffff',
+        '--soar-bg-card': '#ffffff',
+        '--soar-border': '#e5e7eb',
+        '--soar-border-strong': '#d1d5db',
+        '--soar-text-primary': '#111827',
+        '--soar-text-secondary': '#4b5563',
+        '--soar-text-muted': '#6b7280'
+      }
+    };
 
-        function applyTheme(themeObject) {
-            for (const [key, value] of Object.entries(themeObject)) {
-                document.body.style.setProperty(key, value);
-            }
+    function isColorDark(color) {
+      if (!color) return false;
+      let r = 255, g = 255, b = 255;
+      color = String(color).trim();
+      if (color.startsWith('#')) {
+        let hex = color.replace('#', '');
+        if (hex.length === 3) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        if (hex.length >= 6) {
+          r = parseInt(hex.substring(0, 2), 16);
+          g = parseInt(hex.substring(2, 4), 16);
+          b = parseInt(hex.substring(4, 6), 16);
+        }
+      } else if (color.startsWith('rgb')) {
+        const parts = color.match(/\d+/g);
+        if (parts && parts.length >= 3) {
+          r = parseInt(parts[0], 10);
+          g = parseInt(parts[1], 10);
+          b = parseInt(parts[2], 10);
+        }
+      }
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+      return luminance < 140;
+    }
+
+    function applySoarTheme(themeKeyOrObj) {
+      const mode = typeof themeKeyOrObj === 'string' ? themeKeyOrObj : (themeKeyOrObj.theme || 'light');
+      document.documentElement.setAttribute('data-theme', mode);
+      document.body.className = mode;
+
+      const palette = typeof themeKeyOrObj === 'object' ? themeKeyOrObj : (SOAR_PALETTES[mode] || SOAR_PALETTES.light);
+      for (const [key, value] of Object.entries(palette)) {
+        if (key.startsWith('--')) {
+          document.documentElement.style.setProperty(key, value);
+          document.body.style.setProperty(key, value);
+        }
+      }
+      document.body.style.backgroundColor = palette['--soar-bg-page'] || (mode === 'dark' ? '#161626' : '#ffffff');
+    }
+
+    // Google SecOps SOAR message listeners
+    window.addEventListener('message', evt => {
+      if (evt && evt.data) {
+        if (evt.data.background) {
+          const isDark = isColorDark(evt.data.background);
+          applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+        }
+        if (evt.data.actionResult || evt.data.final_response || evt.data.response) {
+          renderReport(evt.data.actionResult || evt.data);
+        }
+      }
+    });
+
+    onmessage = evt => {
+      if (evt && evt.data && evt.data.background) {
+        const isDark = isColorDark(evt.data.background);
+        applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+      }
+    };
+
+    // Initial mount fallback
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      applySoarTheme(SOAR_PALETTES.dark);
+    } else {
+      applySoarTheme(SOAR_PALETTES.light);
+    }
+
+    // =========================================================================
+    // Markdown Fallback Parser
+    // =========================================================================
+    function parseMarkdown(md) {
+      if (typeof marked !== "undefined" && marked.parse) {
+        try { return marked.parse(md); } catch (e) {}
+      }
+      // Simple offline regex renderer fallback
+      let html = md
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+        .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+        .replace(/`([^`]+)`/gim, '<code>$1</code>')
+        .replace(/^\s*\-\s+(.*$)/gim, '<li>$1</li>')
+        .replace(/^\s*\*\s+(.*$)/gim, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>)/gim, '<ul>$1</ul>')
+        .replace(/\n\n/gim, '<p></p>')
+        .replace(/\n/gim, '<br>');
+      return html;
+    }
+
+    let cachedMarkdown = "";
+    function copyReportText() {
+      if (!cachedMarkdown) return;
+      navigator.clipboard.writeText(cachedMarkdown).then(() => {
+        const btn = document.getElementById('copy-btn');
+        const orig = btn.innerHTML;
+        btn.innerHTML = "<span>Copied!</span>";
+        setTimeout(() => { btn.innerHTML = orig; }, 1800);
+      });
+    }
+
+    // =========================================================================
+    // Report Data Parsing & Rendering
+    // =========================================================================
+    function extractPayload(input) {
+      if (!input) return null;
+      let data = input;
+      if (typeof data === "string") {
+        let trimmed = data.trim();
+        if (trimmed.startsWith("[") && trimmed.includes(".JsonResult")) return null;
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+          try { data = JSON.parse(trimmed); } catch (e) {}
+        }
+      }
+      return data;
+    }
+
+    function renderReport(payloadOverride) {
+      let payload = payloadOverride;
+      if (!payload) {
+        let rawContent = "";
+        try {
+          rawContent = [{stepInstanceName}.JsonResult];
+        } catch (e) {
+          const rawEl = document.getElementById('raw-data');
+          rawContent = rawEl ? rawEl.textContent : "";
+        }
+        payload = extractPayload(rawContent);
+      }
+
+      const contentDiv = document.getElementById('content');
+      const copyBtn = document.getElementById('copy-btn');
+      const agentTitleEl = document.getElementById('agent-title');
+      const modelBadgeEl = document.getElementById('model-badge');
+      const sessionBadgeEl = document.getElementById('session-badge');
+
+      if (!payload) {
+        contentDiv.innerHTML = `<p style="color: var(--soar-text-muted); text-align: center; padding: 1.5rem 0;">Awaiting ADK agent execution or data context...</p>`;
+        copyBtn.style.display = "none";
+        return;
+      }
+
+      let agentName = "Google ADK Agent Analysis";
+      let model = "Google ADK";
+      let sessionId = "";
+      let markdownText = "";
+      let thoughts = [];
+      let groundingSources = [];
+
+      if (typeof payload === "object") {
+        agentName = payload.agent_name || payload.name || "Google ADK Agent Analysis";
+        model = payload.model || "Google ADK";
+        sessionId = payload.session_id || "";
+        markdownText = payload.final_response || payload.response || payload.output || payload.analysis || payload.summary || "";
+        thoughts = payload.thoughts || payload.thought_trace || [];
+        groundingSources = payload.grounding_sources || [];
+
+        if (!markdownText && !thoughts.length) {
+          markdownText = JSON.stringify(payload, null, 2);
+        }
+      } else if (typeof payload === "string") {
+        markdownText = payload;
+      }
+
+      agentTitleEl.textContent = agentName.replace(/_/g, ' ');
+      modelBadgeEl.textContent = model;
+      if (sessionId) {
+        sessionBadgeEl.textContent = "Session: " + (sessionId.length > 14 ? sessionId.substring(0, 14) + '...' : sessionId);
+        sessionBadgeEl.style.display = "inline-flex";
+      }
+
+      cachedMarkdown = markdownText;
+      copyBtn.style.display = markdownText ? "inline-flex" : "none";
+
+      // Parse 3-Tier Triage Taxonomy from Markdown if present
+      const triageBanner = document.getElementById('triage-banner');
+      const verdictBadgeHeader = document.getElementById('verdict-badge');
+      const verdictPill = document.getElementById('triage-verdict-pill');
+      const dispPill = document.getElementById('triage-disposition-pill');
+      const confPill = document.getElementById('triage-confidence-pill');
+
+      const vMatch = markdownText.match(/\*\*Verdict:\*\*\s*`?([^`|\n]+)`?/i);
+      const dMatch = markdownText.match(/\*\*Disposition:\*\*\s*`?([^`|\n]+)`?/i);
+      const cMatch = markdownText.match(/\*\*Confidence:\*\*\s*`?([^`|\n]+)`?/i);
+
+      if (vMatch && triageBanner && verdictPill) {
+        const vVal = vMatch[1].trim();
+        const dVal = dMatch ? dMatch[1].trim() : "Evaluated";
+        const cVal = cMatch ? cMatch[1].trim().toUpperCase() : "HIGH";
+
+        let vClass = "badge-inconclusive";
+        const vLower = vVal.toLowerCase();
+        if (vLower.includes("malicious") || (vLower.includes("true positive") && !vLower.includes("benign") && !vLower.includes("btp"))) {
+          vClass = "badge-malicious";
+        } else if (vLower.includes("benign") || vLower.includes("btp")) {
+          vClass = "badge-btp";
+        } else if (vLower.includes("false positive") || vLower === "fp") {
+          vClass = "badge-fp";
         }
 
-        function isColorDark(hexColor) {
-            if (!hexColor || hexColor.length < 4) return false;
-            let hex = hexColor.replace('#', '');
-            if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-            const r = parseInt(hex.substring(0, 2), 16);
-            const g = parseInt(hex.substring(2, 4), 16);
-            const b = parseInt(hex.substring(4, 6), 16);
-            return (0.299 * r + 0.587 * g + 0.114 * b) < 140;
+        verdictPill.className = "badge " + vClass;
+        verdictPill.textContent = vVal;
+        if (verdictBadgeHeader) {
+          verdictBadgeHeader.className = "badge " + vClass;
+          verdictBadgeHeader.textContent = vVal;
+          verdictBadgeHeader.style.display = "inline-flex";
         }
-
-        let rawMarkdownCache = "";
-
-        function copyReportText() {
-            if (!rawMarkdownCache) return;
-            navigator.clipboard.writeText(rawMarkdownCache).then(() => {
-                const btn = document.getElementById('copy-btn');
-                const orig = btn.textContent;
-                btn.textContent = "Copied!";
-                setTimeout(() => { btn.textContent = orig; }, 1800);
-            });
+        if (dispPill) dispPill.textContent = dVal;
+        if (confPill) {
+          confPill.textContent = cVal;
+          confPill.className = "badge " + (cVal.includes("HIGH") ? "badge-accent" : "badge-muted");
         }
+        triageBanner.style.display = "flex";
+      } else if (triageBanner) {
+        triageBanner.style.display = "none";
+        if (verdictBadgeHeader) verdictBadgeHeader.style.display = "none";
+      }
 
-        // Listen for parent iframe postMessage events (theming & dynamic data payloads)
-        window.addEventListener('message', evt => {
-            if (!evt || !evt.data) return;
+      let finalHtml = parseMarkdown(markdownText);
 
-            // Theme sync from Chronicle SOAR host container
-            if (evt.data.background) {
-                applyTheme(isColorDark(evt.data.background) ? themes.dark : themes.light);
-            }
+      // Append thought trace accordion if present
+      if (Array.isArray(thoughts) && thoughts.length > 0) {
+        finalHtml += `
+          <details class="thought-details">
+            <summary class="thought-summary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 16v-4"></path>
+                <path d="M12 8h.01"></path>
+              </svg>
+              <span>Autonomous Reasoning Thought Trace (${thoughts.length} steps)</span>
+            </summary>
+            <ul class="thought-list">
+              ${thoughts.map(t => `<li>${typeof t === 'string' ? t : JSON.stringify(t)}</li>`).join('')}
+            </ul>
+          </details>
+        `;
+      }
 
-            // Direct data payload injection (if dispatched via playbook view event)
-            if (evt.data.actionResult || evt.data.final_response || evt.data.response) {
-                const data = evt.data.actionResult || evt.data;
-                renderReportFromPayload(data);
-            }
-        });
+      // Append Grounded Sources if present
+      if (Array.isArray(groundingSources) && groundingSources.length > 0) {
+        finalHtml += `
+          <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--soar-border); font-size: 0.75rem;">
+            <strong style="color: var(--soar-text-primary);">Grounded Sources Referenced:</strong>
+            <ul style="margin-top: 0.35rem; padding-left: 1.25rem;">
+              ${groundingSources.map(s => `<li><a href="${s.uri || '#'}" target="_blank" style="color: var(--soar-accent); text-decoration: none;">${s.title || s.uri}</a></li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
 
-        function extractMarkdownText(raw) {
-            if (!raw) return "";
-            let trimmed = raw.trim();
+      contentDiv.innerHTML = finalHtml || `<p style="color: var(--soar-text-muted);">Analysis completed without textual body.</p>`;
+    }
 
-            // Check if placeholder was not substituted (e.g. preview mode or unexecuted action)
-            if (trimmed.startsWith("[") && trimmed.includes(".JsonResult")) {
-                return null;
-            }
+    window.addEventListener('DOMContentLoaded', () => renderReport());
+  </script>
 
-            // If payload is a JSON string, extract relevant response fields
-            if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
-                try {
-                    const parsed = JSON.parse(trimmed);
-                    if (parsed && typeof parsed === 'object') {
-                        return parsed.final_response || parsed.response || parsed.output || parsed.analysis || parsed.summary || JSON.stringify(parsed, null, 2);
-                    }
-                } catch (e) {
-                    // Not valid JSON, treat as raw markdown
-                }
-            }
-
-            return trimmed;
-        }
-
-        function renderReportFromPayload(payload) {
-            let markdownText = "";
-            if (typeof payload === "string") {
-                markdownText = extractMarkdownText(payload);
-            } else if (payload && typeof payload === "object") {
-                markdownText = payload.final_response || payload.response || payload.output || payload.analysis || JSON.stringify(payload, null, 2);
-            }
-
-            renderMarkdown(markdownText);
-        }
-
-        function renderMarkdown(rawText) {
-            const contentDiv = document.getElementById('content');
-            const copyBtn = document.getElementById('copy-btn');
-
-            if (!rawText) {
-                contentDiv.innerHTML = `
-                    <div class="text-center py-8 text-muted-foreground">
-                        <p class="font-medium">No ADK agent output available for this alert.</p>
-                        <p class="text-xs mt-1">Execute any Google ADK action (e.g., Run ADK Agent, Run Google Search Agent) in your playbook to populate this view.</p>
-                    </div>
-                `;
-                copyBtn.classList.add('hidden');
-                return;
-            }
-
-            rawMarkdownCache = rawText;
-            copyBtn.classList.remove('hidden');
-
-            // Format markdown headers, lists, and indentation
-            const formattedMarkdown = rawText
-                .replace(/(###)/g, '\n\n$1')           
-                .replace(/(\* \*\*)/g, '\n$1')          
-                .replace(/(\s\d\.\s\*\*)/g, '\n\n$1')   
-                .replace(/(\s\d\.\s)/g, '\n$1')         
-                .trim();
-
-            contentDiv.innerHTML = marked.parse(formattedMarkdown);
-        }
-
-        function renderReport() {
-            const rawElement = document.getElementById('raw-data');
-            const rawContent = rawElement ? rawElement.textContent : "";
-            const extracted = extractMarkdownText(rawContent);
-            renderMarkdown(extracted);
-        }
-
-        // Run rendering on load
-        window.addEventListener('DOMContentLoaded', renderReport);
-    </script>
 </body>
 </html>

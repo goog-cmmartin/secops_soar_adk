@@ -1,0 +1,85 @@
+{
+  "EDR": {
+    "patterns": [
+      ".*EDR.*",
+      ".*HX.*",
+      ".*ATP.*",
+      ".*DEFENDER.*",
+      ".*SYSMON.*",
+      ".*TANIUM.*",
+      ".*SENTINEL.*",
+      ".*CROWDSTRIKE.*",
+      ".*CARBONBLACK.*",
+      ".*S1.*"
+    ],
+    "tactics": [
+      "persistence",
+      "privilege-escalation",
+      "execution",
+      "defense-evasion"
+    ],
+    "description": "Endpoint detection and host activity telemetry."
+  },
+  "IDENTITY": {
+    "patterns": [
+      ".*AD.*",
+      ".*OKTA.*",
+      ".*IAM.*",
+      ".*LDAP.*",
+      ".*DUO.*",
+      ".*WORKSPACE.*",
+      ".*AZURE.*",
+      ".*AUTH.*",
+      ".*PING.*",
+      ".*IDP.*"
+    ],
+    "tactics": [
+      "initial-access",
+      "credential-access",
+      "lateral-movement"
+    ],
+    "description": "Identity, authentication, and access management events."
+  },
+  "CLOUD": {
+    "patterns": [
+      ".*GCP.*",
+      ".*AWS.*",
+      ".*AZURE.*",
+      ".*CLOUD.*",
+      ".*K8S.*",
+      ".*KUBERNETES.*",
+      ".*S3.*",
+      ".*STORAGE.*",
+      ".*AUDIT.*"
+    ],
+    "tactics": [
+      "resource-hijacking",
+      "exfiltration",
+      "discovery",
+      "initial-access"
+    ],
+    "description": "Cloud infrastructure, workload, and administrative audit activity."
+  },
+  "NETWORK": {
+    "patterns": [
+      ".*FW.*",
+      ".*FIREWALL.*",
+      ".*WAF.*",
+      ".*DNS.*",
+      ".*PROXY.*",
+      ".*ZEEK.*",
+      ".*IDS.*",
+      ".*IPS.*",
+      ".*TRAFFIC.*",
+      ".*FLOW.*",
+      ".*NETFLOW.*",
+      ".*VPC_FLOW.*"
+    ],
+    "tactics": [
+      "command-and-control",
+      "exfiltration",
+      "reconnaissance"
+    ],
+    "description": "Network traffic, perimeter telemetry, DNS, and flow records."
+  }
+}
