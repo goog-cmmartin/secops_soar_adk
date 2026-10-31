@@ -1,0 +1,7 @@
+creator: admin
+description: Validates connectivity to Google Gemini / Vertex AI, bundled schema guides, curated rules catalog, and SecOps parameters.
+dynamic_results_metadata: []
+integration_identifier: LogJammer
+is_async: false
+name: Ping
+parameters: []

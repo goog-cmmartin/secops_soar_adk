@@ -1,0 +1,193 @@
+# Cloudflare Log Generation Playbook
+
+## 1. Overview & Log Purpose
+Cloudflare acts as a global reverse proxy, content delivery network (CDN), web application firewall (WAF), Zero Trust Secure Web Gateway (SWG), and cloud access security broker (CASB). 
+
+Cloudflare logs provide telemetry across edge processing, threat mitigation, identity access, DNS filtering, network tunneling, and administrative operations:
+* **HTTP Requests (Edge Logpush)**: Inbound web traffic passing through Cloudflare edge nodes, capturing client metadata, SSL negotiation, origin routing, cache status, WAF triggers, bot scores, and custom firewall rules.
+* **Zero Trust Gateway (DNS, HTTP, Network/L4)**: Egress traffic inspection and policy enforcement for managed enterprise endpoints and WARP clients.
+* **Cloudflare Access**: Identity-aware proxy authentication, authorization decisions, application launches, and session validation.
+* **Audit Logs**: Administrative changes executed within the Cloudflare dashboard or via API (zone updates, certificate deployments, firewall rule adjustments).
+* **CASB & Posture Findings**: Security posture discoveries, permission escalations, and 3rd-party SaaS configuration posture violations.
+* **Cloud Platform Wrappers**: Cloudflare Logpush piped into cloud-native logging infrastructures (e.g., Google Cloud Logging wrapping `jsonPayload`).
+
+---
+
+## 2. Format Specification
+* **Data Format**: Single-line JSON (NDJSON / JSON Lines).
+* **Delimiters**: Comma-delimited key-value pairs enclosed in curly braces `{}`.
+* **String Quoting**: Standard JSON double quotes (`"key": "value"`).
+* **Path / URI Escaping**: Standard forward slashes `/` or escaped forward slashes `\/` (commonly emitted in standard Logpush outputs).
+* **Array Fields**: Multi-value match elements (such as `FirewallMatchesActions`, `FirewallMatchesRuleIDs`, `FirewallMatchesSources`, `QueryCategoryIDs`, `DownloadedFileNames`) must be JSON arrays: `["allow"]` or `[26, 81]`.
+* **Nested Structures**: Complex metadata (e.g., `RequestHeaders`, `Metadata`, `NewValue`, `OldValue`, `AssetMetadata`) are nested JSON sub-objects.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### A. HTTP Request Logs (Edge Logpush / WAF)
+
+| Field Name | Type | Description | Realistic Values / Formats |
+| :--- | :--- | :--- | :--- |
+| `RayID` | String | Unique hex ID identifying the request through the edge | `56a458760f09cac4`, `805854aa4f340c36` (16 hex chars) |
+| `ClientIP` | String | Source IP address of the client | IPv4 (`198.51.100.24`) or IPv6 (`2606:4700::1`) |
+| `ClientASN` | Integer | Autonomous System Number of client IP | `13335`, `15169`, `7922`, `701`, `1221` |
+| `ClientCountry` | String | ISO 3166-1 alpha-2 lowercase country code | `us`, `gb`, `ca`, `fr`, `de`, `ru`, `cn`, `in` |
+| `ClientDeviceType` | String | Device form factor | `desktop`, `mobile`, `tablet` |
+| `ClientIPClass` | String | Reputation / class classification | `noRecord`, `searchEngine`, `bot`, `tor`, `vpn` |
+| `ClientRequestBytes` | Integer | Size of incoming client request in bytes | `256` – `65535` |
+| `ClientRequestHost` | String | Hostname header sent by client | `www.example.com`, `api.service.io`, `admin.portal.net` |
+| `ClientRequestMethod` | String | HTTP verb | `GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH` |
+| `ClientRequestPath` | String | URL path component | `/`, `/api/v1/login`, `/assets/app.js`, `/robots.txt` |
+| `ClientRequestProtocol` | String | HTTP protocol negotiated | `HTTP/1.1`, `HTTP/2`, `HTTP/3` |
+| `ClientRequestReferer` | String | HTTP Referer string | `https://www.google.com/`, `https://example.com/login`, `""` |
+| `ClientRequestScheme` | String | Request scheme | `http`, `https` |
+| `ClientRequestSource` | String | Traffic source pipeline | `eyeball`, `earlyHintsCache`, `worker`, `cdn` |
+| `ClientRequestURI` | String | Full path and query string | `/search?q=test&page=1`, `/login.php?action=auth` |
+| `ClientRequestUserAgent`| String | Raw User-Agent string | Standard modern browser, crawler, or CLI tool strings |
+| `ClientSSLCipher` | String | Cipher suite negotiated | `ECDHE-ECDSA-AES128-GCM-SHA256`, `AEAD-AES256-GCM-SHA384`, `NONE` |
+| `ClientSSLProtocol` | String | TLS version negotiated | `TLSv1.2`, `TLSv1.3`, `none` |
+| `ClientSrcPort` | Integer | Ephemeral source port of client | `1024` – `65535` |
+| `EdgeColoCode` | String | IATA airport code of edge data center | `EWR`, `LHR`, `CDG`, `FRA`, `NRT`, `SIN`, `YYZ` |
+| `EdgeColoID` | Integer | Numeric identifier of edge PoP | `17`, `21`, `87`, `106`, `131`, `388`, `452` |
+| `EdgeResponseBytes` | Integer | Total bytes sent back to client | `0` – `50000000` |
+| `EdgeResponseStatus` | Integer | HTTP status code returned by Cloudflare | `200`, `204`, `301`, `302`, `304`, `400`, `403`, `404`, `429`, `500`, `502`, `504` |
+| `EdgeStartTimestamp` | String / Int | Edge processing start time | ISO 8601 or Unix Nanoseconds |
+| `EdgeEndTimestamp` | String / Int | Edge processing completion time | ISO 8601 or Unix Nanoseconds |
+| `FirewallMatchesActions`| Array | Actions triggered by firewall rules | `["allow"]`, `["block"]`, `["drop"]`, `["challenge"]`, `["jschallenge"]`, `[]` |
+| `FirewallMatchesRuleIDs`| Array | UUID or Rule IDs triggered | `["407cfcf828e44714873664461017d6ea"]`, `["100001"]`, `[]` |
+| `FirewallMatchesSources`| Array | Rule engine sources matched | `["firewallRules"]`, `["waf"]`, `["firewallCustom"]`, `[]` |
+| `OriginIP` | String | Backend origin server IP | IPv4/IPv6 or `""` (if served from cache/blocked) |
+| `OriginResponseStatus` | Integer | Status returned by backend origin | `0` (if uncontacted), `200`, `404`, `500` |
+| `OriginResponseTime` | Integer | Origin response latency in nanoseconds | `0` (edge served) or `10000000` – `500000000` |
+| `SecurityLevel` | String | Security configuration sensitivity | `low`, `med`, `high`, `under_attack`, `unk` |
+| `WAFAction` | String | Legacy WAF action | `unknown`, `allow`, `drop`, `simulate`, `challenge` |
+| `WAFRuleID` | String | Triggered WAF rule identifier | `""`, `100001`, `941100`, `1000005` |
+| `WAFRuleMessage` | String | Associated signature message | `""`, `"Anomaly:Header:User-Agent - Missing"`, `"SQLi Attack"` |
+| `WAFAttackScore` | Integer | Machine learning attack score (1-99) | `0` (clean) or `1` (severe attack) to `99` |
+| `WAFSQLiAttackScore` | Integer | SQL Injection likelihood (1-99) | `0` (not detected) to `99` (safe), `1` = attack |
+| `WAFXSSAttackScore` | Integer | Cross-Site Scripting score | `0` (not detected) to `99` |
+| `WAFRCEAttackScore` | Integer | Remote Code Execution score | `0` (not detected) to `99` |
+| `ZoneID` | Integer / Hex| Numeric ID or 32-char hex Zone ID | `9305920`, `19563127`, `185123158` |
+| `ZoneName` | String | Domain name of the registered zone | `example.com`, `clevelandclinic.org` |
+
+---
+
+### B. Zero Trust Gateway Logs (DNS, HTTP, Network/L4)
+
+#### 1. Gateway DNS
+* **`Datetime`**: ISO 8601 UTC timestamp.
+* **`ColoID`**: Numeric edge PoP ID (e.g., `26`, `493`).
+* **`SrcIP` / `SrcPort`**: Client source IP and port.
+* **`DstIP` / `DstPort`**: Resolver destination IP (`172.64.36.1`, `1.1.1.1`) and port (`53`, `853`).
+* **`Protocol`**: `udp`, `tcp`, `tls`, `https`.
+* **`QueryName` / `QueryNameReversed`**: Queried FQDN (`beacons.gcp.gvt2.com`) and reverse notation (`com.gvt2.gcp.beacons`).
+* **`QueryType`**: Numeric DNS Record Type (`1` = A, `28` = AAAA, `5` = CNAME, `15` = MX).
+* **`ResolverDecision`**: Decision outcome (`allowedOnNoPolicyMatch`, `blockedByRule`, `override`).
+* **`QueryCategoryIDs`**: Array of matched content/threat categories (e.g., `[26, 81]`).
+* **`DeviceID` / `UserID` / `Email`**: Zero Trust client identifiers.
+
+#### 2. Gateway HTTP / Proxy
+* **`AccountID`**: 32-char hex string.
+* **`Action`**: `allow`, `block`, `bypass`, `isolate`.
+* **`URL` / `HTTPHost` / `HTTPMethod`**: Inspected target URL and HTTP attributes.
+* **`PolicyID`**: UUID string (`f3c1701a-36b2-4210-ac1b-5f47c4a397fa`).
+* **`DeviceID` / `DeviceName` / `UserID` / `Email`**: Client endpoint and identity tracking.
+* **`BlockedFileHash` / `BlockedFileName` / `BlockedFileSize`**: Malware/DLP attributes.
+
+#### 3. Gateway L4 / Network Sessions
+* **`Transport` / `Protocol`**: `tcp`, `udp`, `icmp`, `TCP`, `UDP`, `ICMP`.
+* **`SourceIP` / `SourcePort`**: Outbound client source.
+* **`DestinationIP` / `DestinationPort`**: Remote destination server endpoint.
+* **`SNI`**: Server Name Indication (`wss-primary.slack.com`, `help.teams.cloudflare.com`).
+* **`Action`**: `allowedByRule`, `allowedOnNoRuleMatch`, `blockedByRule`.
+* **`BytesSent` / `BytesReceived`**: Traffic accounting metrics.
+* **`SessionStartTime` / `SessionEndTime`**: ISO 8601 session duration markers.
+* **`ConnectionCloseReason`**: `CLIENT_CLOSED`, `SERVER_CLOSED`, `RULE_BLOCKED`, `TIMEOUT`.
+
+---
+
+### C. Cloudflare Access (Identity & Login)
+* **`Action`**: `login`, `logout`, `verify`.
+* **`Allowed`**: Boolean (`true`, `false`).
+* **`AppDomain`**: Protected application FQDN (e.g., `preligens.cloudflareaccess.com/warp`).
+* **`AppUUID`**: UUID of Access Application.
+* **`Connection`**: Identity provider type (`saml`, `oidc`, `google`, `okta`, `azureAD`).
+* **`Email` / `UserUID`**: Authenticated corporate user identity.
+* **`IPAddress` / `Country`**: Source connection properties.
+* **`CreatedAt`**: ISO 8601 timestamp.
+
+---
+
+### D. Audit Logs (Administrative Operations)
+* **`ActionType`**: Action string (`gateway_create`, `delete_requested`, `zone_create`, `dns_record_update`).
+* **`ActionResult`**: Boolean (`true`, `false`).
+* **`ActorEmail` / `ActorID` / `ActorIP` / `ActorType`**: Identity performing the action (`user`, `system`, `api_token`).
+* **`Interface`**: `API`, `UI`.
+* **`ResourceType`**: Cloudflare object affected (`gateway.rule`, `certificate_pack`, `dns_record`, `firewall_rule`).
+* **`ResourceID`**: Identifier of the modified resource.
+* **`NewValue` / `OldValue`**: Nested JSON objects representing state changes.
+* **`When`**: ISO 8601 UTC timestamp.
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Cloudflare logs primarily use **ISO 8601 UTC string format (`YYYY-MM-DDTHH:MM:SSZ`)**, with occasional nano-precision timestamps or Unix epoch timestamps.
+
+When generating synthetic scenarios, use the following replacement variables:
+* Standard UTC ISO 8601: `##$TimeStamp-0d0h0m0s$##` (Evaluates to: `YYYY-MM-DDTHH:MM:SSZ`)
+* Fractional Seconds UTC: `##$TimeStampIso8601_Nano-0d0h0m0s$##` (Evaluates to: `YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ`)
+* Unix Epoch Seconds: `##$Epoch-0d0h0m0s$##`
+* Unix Epoch Nanoseconds: `##$EpochNano-0d0h0m0s$##`
+
+### Temporal Consistency Rules:
+1. `EdgeStartTimestamp` must be equal to or slightly precede `EdgeEndTimestamp` (typically `0` to `5` seconds difference).
+2. For Gateway sessions, `SessionStartTime` must precede `SessionEndTime`.
+3. GCP log wrapper `timestamp` matches `jsonPayload.EdgeStartTimestamp`, while `receiveTimestamp` is `1` to `300` seconds in the future.
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: WAF SQL Injection Attack Block (HTTP Edge Logpush)
+```json
+{"ClientASN":13335,"ClientCountry":"ro","ClientDeviceType":"desktop","ClientIP":"198.51.100.87","ClientIPClass":"noRecord","ClientMTLSAuthCertFingerprint":"","ClientMTLSAuthStatus":"unknown","ClientRegionCode":"B","ClientRequestBytes":1450,"ClientRequestHost":"portal.company.com","ClientRequestMethod":"POST","ClientRequestPath":"/api/v1/auth/login","ClientRequestProtocol":"HTTP/2","ClientRequestReferer":"https://portal.company.com/login","ClientRequestScheme":"https","ClientRequestSource":"eyeball","ClientRequestURI":"/api/v1/auth/login?user=admin%27%20OR%201=1--","ClientRequestUserAgent":"sqlmap/1.6#stable (https://sqlmap.org)","ClientSSLCipher":"ECDHE-RSA-AES128-GCM-SHA256","ClientSSLProtocol":"TLSv1.2","ClientSrcPort":48291,"ClientTCPRTTMs":14,"Cookies":{},"EdgeColoCode":"OTP","EdgeColoID":142,"EdgeEndTimestamp":"##$TimeStamp-0d0h0m10s$##","EdgePathingOp":"wl","EdgePathingSrc":"filterBasedFirewall","EdgePathingStatus":"nr","EdgeRateLimitAction":"","EdgeRateLimitID":0,"EdgeRequestHost":"portal.company.com","EdgeResponseBodyBytes":152,"EdgeResponseBytes":648,"EdgeResponseCompressionRatio":1,"EdgeResponseContentType":"text/html","EdgeResponseStatus":403,"EdgeServerIP":"","EdgeStartTimestamp":"##$TimeStamp-0d0h0m10s$##","EdgeTimeToFirstByteMs":2,"FirewallMatchesActions":["block"],"FirewallMatchesRuleIDs":["a73b4512e091448b812033bc6f400921","942100"],"FirewallMatchesSources":["firewallCustom","waf"],"OriginIP":"","OriginResponseBytes":0,"OriginResponseHTTPExpires":"","OriginResponseHTTPLastModified":"","OriginResponseStatus":0,"OriginResponseTime":0,"OriginSSLProtocol":"unknown","ParentRayID":"00","RayID":"8b2401f89c018a12","RequestHeaders":{"content-type":"application/x-www-form-urlencoded"},"ResponseHeaders":{},"SecurityAction":"","SecurityActions":["block"],"SecurityLevel":"high","SecurityRuleDescription":"Block SQL Injection Attempts","SecurityRuleID":"a73b4512e091448b812033bc6f400921","SecurityRuleIDs":["a73b4512e091448b812033bc6f400921","942100"],"SecuritySources":["firewallCustom","waf"],"WAFAttackScore":1,"WAFFlags":"0","WAFMatchedVar":"user=admin' OR 1=1--","WAFProfile":"high","WAFRCEAttackScore":0,"WAFRuleID":"942100","WAFRuleMessage":"SQL Injection Attack Detected via libinjection","WAFSQLiAttackScore":1,"WAFXSSAttackScore":0,"ZoneID":48910231,"ZoneName":"company.com"}
+```
+
+### Scenario 2: Zero Trust Gateway Network L4 SSH Block
+```json
+{"AccountID":"9b10cf24a17d890045e12810a9910cba","Action":"blockedByRule","Datetime":"##$TimeStamp-0d0h5m30s$##","DestinationIP":"203.0.113.50","DestinationPort":22,"DeviceID":"48910fae-128a-49a0-bc11-20984819aa12","DeviceName":"macbook-pro-secops.local","Email":"analyst.jane@corp-defense.io","OverrideIP":"","OverridePort":0,"PolicyID":"cc49a182-9901-4478-8762-b91278100ef1","PolicyName":"Block_Outbound_SSH_NonProd","SessionID":"189af012-d800-0091-a1b2-ef1100000001","SNI":"","SourceInternalIP":"10.0.14.88","SourceIP":"198.51.100.34","SourcePort":58210,"Transport":"tcp","UserID":"39401827-cba1-5120-9981-aa9081274619"}
+```
+
+### Scenario 3: Cloudflare Access Authentication Success
+```json
+{"Action":"login","Allowed":true,"AppDomain":"internal-dash.corp.net/admin","AppUUID":"c5810291-8812-4aa1-998a-118402941bbb","Connection":"okta","Country":"us","CreatedAt":"##$TimeStamp-0d0h12m00s$##","Email":"alex.mercer@corp.net","IPAddress":"203.0.113.195","PurposeJustificationPrompt":"","PurposeJustificationResponse":"","RayID":"8b2410a8ef1092aa","TemporaryAccessApprovers":[],"TemporaryAccessDuration":0,"UserUID":"f912803a-810a-4091-bf99-88029147102e"}
+```
+
+### Scenario 4: Cloudflare Administrative Audit Log (Zone WAF Rule Alteration)
+```json
+{"ActionResult":true,"ActionType":"firewall_rule_update","ActorEmail":"lead-secops@corp.net","ActorID":"518290ab908e4112acdf901248109923","ActorIP":"198.51.100.12","ActorType":"user","ID":"118409ba-b481-4209-9021-f187a81029ba","Interface":"UI","Metadata":{"account_id":"9b10cf24a17d890045e12810a9910cba","zone_name":"corp.net","zone_tag":"185123158"},"NewValue":{"action":"block","description":"Block suspicious automation tooling","expression":"(http.user_agent contains \"sqlmap\" or http.user_agent contains \"nikto\")","id":"a73b4512e091448b812033bc6f400921","paused":false,"priority":1},"OldValue":{"action":"log","description":"Block suspicious automation tooling","expression":"(http.user_agent contains \"sqlmap\")","id":"a73b4512e091448b812033bc6f400921","paused":false,"priority":1},"OwnerID":"9b10cf24a17d890045e12810a9910cba","ResourceID":"a73b4512e091448b812033bc6f400921","ResourceType":"firewall.rule","When":"##$TimeStamp-0d0h15m00s$##"}
+```
+
+### Scenario 5: Google Cloud Logging Wrapped Cloudflare Logpush (Edge Asset Request)
+```json
+{"insertId":"gcpLogpush9182301982","jsonPayload":{"CacheCacheStatus":"hit","CacheReserveUsed":false,"CacheResponseBytes":18420,"CacheResponseStatus":200,"CacheTieredFill":false,"ClientASN":15169,"ClientCountry":"us","ClientDeviceType":"desktop","ClientIP":"203.0.113.4","ClientIPClass":"noRecord","ClientRequestBytes":1042,"ClientRequestHost":"cdn.corp.net","ClientRequestMethod":"GET","ClientRequestPath":"/static/app.bundle.js","ClientRequestProtocol":"HTTP/2","ClientRequestReferer":"https://cdn.corp.net/index.html","ClientRequestURI":"/static/app.bundle.js?v=2.4.1","ClientRequestUserAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36","ClientSSLCipher":"AEAD-AES128-GCM-SHA256","ClientSSLProtocol":"TLSv1.3","ClientSrcPort":51294,"EdgeColoCode":"SFO","EdgeColoID":32,"EdgeEndTimestamp":"##$TimeStamp-0d0h2m00s$##","EdgePathingOp":"wl","EdgePathingSrc":"macro","EdgePathingStatus":"nr","EdgeRateLimitAction":"","EdgeRateLimitID":0,"EdgeRequestHost":"cdn.corp.net","EdgeResponseBytes":18640,"EdgeResponseCompressionRatio":1,"EdgeResponseContentType":"application/javascript","EdgeResponseStatus":200,"EdgeServerIP":"172.64.36.1","EdgeStartTimestamp":"##$TimeStamp-0d0h2m00s$##","FirewallMatchesActions":[],"FirewallMatchesRuleIDs":[],"FirewallMatchesSources":[],"OriginIP":"","OriginResponseBytes":0,"OriginResponseHTTPExpires":"","OriginResponseHTTPLastModified":"","OriginResponseStatus":0,"OriginResponseTime":0,"OriginSSLProtocol":"unknown","ParentRayID":"00","RayID":"8b242091ea01441a","SecurityLevel":"med","WAFAction":"unknown","WAFFlags":"0","WAFMatchedVar":"","WAFProfile":"unknown","WAFRuleID":"","WAFRuleMessage":"","WorkerCPUTime":0,"WorkerStatus":"unknown","WorkerSubrequest":false,"WorkerSubrequestCount":0,"ZoneID":48910231},"logName":"projects/corp-security-siem/logs/cloudflarelogs","receiveTimestamp":"##$TimeStamp-0d0h1m55s$##","resource":{"labels":{"project_id":"corp-security-siem"},"type":"project"},"timestamp":"##$TimeStamp-0d0h2m00s$##"}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Strict JSON Types**:
+   - `EdgeResponseStatus`, `ClientRequestBytes`, `EdgeResponseBytes`, `ClientSrcPort`, `OriginResponseStatus` **MUST** be numeric integers, not strings.
+   - `FirewallMatchesActions`, `FirewallMatchesRuleIDs`, and `FirewallMatchesSources` **MUST** be JSON arrays (e.g. `[]` or `["allow"]`). Never serialize them as comma-separated strings inside a single string key.
+2. **Blocked vs. Served Status Alignment**:
+   - If `FirewallMatchesActions` contains `"block"` or `"drop"`, `EdgeResponseStatus` must reflect a blocked status code (typically `403`), and `OriginIP` / `OriginResponseStatus` should typically be empty (`""`) and `0`.
+3. **Empty Value Representation**:
+   - Cloudflare logs emit explicit empty strings `""` for unpopulated string fields, `0` for unpopulated integers, and `{}` / `[]` for empty complex objects. Do not use JSON `null` unless simulating API object payloads like `OldValue` / `NewValue`.
+4. **Hex String Formats**:
+   - `RayID` is a 16-character hexadecimal string (`^[0-9a-f]{16}$`).
+   - `PolicyID`, `DeviceID`, `UserID` in Zero Trust records are 36-character standard UUID strings.
+5. **Escape Sequences in URIs & User Agents**:
+   - Ensure special characters in `ClientRequestURI`, `ClientRequestUserAgent`, and `WAFMatchedVar` (e.g., quotes `"`, backslashes `\`, control characters) are correctly escaped to prevent invalid JSON payloads.

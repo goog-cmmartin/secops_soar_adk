@@ -1,0 +1,508 @@
+# Detection Engineering Playbook: Auth0 (AUTH_ZERO) Identity & Access Logs
+
+---
+
+## 1. Overview & Log Purpose
+
+**Auth0** (by Okta) is an Identity-as-a-Service (IDaaS) and Customer Identity and Access Management (CIAM) platform. Auth0 logs record all authentication, authorization, user management, and administrative actions occurring across applications, identity providers (IdPs), APIs, and the Auth0 Management API.
+
+### Core Activities Logged
+* **User Authentication & Authorization**: Interactive web logins, single sign-on (SSO), social logins (Google, Apple, Microsoft), enterprise federation (SAML, WS-Fed, Azure AD/WAAD), and passwordless authentication (SMS, Magic Links).
+* **Token Operations**: OAuth 2.0 / OpenID Connect (OIDC) token exchanges, authorization code grants, client credential flows (M2M), refresh token exchanges, and token revocation.
+* **Security & Adaptive MFA**: Pre-login risk assessments, anomaly detection (impossible travel, untrusted IP, brute force protection), and MFA challenges/enrollments.
+* **Management API Auditing**: Administrative and automated configuration changes via the Management API v2 (e.g., user provisioning, role assignments, client creation, secret access, tenant configuration modifications).
+* **Notification Deliveries**: System emails and SMS delivery tracking (verification emails, password reset links).
+
+---
+
+## 2. Format Specification
+
+### Structural Models
+Auth0 emits logs in **JSON format**. Depending on the delivery mechanism (Auth0 Log Streaming, Log Streams to AWS EventBridge/Datadog/Splunk, Management API `/api/v2/logs` polling, or SIEM webhooks), logs appear in one of three structural envelopes:
+
+1. **Standard / Flat JSON** (Direct API export or legacy syslog/HTTP export):
+   ```json
+   {
+     "date": "2024-11-07T03:29:03.299Z",
+     "type": "s",
+     "description": "",
+     "client_id": "...",
+     "ip": "...",
+     "details": { ... },
+     "log_id": "90020241107032903328307000000000000001223372061753965617"
+   }
+   ```
+
+2. **Stream Data Wrapper** (Auth0 Log Stream / Event Stream payload):
+   ```json
+   {
+     "log_id": "90020241107032903328307000000000000001223372061753965617",
+     "data": {
+       "date": "2024-11-07T03:29:03.299Z",
+       "type": "s",
+       "details": { ... }
+     }
+   }
+   ```
+
+3. **AWS EventBridge Partner Wrapper** (When routed via AWS Partner Event Source):
+   ```json
+   {
+     "version": "0",
+     "id": "357f9ed5-c60d-6eca-afff-ea8af3559b4e",
+     "detail-type": "Auth0 log",
+     "source": "aws.partner/auth0.com/tenant-name/auth0.logs",
+     "account": "123456789012",
+     "time": "2024-08-01T18:56:15Z",
+     "region": "us-east-1",
+     "resources": [],
+     "detail": {
+       "log_id": "...",
+       "data": { ... }
+     }
+   }
+   ```
+
+### Delimiters & Escaping Rules
+* **Encoding**: UTF-8.
+* **Strings & Nested Structures**: JSON-escaped strings (`\"`). Complex nested payloads (such as user metadata or HTTP request bodies) are serialized as nested JSON objects or JSON-encoded strings inside metadata.
+* **Sensitive Value Masking**: Auth0 automatically masks sensitive fields with asterisks:
+  * Passwords: `"password": "*****"`
+  * Authorization Codes: `"code": "******************************************7bT"`
+  * User Verification Codes: `"verification_code": "******"`
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Event Type Codes (`type`)
+The `type` field is the primary indicator of the event action.
+
+| Type Code | Description | Category | Severity / Security Impact |
+| :--- | :--- | :--- | :--- |
+| `s` | Successful Login | Authentication | Informational |
+| `f` | Failed Login | Authentication | Warning / Potential Brute Force |
+| `ss` | Successful Signup | Registration | Informational |
+| `fs` | Failed Signup | Registration | Warning |
+| `slo` | Successful Logout | Session | Informational |
+| `flo` | Failed Logout | Session | Warning |
+| `scp` | Successful Change Password | Account Management | Informational (Audit trail) |
+| `fcp` | Failed Change Password | Account Management | Warning |
+| `fcpr` | Failed Change Password Request | Account Management | Warning (User enumeration) |
+| `sdu` | Successful User Deletion | Account Management | Medium / Data lifecycle |
+| `fdu` | Failed User Deletion | Account Management | Warning |
+| `seacft` | Success Exchange Authorization Code for Access Token | OAuth / OIDC | Informational |
+| `feacft` | Failed Exchange Authorization Code for Access Token | OAuth / OIDC | Warning / Potential replay |
+| `seccft` | Success Exchange Client Credentials for Access Token | OAuth / M2M | Informational |
+| `feccft` | Failed Exchange Client Credentials for Access Token | OAuth / M2M | Warning / Auth failure |
+| `sertft` | Success Exchange Refresh Token for Access Token | OAuth / OIDC | Informational |
+| `fertft` | Failed Exchange Refresh Token for Access Token | OAuth / OIDC | High (Token replay / theft indicator) |
+| `fsa` | Failed Silent Authentication | Authentication | Warning / Session expired |
+| `pla` | Pre-login Risk Assessment | Anomaly Detection | Informational / Contextual |
+| `cls` | Passwordless Code / Link Sent | Passwordless | Informational |
+| `fn` | Failed Notification / Email Delivery | System / Delivery | Warning |
+| `sapi` | Success Management API v2 Operation | Admin / Management | Informational / High Audit |
+| `fapi` | Failed Management API v2 Operation | Admin / Management | Warning / High Audit |
+| `mgmt_api_read` | Management API Read Operation | Admin / Management | Informational (Data discovery) |
+| `api_limit` | Tenant Rate Limit Exceeded | Platform | High / DoS / Throttle |
+| `depnote` | Feature Deprecation Notice | System | Informational |
+
+---
+
+### 3.2 Top-Level Core Schema
+
+| Field Name | Type | Description | Realistic / Valid Values |
+| :--- | :--- | :--- | :--- |
+| `log_id` | String | Unique monotonically increasing 56-digit event ID | `90020240801185615479178000000000000001223372042524997602` |
+| `date` | String | ISO 8601 UTC timestamp of the event | `2024-08-01T18:56:15.386Z` |
+| `type` | String | Auth0 event type code (see table above) | `s`, `f`, `sapi`, `seccft`, `fertft`, `pla`, `cls` |
+| `description` | String | Plaintext description or error message | `Pre-login risk assessment`, `Wrong email or verification code.`, `Update a User`, `Login required` |
+| `client_id` | String | Unique identifier of the Auth0 Client Application | 32-character base62 string (e.g., `W3Yy3bheJVd0LamWXf088X2iYQBM3Acs`) |
+| `client_name` | String | Friendly name of the client application | `Frontend-App`, `Customer Portal`, `Shipt Terraform`, `Identity Service` |
+| `connection` | String | Identity Provider / Connection name | `Username-Password-Authentication`, `google-oauth2`, `email`, `waad` |
+| `connection_id` | String | Unique connection identifier | `con_vIV1Qvog4hzzHYG3`, `con_ME29ct8DUnJAQEdh`, or `""` |
+| `strategy` | String | Identity strategy used | `auth0`, `google-oauth2`, `email`, `waad`, `adfs`, `samlp` |
+| `strategy_type` | String | High-level connection class | `database`, `social`, `passwordless`, `enterprise` |
+| `ip` | String | IPv4 or IPv6 address of the originating client | `198.51.100.45`, `2600:1005:a100:555b:586d:ce3a:9bc8:9655` |
+| `user_agent` | String | HTTP User-Agent string or SDK identifier | Browser strings, `node-auth0/3.4.0`, `Go-Auth0-SDK/0.14.0`, `okhttp/4.11.0` |
+| `user_id` | String | Unique identifier of the authenticated subject | `auth0|65d2ee2b60e9bcf231c44088`, `google-oauth2|1092837465...` |
+| `user_name` | String | Username or email associated with the subject | `john.doe@example.com`, `admin_service` |
+| `hostname` | String | Auth0 tenant domain or custom domain | `auth.company.com`, `tenant-prod.us.auth0.com` |
+| `audience` | String | Target API identifier / Resource indicator | `https://api.company.com/v1`, `https://tenant.auth0.com/api/v2/` |
+| `scope` | String / Array | OAuth scopes requested or granted | `openid profile email offline_access`, `["read:users", "update:users"]` |
+| `organization_id`| String | Auth0 Organization ID (B2B multi-tenancy) | `org_Dp3sAx1yd86zVzCE` |
+| `organization_name` | String | Normalized organization name | `acme-corp`, `enterprise-tenant-1` |
+| `tenant_name` | String | Short name of the Auth0 tenant | `acme-prod`, `fs-staging`, `cyberknowledge-uat` |
+| `$event_schema` | Object | Schema version metadata | `{"version": "1.0.0"}` |
+| `auth0_client` | Object | Telemetry from Auth0 SDKs | `{"name": "nextjs-auth0", "version": "2.2.1", "env": {"node": "v18.16.0"}}` |
+
+---
+
+### 3.3 Dynamic `details` Object Breakdown
+
+The `details` object structure varies based on the event `type`:
+
+#### A. Interactive Login Events (`type: "s"` / `type: "f"`)
+```json
+"details": {
+  "prompts": [
+    {
+      "name": "prompt-authenticate-password",
+      "initiatedAt": 1722516271266,
+      "completedAt": 1722516274201,
+      "connection": "Username-Password-Authentication",
+      "connection_id": "con_tNN3WKyz1iWKHAqR",
+      "strategy": "auth0",
+      "identity": "6489b85c7c0b5f1a0ebe8ab7",
+      "stats": { "loginsCount": 86 },
+      "elapsedTime": 2935
+    },
+    {
+      "name": "login",
+      "flow": "universal-login",
+      "initiatedAt": 1722516271292,
+      "completedAt": 1722516274230,
+      "user_id": "auth0|6489b85c7c0b5f1a0ebe8ab7",
+      "user_name": "user@example.com",
+      "timers": { "rules": 357 },
+      "elapsedTime": 2938
+    }
+  ],
+  "session_id": "d4PcPEi3uMQLG8h7bCF2SBrJ1WfZDdII",
+  "initiatedAt": 1722516271266,
+  "completedAt": 1722516274732,
+  "elapsedTime": 3466,
+  "stats": { "loginsCount": 86 },
+  "actions": {
+    "executions": ["ZTJ9E1AJzzxNxaA2dYyqpmpcMjAyNDA4MDHQBpWBbYNLva52iHpvxFCB"]
+  },
+  "riskAssessment": {
+    "confidence": "high",
+    "version": "1",
+    "assessments": {
+      "UntrustedIP": { "confidence": "high", "code": "not_found_on_deny_list" },
+      "NewDevice": { "confidence": "low", "code": "no_device_history" },
+      "ImpossibleTravel": { "confidence": "high", "code": "location_history_not_found" }
+    }
+  }
+}
+```
+
+#### B. Failed Authentication / Error Context (`type: "f"` / `type: "fsa"`)
+```json
+"details": {
+  "body": {},
+  "qs": {
+    "state": "nSxHwrQxqVkKhYDiUtCo7HSP6Z-MKMk2",
+    "client_id": "W3Yy3bheJVd0LamWXf088X2iYQBM3Acs",
+    "response_type": "code"
+  },
+  "connection": "email",
+  "error": {
+    "message": "Wrong email or verification code.",
+    "oauthError": "unauthorized",
+    "type": "oauth-authorization"
+  },
+  "session_id": "JTxZ3bdnyaKWyN2FwNCUfjmksbcysV65",
+  "riskAssessment": null
+}
+```
+
+#### C. Management API Operations (`type: "sapi"` / `type: "mgmt_api_read"`)
+```json
+"details": {
+  "request": {
+    "method": "patch",
+    "path": "/api/v2/users/auth0%7C648a150ef5a581b15d072927/roles",
+    "query": {},
+    "userAgent": "Go-Auth0-SDK/0.14.0",
+    "body": { "roles": ["rol_lkdhYhNKcspyFy3j"] },
+    "channel": "api",
+    "ip": "198.51.100.45",
+    "auth": {
+      "user": {},
+      "strategy": "jwt",
+      "credentials": {
+        "jti": "746390b4c51cf7da862e675d0d877aca",
+        "scopes": ["read:roles", "update:roles", "update:users"]
+      }
+    }
+  },
+  "response": {
+    "statusCode": 204,
+    "body": {}
+  }
+}
+```
+
+#### D. Refresh Token Rotation Failure (`type: "fertft"`)
+```json
+"details": {
+  "description": "Unknown or invalid refresh token.",
+  "tokenCounter": 5,
+  "familyId": "VqZbKDlbYi7OzYwGAjNowA"
+}
+```
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Auth0 logs contain two distinct time representations:
+1. **Primary ISO 8601 UTC Timestamp (`date`)**: String format `YYYY-MM-DDTHH:MM:SS.sssZ`.
+2. **Prompts & Execution Milliseconds (`initiatedAt`, `completedAt`)**: 13-digit Unix Epoch Milliseconds integer.
+
+### Relative Time Template Tags
+When generating synthetic logs, always ensure temporal synchronization between the root ISO string and the nested epoch millisecond timestamps:
+
+* **ISO 8601 String**: `##$TimeStamp-0d0h0m0s$##` (Evaluates to `YYYY-MM-DDTHH:MM:SS.sssZ`)
+* **Epoch Milliseconds**: `##$EpochMs-0d0h0m0s$##` (Evaluates to 13-digit integer, e.g., `1722516274732`)
+* **Epoch Seconds**: `##$Epoch-0d0h0m0s$##` (Evaluates to 10-digit integer, e.g., `1722516274`)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Successful Interactive Universal Login (`type: "s"`)
+*Scenario*: Standard user authentication with multi-prompt flow and adaptive risk assessment.
+```json
+{
+  "log_id": "90020240801124434841430000000000000001223372042517709672",
+  "data": {
+    "date": "##$TimeStamp-0d0h5m12s$##",
+    "type": "s",
+    "client_id": "4plLHrHjY8sOjGnrYEyzEe5f7ZDdQHoa",
+    "client_name": "Customer Portal Web",
+    "connection": "Username-Password-Authentication",
+    "connection_id": "con_tNN3WKyz1iWKHAqR",
+    "strategy": "auth0",
+    "strategy_type": "database",
+    "ip": "203.0.113.195",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "user_id": "auth0|6489b85c7c0b5f1a0ebe8ab7",
+    "user_name": "alex.chen@example.com",
+    "hostname": "auth.example.com",
+    "details": {
+      "initiatedAt": ##$EpochMs-0d0h5m15s$##,
+      "completedAt": ##$EpochMs-0d0h5m12s$##,
+      "elapsedTime": 3120,
+      "session_id": "d4PcPEi3uMQLG8h7bCF2SBrJ1WfZDdII",
+      "prompts": [
+        {
+          "name": "prompt-authenticate-password",
+          "initiatedAt": ##$EpochMs-0d0h5m15s$##,
+          "completedAt": ##$EpochMs-0d0h5m13s$##,
+          "connection": "Username-Password-Authentication",
+          "connection_id": "con_tNN3WKyz1iWKHAqR",
+          "strategy": "auth0",
+          "identity": "6489b85c7c0b5f1a0ebe8ab7",
+          "stats": { "loginsCount": 42 }
+        },
+        {
+          "name": "login",
+          "flow": "universal-login",
+          "initiatedAt": ##$EpochMs-0d0h5m15s$##,
+          "completedAt": ##$EpochMs-0d0h5m12s$##,
+          "user_id": "auth0|6489b85c7c0b5f1a0ebe8ab7",
+          "user_name": "alex.chen@example.com",
+          "timers": { "rules": 142 }
+        }
+      ],
+      "actions": {
+        "executions": ["ZTJ9E1AJzzxNxaA2dYyqpmpcMjAyNDA4MDHQBpWBbYNLva52iHpvxFCB"]
+      },
+      "riskAssessment": {
+        "confidence": "high",
+        "version": "1",
+        "assessments": {
+          "UntrustedIP": { "confidence": "high", "code": "not_found_on_deny_list" },
+          "NewDevice": { "confidence": "low", "code": "recognized_device" },
+          "ImpossibleTravel": { "confidence": "high", "code": "location_history_found" }
+        }
+      },
+      "stats": { "loginsCount": 42 }
+    },
+    "$event_schema": { "version": "1.0.0" },
+    "tenant_name": "enterprise-prod",
+    "log_id": "90020240801124434841430000000000000001223372042517709672"
+  }
+}
+```
+
+### Example 2: Failed Login Attempt / Invalid Credentials (`type: "f"`)
+*Scenario*: Brute force or password guessing attempt triggering an unauthorized OAuth error.
+```json
+{
+  "date": "##$TimeStamp-0d0h12m30s$##",
+  "type": "f",
+  "description": "Wrong email or password.",
+  "connection": "Username-Password-Authentication",
+  "connection_id": "con_vIV1Qvog4hzzHYG3",
+  "client_id": "b7VsNI1dIS1d7uIDVYzG9V6wYHYhyIEI",
+  "client_name": "MyAccount-login",
+  "ip": "198.51.100.77",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  "user_id": "",
+  "user_name": "target.victim@example.com",
+  "hostname": "auth.example.com",
+  "strategy": "auth0",
+  "strategy_type": "database",
+  "details": {
+    "body": {
+      "client_id": "b7VsNI1dIS1d7uIDVYzG9V6wYHYhyIEI",
+      "username": "target.victim@example.com",
+      "password": "*****",
+      "connection": "Username-Password-Authentication"
+    },
+    "qs": {
+      "state": "hKFo2SBhZkRhYm1...",
+      "response_type": "code",
+      "redirect_uri": "https://portal.example.com/callback"
+    },
+    "connection": "Username-Password-Authentication",
+    "error": {
+      "message": "Wrong email or password.",
+      "oauthError": "invalid_grant",
+      "type": "oauth-authorization"
+    },
+    "session_id": "JTxZ3bdnyaKWyN2FwNCUfjmksbcysV65",
+    "riskAssessment": {
+      "confidence": "high",
+      "version": "1",
+      "assessments": {
+        "UntrustedIP": { "confidence": "high", "code": "found_on_deny_list" },
+        "NewDevice": { "confidence": "high", "code": "new_device" },
+        "ImpossibleTravel": { "confidence": "high", "code": "impossible_velocity" }
+      }
+    }
+  },
+  "log_id": "90020240801124435841430000000000000001223372042517709999"
+}
+```
+
+### Example 3: Suspicious Management API Role Escalation (`type: "sapi"`)
+*Scenario*: An administrative service token assigns an administrative role to a target user identity.
+```json
+{
+  "log_id": "90020240801142213211357000000000000001223372036854871576",
+  "data": {
+    "date": "##$TimeStamp-0d1h15m00s$##",
+    "type": "sapi",
+    "description": "Assign roles to a user",
+    "client_id": "3ZY51DGl1rEby7eoDYPdHlzbREqKrbLH",
+    "client_name": "Terraform-Automator",
+    "ip": "192.0.2.14",
+    "user_agent": "Go-Auth0-SDK/0.14.0",
+    "hostname": "tenant-prod.us.auth0.com",
+    "user_id": "",
+    "user_name": "",
+    "details": {
+      "request": {
+        "method": "post",
+        "path": "/api/v2/users/auth0%7C648a150ef5a581b15d072927/roles",
+        "query": {},
+        "userAgent": "Go-Auth0-SDK/0.14.0",
+        "body": {
+          "roles": ["rol_GlobalSuperAdmin99"]
+        },
+        "channel": "api",
+        "ip": "192.0.2.14",
+        "auth": {
+          "user": {},
+          "strategy": "jwt",
+          "credentials": {
+            "jti": "89fce3b879c748c9bf39b8fa018cda12",
+            "scopes": ["update:users", "read:roles", "update:roles"]
+          }
+        }
+      },
+      "response": {
+        "statusCode": 204,
+        "body": {}
+      }
+    },
+    "auth0_client": {
+      "name": "Go-Auth0-SDK",
+      "version": "0.14.0",
+      "env": { "go": "1.21.0" }
+    },
+    "$event_schema": { "version": "1.0.0" },
+    "tenant_name": "enterprise-prod",
+    "log_id": "90020240801142213211357000000000000001223372036854871576"
+  }
+}
+```
+
+### Example 4: Refresh Token Replay / Stolen Token Alert (`type: "fertft"`)
+*Scenario*: Attempt to exchange an already rotated or invalidated refresh token (OAuth 2.0 Token Family breach detection).
+```json
+{
+  "log_id": "90020240801192010277862000000000000001223372036854872354",
+  "data": {
+    "date": "##$TimeStamp-0d0h22m45s$##",
+    "type": "fertft",
+    "description": "Unknown or invalid refresh token.",
+    "connection_id": "",
+    "client_id": "57qGrcHegDyFZJ8WuTt5iQWf75QB5WfI",
+    "client_name": "Mobile-Banking-iOS",
+    "ip": "198.51.100.201",
+    "user_agent": "BankingApp/4.2.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+    "hostname": "auth.bank.com",
+    "user_id": "",
+    "user_name": "",
+    "audience": "https://api.bank.com/v1/",
+    "scope": "openid email profile offline_access",
+    "details": {
+      "description": "Unknown or invalid refresh token.",
+      "tokenCounter": 12,
+      "familyId": "VqZbKDlbYi7OzYwGAjNowA"
+    },
+    "auth0_client": {
+      "name": "auth0-ios",
+      "version": "2.5.0",
+      "env": { "iOS": "17.5.1" }
+    },
+    "$event_schema": { "version": "1.0.0" },
+    "tenant_name": "bank-prod",
+    "log_id": "90020240801192010277862000000000000001223372036854872354"
+  }
+}
+```
+
+### Example 5: Machine-to-Machine Token Issuance (`type: "seccft"`)
+*Scenario*: Microservice authentication via Client Credentials grant requesting specific API scopes.
+```json
+{
+  "log_id": "90020240801230515371927000000000000001223372036854872421",
+  "data": {
+    "date": "##$TimeStamp-0d0h0m10s$##",
+    "type": "seccft",
+    "description": "",
+    "connection_id": "",
+    "client_id": "cXcvVbEAeO3cindiI9IrDhvGgjAcCRyA",
+    "client_name": "Billing-Engine-Daemon",
+    "ip": "10.100.4.18",
+    "user_agent": "Go-http-client/2.0",
+    "hostname": "auth.example.com",
+    "user_id": "",
+    "user_name": "",
+    "audience": "https://api.example.com/v2/invoices",
+    "scope": "read:invoices create:invoices charge:customers",
+    "details": {},
+    "$event_schema": { "version": "1.0.0" },
+    "tenant_name": "enterprise-prod",
+    "log_id": "90020240801230515371927000000000000001223372036854872421"
+  }
+}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Critical Schema Dependencies
+* **Monotonic Log ID Structure**: `log_id` is an essential deduplication key in SIEM pipelines (Splunk, Elastic, Sentinel). It begins with `900` followed by the date string representation and high-precision event counters (`900YYYYMMDD...`). If constructing an event wrapper, `log_id` MUST be identical at the wrapper root and within `data.log_id`.
+* **String vs. Array Scopes**: The `scope` parameter can be a space-delimited string (`"openid profile email"`) or an array of strings (`["openid", "profile"]`). Parsers must handle both types.
+* **Blank vs Null Strings**: In unauthenticated failures or machine-to-machine operations, `user_id` and `user_name` are represented as empty strings (`""`) rather than `null`.
+* **Event Structure Consistency**: When generating event streams, do not mix root-level fields with wrapper models inside the same stream unless testing heterogeneous ingest pipelines. Choose either the Flat model or the `{"log_id": "...", "data": { ... }}` model consistently per generated batch.
+* **Exclude Extraneous CDN Noise**: Edge CDN logs (e.g., Cloudflare HTTP request logs with `RayID`, `EdgeResponseStatus`) must NOT be merged into Auth0 authentication records. Auth0 emits solely its application/identity event structure.

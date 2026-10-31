@@ -1,0 +1,216 @@
+# AI Generation Playbook: ZSCALER_WEBPROXY (Zscaler Internet Access NSS Web Logs)
+
+---
+
+## 1. Overview & Log Purpose
+
+### System & Device Classification
+* **Vendor**: Zscaler
+* **Product**: Zscaler Internet Access (ZIA) / Nanolog Streaming Service (NSS)
+* **Log Category**: Web Proxy & Secure Web Gateway (SWG) Access Logs
+* **Sourcetype Variants**: `zscalernss-web`, `zscaler:zia:web`, `zscaler-nss`
+
+### Activity Recorded
+Zscaler NSS Web Proxy logs capture real-time HTTP, HTTPS, SSL/TLS, and DNS-over-HTTPS (DoH) transactions processed by the Zscaler cloud enforcement nodes. These logs document:
+* **Web Traffic & Policy Enforcement**: URL categorization, allow/block decisions, bandwidth limits, cloud app usage.
+* **Security & Threat Prevention**: Known malware downloads, botnet callback prevention, malicious IP/domain blocks, phishing prevention, cloud sandbox quarantine events.
+* **Data Loss Prevention (DLP)**: Dictionary matches, pattern hits, file upload/download enforcement.
+* **SSL/TLS Inspection**: Certificate verification, protocol inspection, cipher suite negotiation, SSL handshake failures, and inspection bypasses.
+* **User & Device Telemetry**: User identity (UPN/email/machine accounts), source network location, Zscaler Client Connector (ZCC) device metadata, and OS environment.
+
+---
+
+## 2. Format Specifications
+
+Zscaler NSS feeds can output logs in several standard formats depending on the SIEM integration profile. When generating synthetic logs, adhere strictly to one of the following primary formats.
+
+### Format A: Splunk HEC / JSON Wrapper (Most Common)
+Single-line JSON wrapped in an event envelope or emitted as a raw JSON payload.
+* **Structure**: `{"event": { <key-value pairs> }, "sourcetype": "zscalernss-web"}`
+* **Quoting & Types**: All keys and string values are double-quoted. Numeric values (sizes, status codes, risk scores) are commonly formatted as double-quoted strings in standard NSS templates (`"status": "200"`, `"pagerisk": "0"`).
+* **Escaping**: Standard JSON escaping (`\"`, `\\`, `\n`).
+
+### Format B: LEEF 1.0 (Log Event Extended Format over Syslog)
+Used natively for IBM QRadar and standard Syslog collectors.
+* **Structure**: `<PRI>MMM DD HH:MM:SS <Host> zscaler-nss: LEEF:1.0|Zscaler|NSS|<Version>|<Reason/Policy>|cat=<Action>\t<Key1>=<Val1>\t<Key2>=<Val2>...`
+* **Delimiter**: Header fields are pipe-delimited (`|`); payload attributes are strictly tab-delimited (`\t`).
+* **Header Fields (7 elements)**:
+  `LEEF:Version|Vendor|Product|ProductVersion|EventID/Reason|cat=Action`
+
+### Format C: Key-Value (KV) Tab-Delimited
+Custom NSS stream emitting a timestamp prefix followed by tab-separated pairs.
+* **Structure**: `YYYY-MM-DD HH:MM:SS [Timezone]\tkey1=value1\tkey2=value2\t...`
+* **Delimiter**: Tab (`\t`) between key-value pairs; unquoted values unless strings contain explicit quotes.
+
+### Format D: CEF (Common Event Format)
+* **Structure**: `MMM DD HH:MM:SS <Host> CEF:0|Zscaler|NSSWeblog|<Version>|<DeviceEventClassID>|<Name>|<Severity>|act=<Action> app=<Protocol> ...`
+* **Delimiter**: Space-separated `key=value` with standard CEF extension escaping.
+
+---
+
+## 3. Schema Breakdown & Core Fields
+
+### 3.1 Metadata & Device Fields
+
+| Field (JSON) | Field (LEEF) | Field (CEF) | Type | Description / Allowed Values |
+| :--- | :--- | :--- | :--- | :--- |
+| `vendor` | *Header (2)* | *Header (2)* | String | Constant: `Zscaler` |
+| `product` | *Header (3)* | *Header (3)* | String | `NSS` or `NSSWeblog` |
+| `productversion` | *Header (4)* | *Header (4)* | String | e.g., `4.1`, `5.0`, `6.2r.551_prod.53.391476_114` |
+| `event_id` | `recordid` | `externalId` | String/Int | Unique 64-bit uint string (e.g., `7365838693731467265`) |
+| `trafficredirectmethod` | - | - | String | `ZscalerClientConnector`, `GRE`, `IPSec`, `PAC`, `Explicit` |
+| `productversion` | - | - | String | e.g., `6.2r.551_prod.53.391476_114` |
+
+### 3.2 Network & Routing Fields
+
+| Field (JSON) | Field (LEEF) | Field (CEF) | Type | Description / Example Values |
+| :--- | :--- | :--- | :--- | :--- |
+| `ClientIP` | `src` | `src` | IP | Internal client IPv4 address (`10.0.1.10`, `192.168.1.58`) |
+| `clientpublicIP` | `srcPostNAT` | `sourceTranslatedAddress` | IP | Egress public IP before Zscaler node (`198.51.100.1`) |
+| `serverip` | `dst` | `dst` | IP | Destination server IP address (`198.51.100.2`) |
+| `location` | `realm` | `spriv` | String | Location name or VPN profile (`Road Warrior`, `Road%20Warrior`, `Corporate Offices`, `AWS_Prod_-us-east-1`) |
+
+### 3.3 Identity & Endpoint Context
+
+| Field (JSON) | Field (LEEF) | Field (CEF) | Type | Description / Example Values |
+| :--- | :--- | :--- | :--- | :--- |
+| `user` | `usrName` | `suser` | String | UPN (`user@example.com`), numeric ID (`849949440`), or machine account (`noauth-protocol$@domain.com`) |
+| `department` | `role` | `cs1` | String | User department (`IT Operations`, `IT%20Operations`, `Default Department`, `Security`) |
+| `devicehostname` | `devicehostname` | `dvchost` | String | Client hostname (`WKSTN-LON-01`, `WKSTN-CORP-01`, `NA`) |
+| `deviceowner` | `deviceowner` | - | String | User ID or SAM account (`jdoe`, `dummy_user`, `NA`) |
+| `deviceostype` | - | - | String | `Windows OS`, `Mac OS`, `Linux`, `iOS`, `Android` |
+| `deviceosversion` | - | - | String | `Microsoft Windows 10 Enterprise;64 bit;amd64`, `macOS 13.4` |
+
+### 3.4 HTTP/Proxy Transaction Fields
+
+| Field (JSON) | Field (LEEF) | Field (CEF) | Type | Description / Example Values |
+| :--- | :--- | :--- | :--- | :--- |
+| `protocol` | `appproto` | `app` | String | `HTTP`, `HTTPS`, `HTTP_PROXY`, `SSL`, `TUNNEL_SSL`, `DNSOVERHTTPS` |
+| `requestmethod` | `reqmethod` | `requestMethod` | String | `GET`, `POST`, `CONNECT`, `PUT`, `OPTIONS`, `HEAD`, `MAILPOST`, `NA` (for raw SSL/TCP) |
+| `status` | `respcode` | `outcome` | String | HTTP status code (`200`, `201`, `204`, `302`, `403`, `500`, `504`) or `NA` |
+| `url` | `url` | `request` | String | Target URI, FQDN with port, or path (e.g., `login.microsoftonline.com:443`, `api.github.com/v3/user`) |
+| `hostname` | `hostname` | `dhost` | String | Destination FQDN (`login.microsoftonline.com`, `api.github.com`) |
+| `useragent` | `useragent` | `requestClientApplication` | String | Browser UA, SDK agent (`Boost.Beast/306`, `Microsoft NCSI`), or `Unknown` |
+| `refererURL` | `referer` | `requestContext` | String | Referer URI or `None` |
+| `contenttype` | `contenttype` | `fileType` | String | MIME type (`application/json`, `text/html`, `image/gif`, `application/octet_stream`, `Other`) |
+
+### 3.5 Traffic Volume & Metrics
+
+| Field (JSON) | Field (LEEF) | Field (CEF) | Type | Description / Units |
+| :--- | :--- | :--- | :--- | :--- |
+| `requestsize` | `srcBytes` | `in` | String/Int | Bytes sent by client (request headers + payload) |
+| `responsesize` | `dstBytes` | `out` | String/Int | Bytes sent by server (response headers + payload) |
+| `transactionsize` | - | - | String/Int | Total transaction bytes (`requestsize` + `responsesize`) |
+| `clienttranstime` | - | - | String/Int | Total transaction duration in milliseconds / microseconds |
+| `servertranstime` | - | - | String/Int | Server response turnaround time |
+| `bwthrottle` | `bwthrottle` | - | String | Bandwidth throttle flag: `YES`, `NO` |
+
+### 3.6 Classification, Policy & Threat Fields
+
+| Field (JSON) | Field (LEEF) | Field (CEF) | Type | Description / Example Values |
+| :--- | :--- | :--- | :--- | :--- |
+| `action` | `cat` | `act` | String | Policy decision: `Allowed`, `Blocked`, `Quarantined` |
+| `reason` | *Header (5)* / `policy` | `reason` | String | Detailed reason string (*see table below*) |
+| `appname` | `appname` | `destinationServiceName` | String | `General Browsing`, `Outlook (Office 365)`, `Google Drive`, `Cyberark`, `ServiceNow`, `Common Office 365 Applications` |
+| `appclass` | `appclass` | `cs3` | String | `General Browsing`, `Webmail`, `Business`, `IM`, `File Share`, `Sales and Marketing`, `IT Services` |
+| `urlcategory` | `urlcategory` | `cat` | String | `Corporate Marketing`, `Web search`, `Internet Services`, `Online Chat`, `Operating System and Software Updates`, `Botnets`, `Suspicious Destination`, `SSL-Bypass` |
+| `urlsupercategory` | `urlsupercategory` | `cs2` | String | `Business and Economy`, `Internet Communication`, `Information Technology`, `Advanced Security`, `User-defined`, `Miscellaneous` |
+| `urlclass` | `urlclass` | `ZscalerNSSWeblogURLClass` | String | `Business Use`, `Bandwidth Loss`, `General Surfing`, `Advanced Security Risk` |
+| `pagerisk` | `riskscore` | `cn1` | String/Int | Risk rating score: `0` to `100` |
+| `threatcategory` | `malwaretype` | `cs4` | String | Threat classification: `None`, `Botnets`, `Phishing`, `Submitted to Sandbox`, `Spyware` |
+| `threatname` | `threatname` | `cs5` | String | Threat definition: `None`, `Win32.Banker.Emotet.LZ`, `Trojan.GenericKD`, `W32/CobaltStrike.C2` |
+| `threatclass` | `malwareclass` | - | String | `None`, `Behavior Analysis`, `Virus`, `Adware` |
+| `threatseverity` | - | - | String | `None`, `Low`, `Medium`, `High`, `Critical` |
+| `fileclass` | `fileclass` | - | String | `None`, `Executables Files`, `Archive Files`, `Documents` |
+| `filetype` | `filetype` | `fileType` | String | `None`, `Windows Executable (exe, exe64, scr)`, `GZIP`, `ZIP`, `PDF` |
+| `md5` / `bamd5` | `md5` | `bamd5` | Hex String | MD5 hash of scanned file payload, or `None` |
+| `dlpengine` | `dlpeng` | `cs6` | String | DLP Engine status: `None`, `Standard`, `Advanced` |
+| `dlpdictionaries` | `dlpdict` | `ZscalerNSSWeblogDLPDictionaries` | String | Triggered DLP rule/dictionary: `None`, `PII_SSN`, `CreditCard_PCI` |
+| `unscannabletype` | `unscannabletype` | - | String | `None`, `ENCRYPTED`, `BAD_ARCHIVE`, `MAX_SIZE_EXCEEDED` |
+
+---
+
+## 4. Policy Action & Reason Matrix
+
+When generating realistic logs, pair `action`, `reason`, and `status` according to this matrix:
+
+| Scenario | Action (`action` / `cat`) | Reason (`reason` / `policy`) | Status (`status` / `respcode`) | Protocol / Method |
+| :--- | :--- | :--- | :--- | :--- |
+| **Normal Allowed Web** | `Allowed` | `Allowed` | `200`, `201`, `204`, `302` | `HTTPS` / `GET`, `POST` |
+| **SSL Proxy Connect** | `Allowed` | `Allowed` | `200` | `HTTP_PROXY` / `CONNECT` |
+| **URL Category Block** | `Blocked` | `Not allowed to browse this category` | `403` | `HTTP`, `HTTPS` / `GET`, `POST` |
+| **Firewall Rule Block** | `Blocked` | `Web application is blocked by Firewall rule` | `403` | `HTTP` / `GET` |
+| **SSL Handshake Drop** | `Blocked` | `Dropped due to failed client SSL handshake` | `NA` | `SSL` / `NA` |
+| **Bad Server Cert** | `Blocked` | `Access denied due to bad server certificate` | `403` | `HTTPS` / `POST`, `GET` |
+| **Botnet / Malware Hit**| `Blocked` | `Reputation block outbound request: botnet site` | `403` | `HTTP` / `CONNECT`, `GET` |
+| **Country Geo-Block** | `Blocked` | `Country block outbound request: not allowed to access sites in this country` | `NA` | `SSL` / `NA` |
+| **Sandbox Quarantine** | `Blocked` / `Quarantined` | `Quarantined` | `403` | `HTTPS` / `GET` |
+| **DLP Block** | `Blocked` | `Blocked by DLP policy violation` | `403` | `HTTPS` / `POST`, `PUT` |
+
+---
+
+## 5. Timestamp & Dynamic Time Templating
+
+Zscaler NSS uses different time formats based on the log transmission layer:
+* **JSON NSS**: `YYYY-MM-DD HH:MM:SS` (field `datetime`) and Unix Epoch seconds (field `epochtime`).
+* **JSON ZIA v1.4+**: ISO 8601 UTC `YYYY-MM-DDTHH:MM:SSZ` (field `datetime`) and Unix Epoch seconds (field `edatetime`).
+* **LEEF Header Syslog**: Standard BSD Syslog timestamp `MMM dd HH:mm:ss`.
+* **LEEF `devTime` Parameter**: `MMM dd yyyy HH:mm:ss z` (e.g., `May 27 2024 14:29:39 America/New York` or `GMT`).
+
+### Required Dynamic Time Template Tags
+When generating scenario logs, use the following dynamic replacement tags:
+
+* Standard Date/Time (`datetime`): `##$TimeStamp-0d2h15m0s$##` -> `2024-05-06 10:56:04`
+* ISO 8601 UTC: `##$Iso8601-0d2h15m0s$##` -> `2024-05-06T10:56:04Z`
+* Epoch Seconds (`epochtime`, `edatetime`): `##$Epoch-0d2h15m0s$##` -> `1714992964`
+* Syslog Header Time: `##$SyslogTime-0d2h15m0s$##` -> `May  6 10:56:04`
+* Custom Time for LEEF `devTime`: `##$CustomTime:MMM dd yyyy HH:mm:ss-0d2h15m0s$## America/New York` -> `May 06 2024 10:56:04 America/New York`
+
+---
+
+## 6. Concrete Valid Examples
+
+### Example 1: JSON NSS Format - Allowed Corporate SaaS Activity (M365)
+```json
+{"event":{"ClientIP":"10.200.45.112","action":"Allowed","appclass":"Webmail","appname":"Outlook (Office 365)","bwthrottle":"NO","clientpublicIP":"198.51.100.22","contenttype":"application/json","datetime":"##$TimeStamp-0d0h05m20s$##","department":"Finance%20Operations","devicehostname":"FIN-LT-4491","deviceowner":"mreynolds","dlpdictionaries":"None","dlpengine":"None","event_id":"7365839912448301057","fileclass":"None","filetype":"None","hostname":"outlook.office365.com","keyprotectiontype":"Software Protection","location":"Road%20Warrior","pagerisk":"0","product":"NSS","protocol":"HTTPS","reason":"Allowed","refererURL":"https://outlook.office.com/mail/inbox","requestmethod":"POST","requestsize":"3450","responsesize":"12880","serverip":"52.96.166.162","status":"200","threatcategory":"None","threatclass":"None","threatname":"None","threatseverity":"None","transactionsize":"16330","unscannabletype":"None","url":"outlook.office365.com/owa/service.svc?action=GetMailItems","urlcategory":"Webmail","urlclass":"Business Use","urlsupercategory":"Internet Communication","user":"mreynolds@example.com","useragent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","vendor":"Zscaler"},"sourcetype":"zscalernss-web"}
+```
+
+### Example 2: JSON NSS Format - Blocked Botnet Command & Control (Emotet)
+```json
+{"event":{"ClientIP":"192.168.4.88","action":"Blocked","appclass":"General Browsing","appname":"General Browsing","bwthrottle":"NO","clientpublicIP":"198.51.100.22","contenttype":"Other","datetime":"##$TimeStamp-0d0h04m10s$##","department":"Human%20Resources","devicehostname":"HR-WS-0092","deviceowner":"kclark","dlpdictionaries":"None","dlpengine":"None","event_id":"7365839988112448302","fileclass":"None","filetype":"None","hostname":"evil-c2-node.biz","keyprotectiontype":"N/A","location":"HQ-Branch-Office","pagerisk":"95","product":"NSS","protocol":"HTTP","reason":"Reputation block outbound request: botnet site","refererURL":"None","requestmethod":"CONNECT","requestsize":"185","responsesize":"0","serverip":"203.0.113.59","status":"403","threatcategory":"Botnets","threatclass":"Behavior Analysis","threatname":"Win32.Banker.Emotet.LZ","threatseverity":"Critical","transactionsize":"185","unscannabletype":"None","url":"evil-c2-node.biz:8080/gate.php","urlcategory":"Botnets","urlclass":"Advanced Security Risk","urlsupercategory":"Advanced Security","user":"kclark@example.com","useragent":"Boost.Beast/306","vendor":"Zscaler"},"sourcetype":"zscalernss-web"}
+```
+
+### Example 3: LEEF Syslog Format - Policy Block (Gambling / URL Filtering)
+```text
+<38>##$SyslogTime-0d0h03m30s$## 198.51.100.1 zscaler-nss: LEEF:1.0|Zscaler|NSS|4.1|Not allowed to browse this category|cat=Blocked	devTime=##$CustomTime:MMM dd yyyy HH:mm:ss-0d0h03m30s$## America/New York	devTimeFormat=MMM dd yyyy HH:mm:ss z	src=10.10.80.14	dst=198.51.100.200	srcPostNAT=198.51.100.22	realm=Corporate Headquarters	usrName=dsmith@example.com	srcBytes=420	dstBytes=14200	role=Legal & Compliance	policy=Not allowed to browse this category	url=www.online-casinogame-live.com/	recordid=7365840112448301059	bwthrottle=NO	useragent=Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0	referer=None	hostname=www.online-casinogame-live.com	appproto=HTTPS	urlcategory=Gambling	urlsupercategory=User-defined	urlclass=Bandwidth Loss	appclass=General Browsing	appname=General Browsing	malwaretype=None	malwareclass=None	threatname=None	riskscore=45	dlpdict=None	dlpeng=None	fileclass=None	filetype=None	reqmethod=GET	respcode=403	contenttype=text/html	unscannabletype=None	deviceowner=dsmith	devicehostname=L00ES5CD992LL1
+```
+
+### Example 4: LEEF Syslog Format - Cloud Sandbox Executable Quarantine
+```text
+<38>##$SyslogTime-0d0h02m15s$## 198.51.100.1 zscaler-nss: LEEF:1.0|Zscaler|NSS|4.1|Quarantined|cat=Blocked	devTime=##$CustomTime:MMM dd yyyy HH:mm:ss-0d0h02m15s$## America/New York	devTimeFormat=MMM dd yyyy HH:mm:ss z	src=10.10.80.45	dst=198.51.100.205	srcPostNAT=198.51.100.22	realm=Engineering Lab	usrName=adevlin@example.com	srcBytes=2940	dstBytes=21050	role=Software Development	policy=Quarantined	url=files.suspicious-dist-server.com/bin/setup_patch_v44.exe	recordid=7365840255448301060	bwthrottle=NO	useragent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36	referer=None	hostname=files.suspicious-dist-server.com	appproto=HTTPS	urlcategory=Other Information Technology	urlsupercategory=Information Technology	urlclass=Business Use	appclass=General Browsing	appname=General Browsing	malwaretype=Submitted to Sandbox	malwareclass=Behavior Analysis	threatname=Trojan.Downloader.Agent	riskscore=85	dlpdict=None	dlpeng=None	fileclass=Executables Files	filetype=Windows Executable (exe, exe64, scr)	md5=88adcb532aed31c2956f554c4be4fa12	filename=setup_patch_v44.exe	reqmethod=GET	respcode=403	contenttype=application/octet_stream	unscannabletype=None	deviceowner=adevlin	devicehostname=DEV-WS-9901
+```
+
+### Example 5: KV Tab-Delimited - Data Loss Prevention (DLP) Rule Match & Block
+```text
+##$TimeStamp-0d0h01m00s$## GMT	reason=Blocked by DLP policy violation	event_id=7365840399448301061	protocol=HTTPS	action=Blocked	transactionsize=128450	responsesize=1450	requestsize=127000	urlcategory=Personal Storage	serverip=198.51.100.89	clienttranstime=340	requestmethod=POST	refererURL=https://www.personal-cloud-drive.com/upload	useragent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36	product=NSS	location=Road Warrior	ClientIP=10.0.12.8	status=403	user=jdoe@example.com	url=www.personal-cloud-drive.com/api/v2/upload/chunk	vendor=Zscaler	hostname=www.personal-cloud-drive.com	clientpublicIP=198.51.100.22	threatcategory=None	threatname=None	filetype=ZIP	appname=Generic File Sharing	pagerisk=20	department=Corporate Accounting	urlsupercategory=Internet Communication	appclass=File Share	dlpengine=Advanced	urlclass=Bandwidth Loss	threatclass=None	dlpdictionaries=CreditCard_PCI_DSS,SSN_PII_Strict	fileclass=Archive Files	bwthrottle=NO	servertranstime=120
+```
+
+---
+
+## 7. Key Constraints & Common Pitfalls
+
+### Mandatory Parsing Rules
+1. **LEEF Tab Delimiter**: In LEEF logs, the attributes *must* be separated by the literal horizontal tab (`\t`) character. Using spaces between key-value pairs will cause QRadar and generic syslog parsers to fail.
+2. **Missing/Null Field Values**: Zscaler NSS does not use empty strings or JSON `null` for unpopulated attributes. It outputs literal `"None"`, `"NA"`, `"N/A"`, or `"0"` depending on the field.
+   * `threatname`: `"None"`
+   * `requestmethod`: `"NA"` (for lower-level SSL/TLS records before HTTP decapsulation)
+   * `status`: `"NA"` (when no HTTP response was sent, e.g., dropped TCP connection)
+   * `pagerisk` / `riskscore`: `"0"`
+3. **URL Encoding Consistency**: Field values containing spaces—such as `department`, `location`, `urlcategory`, and `useragent`—are frequently URL-encoded (`%20`) by NSS depending on feed configuration (`Road%20Warrior` vs `Road Warrior`).
+4. **URL vs. Hostname**:
+   * `hostname`: Pure FQDN or IP without scheme or port (e.g., `login.microsoft.com`).
+   * `url`: Full path or host with explicit port (e.g., `login.microsoft.com:443` or `example.com/api/v1/auth?client_id=123`).
+5. **Byte Consistency**:
+   * Ensure `transactionsize` roughly equals `requestsize` + `responsesize`.
+   * For blocked requests at the TCP/SSL level, `requestsize` may be small (handshake size) and `responsesize` is typically `0`.
+   * For proxy `CONNECT` tunnels, `responsesize` is commonly small (e.g., `65` bytes representing HTTP 200 Connection Established).

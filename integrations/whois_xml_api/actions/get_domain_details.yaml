@@ -1,0 +1,17 @@
+name: "Get Domain Details"
+description: "Retrieves domain registration details and availability from WHOIS XML API."
+is_async: false
+parameters:
+  - name: "Domain Name"
+    description: "The domain name to inspect (e.g., example.com)."
+    type: string
+    is_mandatory: true
+    default_value: ""
+  - name: "Check availability"
+    description: "Determine whether to check if the domain is currently available for registration."
+    type: boolean
+    is_mandatory: false
+    default_value: false
+simulation_data:
+  output_message: "Successfully fetched WHOIS data for domain: example.com"
+  result_value: true

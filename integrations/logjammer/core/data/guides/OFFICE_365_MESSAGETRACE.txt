@@ -1,0 +1,182 @@
+# AI Log Generation Playbook: Office 365 Message Trace (`OFFICE_365_MESSAGETRACE`)
+
+## 1. Overview & Log Purpose
+
+**OFFICE_365_MESSAGETRACE** captures the lifecycle, routing, security inspection, and delivery disposition of emails processed through Microsoft Exchange Online Protection (EOP) and Microsoft Defender for Office 365 (MDO).
+
+### Core Recorded Activities
+* **Email Transit & Delivery**: Inbound, outbound, and internal routing statuses (e.g., `Delivered`, `Expanded`, `Resolved`, `Failed`, `Pending`).
+* **Security & Threat Detection**: Antispam verdicts (`FilteredAsSpam`), antiphishing detections, antimalware blocks, and quarantine actions.
+* **Metadata & Forensics**: RFC 5322 Internet Message IDs, Exchange Network Message IDs, sender/recipient envelope addresses, client IP addresses, delivery servers, subject lines, message sizes, and authentication results (SPF, DKIM, DMARC, CompAuth).
+* **Deep Inspection Telemetry (MDO Advanced Hunting)**: File attachment analysis (hashes, file types) and URL threat analysis (domains, body/attachment location).
+
+---
+
+## 2. Format Specification
+
+Office 365 Message Trace logs are transmitted as JSON objects. Across enterprise environments, logs appear in three main schema variants depending on the extraction mechanism:
+
+| Dialect Variant | Ingestion Mechanism | Format Characteristics |
+| :--- | :--- | :--- |
+| **Variant A: Classic Message Trace** | PowerShell `Get-MessageTrace` / EOP REST Reporting API / Splunk Add-on for MS Cloud Services | Flat JSON object; contains `Organization`, `MessageTraceId`, `Status`, `SenderAddress`, `RecipientAddress`. |
+| **Variant B: MDO Advanced Hunting Stream** | Azure Event Hub / Azure Monitor Diagnostic Settings (Log Analytics) | Wrapped JSON object with top-level fields `time`, `tenantId`, `operationName`, `category` (`AdvancedHunting-EmailEvents`, `AdvancedHunting-EmailAttachmentInfo`, `AdvancedHunting-EmailUrlInfo`), and a nested `properties` dictionary. |
+| **Variant C: Microsoft Graph Security API** | MS Graph API (`/security/messageTraces`) | CamelCase JSON format (`messageId`, `receivedDateTime`, `recipientAddress`, `senderAddress`, `fromIP`, `toIP`). |
+
+### Delimiters and Quoting
+* **Line Termination**: Single-line newline-delimited JSON (`NDJSON` / `JSONL`).
+* **Encoding**: UTF-8.
+* **Quoting**: All JSON strings must be double-quoted (`"..."`). Special characters within subject lines, email bodies, or nested JSON structures (e.g., `AuthenticationDetails`) must be escaped properly (`\"`, `\\`, `\n`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Variant A: Classic Message Trace Schema (Flat JSON)
+
+| Field Name | Type | Description | Sample Values |
+| :--- | :--- | :--- | :--- |
+| `Organization` | String | Microsoft 365 Tenant identifier or custom domain | `"contoso.onmicrosoft.com"`, `"acme.com"` |
+| `MessageId` | String | RFC 5322 Internet Message-ID header (enclosed in `< >`) | `"<LO7P265MB7699@PROD.OUTLOOK.COM>"`, `"<uuid@domain.com>"` |
+| `MessageTraceId` | String (UUID/Numeric) | Exchange tracking identifier correlating all hops for an email | `"cc9ea6a5-c2a5-4d19-6eb7-08db322ea3b8"`, `"62581968470047"` |
+| `Received` | String | Timestamp when Exchange Online received the email | `"2024-05-23T03:29:37.1400000"`, `"/Date(1716434977140)/"` |
+| `SenderAddress` | String | Envelope sender (P1) email address (`<>` for system bounces/NDRs) | `"alice@example.com"`, `"noreply@service.com"`, `"< >"` |
+| `RecipientAddress` | String | Envelope recipient (P1) email address | `"bob@contoso.com"`, `"dl-all@contoso.com"` |
+| `Subject` | String | Email Subject line header (P2) | `"Invoice #90214"`, `"Weekly Report"` |
+| `Status` | String | Final message delivery status | `Delivered`, `Failed`, `Expanded`, `Quarantined`, `FilteredAsSpam`, `Resolved`, `SENDEXTERNAL`, `RECEIVE` |
+| `FromIP` | String (IPv4/IPv6) | IP address of connecting sending mail server/client | `"198.51.100.45"`, `"10.12.10.2"` |
+| `ToIP` | String (IPv4/IPv6) \| Null | Destination IP address for external handoff (or `null`) | `"203.0.113.10"`, `null` |
+| `Size` | Integer | Total size of email message in bytes | `26074`, `124771`, `524288` |
+| `StartDate` | String (ISO / OData) | Trace search start boundary | `"2024-05-23T03:25:00Z"`, `"/Date(1716434700000)/"` |
+| `EndDate` | String (ISO / OData) | Trace search end boundary | `"2024-05-23T03:30:00Z"`, `"/Date(1716435000000)/"` |
+| `Index` | Integer / String | Record sequential counter | `7312`, `11749`, `395` |
+
+---
+
+### Variant B: Advanced Hunting Schema (`AdvancedHunting-EmailEvents`)
+
+#### Outer Wrapper
+* `time`: ISO 8601 Event ingestion timestamp (`YYYY-MM-DDTHH:MM:SS.fffffffZ`).
+* `tenantId`: Azure AD / Entra ID Tenant UUID.
+* `operationName`: Operation type (typically `"Publish"`).
+* `category`: Category name (`"AdvancedHunting-EmailEvents"`, `"AdvancedHunting-EmailAttachmentInfo"`, `"AdvancedHunting-EmailUrlInfo"`).
+* `Tenant`: Tenant routing classifier (typically `"DefaultTenant"`).
+* `properties`: Nested JSON object containing forensic metadata.
+
+#### `properties` Dictionary Fields (EmailEvents)
+
+| Field Name | Type | Description | Sample Values |
+| :--- | :--- | :--- | :--- |
+| `ReportId` | String | Unique report record ID | `"e69fa068-ca7f-4092-199a-08dc6e99647a-298909918974558219-1"` |
+| `NetworkMessageId` | String (UUID) | Unique message trace ID within MDO | `"e69fa068-ca7f-4092-199a-08dc6e99647a"` |
+| `InternetMessageId`| String | Internet Message-ID RFC header | `"<LO7P265MB7699E56948722A@OUTLOOK.COM>"` |
+| `Timestamp` | String (ISO 8601) | Timestamp of email processing | `"2024-05-07T13:27:08Z"` |
+| `EmailClusterId` | Integer | MDO message cluster grouping ID | `3364680795` |
+| `SenderIPv4` | String (IPv4) | Inbound sending server IPv4 | `"86.5.87.129"` |
+| `SenderIPv6` | String (IPv6) \| Null| Inbound sending server IPv6 | `null`, `"2a01:111:f400:7c0a::"` |
+| `SenderMailFromAddress` | String | P1 RFC 5321 Mail From address | `"attacker@evil.com"`, `"sender@legit.com"` |
+| `SenderFromAddress`| String | P2 RFC 5322 From header address | `"spoofed-exec@target.com"`, `"sender@legit.com"` |
+| `SenderMailFromDomain` | String | Domain extracted from P1 address | `"evil.com"`, `"legit.com"` |
+| `SenderFromDomain`| String | Domain extracted from P2 address | `"target.com"`, `"legit.com"` |
+| `RecipientEmailAddress` | String | Recipient address | `"victim@target.com"` |
+| `Subject` | String | Email Subject line | `"Urgent: Wire Transfer Required"` |
+| `EmailDirection` | String | Traffic direction | `"Inbound"`, `"Outbound"`, `"Intra-org"` |
+| `DeliveryAction` | String | Action taken on message | `"Delivered"`, `"Blocked"`, `"Replaced"`, `"Quarantine"` |
+| `DeliveryLocation`| String | Destination mailbox folder / endpoint | `"Inbox/folder"`, `"Junk folder"`, `"Quarantine"`, `"On-premises/external"`, `"Dropped"`, `"Failed"` |
+| `EmailLanguage` | String | Detected language code | `"en"`, `"fr"`, `"es"`, `"de"` |
+| `AttachmentCount` | Integer | Number of email attachments | `0`, `1`, `3` |
+| `UrlCount` | Integer | Number of URLs parsed in email body | `0`, `1`, `4` |
+| `SenderObjectId` | String (UUID) \| Null| Entra ID User Object ID of internal sender | `"52106877-7cc0-4f2e-839a-ec5cd66b2571"`, `null` |
+| `RecipientObjectId`| String (UUID) | Entra ID User Object ID of recipient | `"c99e1529-af9e-44b6-be1b-8474d8d90d5f"` |
+| `ThreatTypes` | String \| Null | Classified threat category | `"Phish"`, `"Malware"`, `"Spam"`, `null` |
+| `ThreatNames` | String \| Null | Name of threat detected | `"Trojan:Win32/Emotet"`, `"Phish_CredentialHarvest"`, `null` |
+| `DetectionMethods` | String \| Null | Engine/Rule triggering detection | `"File reputation"`, `"URL reputation"`, `"Machine Learning"` |
+| `AuthenticationDetails` | String (JSON-escaped) | Authentication pass/fail results | `"{\"DKIM\":\"pass\",\"DMARC\":\"pass\",\"SPF\":\"pass\",\"CompAuth\":\"pass\"}"` |
+| `BulkComplaintLevel` | Integer \| Null | BCL rating (0–9) | `0`, `3`, `7`, `null` |
+
+---
+
+### Variant C: Advanced Hunting Supporting Categories
+
+#### `AdvancedHunting-EmailAttachmentInfo`
+Nested inside `properties`:
+* `ReportId`, `NetworkMessageId`, `Timestamp`, `RecipientEmailAddress`, `SenderFromAddress`
+* `FileName` (e.g., `"Invoice_0912.pdf"`, `"payload.iso"`, `"ATT00004"`)
+* `FileType` (e.g., `"pdf"`, `"iso"`, `"png"`, `"exe"`, `"docx"`)
+* `SHA256` (64-character lowercase hexadecimal hash)
+* `FileSize` (Integer bytes)
+* `ThreatTypes`, `ThreatNames`, `DetectionMethods`
+
+#### `AdvancedHunting-EmailUrlInfo`
+Nested inside `properties`:
+* `ReportId`, `NetworkMessageId`, `Timestamp`
+* `Url` (Full URL, e.g., `"https://secure-login.portal-update.com/auth"`)
+* `UrlDomain` (e.g., `"portal-update.com"`)
+* `UrlLocation` (`"Body"` or `"Attachment"`)
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+### Supported Formats Across Variants
+1. **ISO 8601 UTC with fractional seconds (Standard)**: `2024-05-07T13:28:26.2247938Z`
+2. **ISO 8601 UTC without trailing 'Z'**: `2023-03-31T21:26:49.9714743`
+3. **ISO 8601 Second Granularity**: `2024-05-07T13:27:08Z`
+4. **OData WCF Epoch Milliseconds**: `"/Date(1754369327258)/"`
+
+### Dynamic Time Replacement Tags
+When authoring scenarios, embed the following placeholder macros to ensure proper relative time generation:
+
+* `##$TimeStamp-0d0h0m0s$##` -> Current execution time in ISO 8601 (`YYYY-MM-DDTHH:MM:SS.fffffffZ`)
+* `##$TimeStamp-0d0h2m0s$##` -> Event timestamp 2 minutes prior (`YYYY-MM-DDTHH:MM:SS.fffffffZ`)
+* `##$Epoch-0d0h2m0s$##` -> Event timestamp 2 minutes prior in Unix Epoch Seconds (`1716434977`)
+* `##$EpochMS-0d0h2m0s$##` -> Event timestamp 2 minutes prior in Unix Epoch Milliseconds (`1716434977000`)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Classic Message Trace – Clean Inbound Delivery
+```json
+{"Organization":"contosocorp.onmicrosoft.com","MessageId":"<CALP265MB3210ABC123@CALP265MB3210.PROD.OUTLOOK.COM>","Received":"##$TimeStamp-0d0h5m12s$##","SenderAddress":"partner-support@vendor-services.com","RecipientAddress":"finance-ops@contosocorp.com","Subject":"Monthly Settlement Statement - October 2024","Status":"Delivered","ToIP":null,"FromIP":"198.51.100.44","Size":45120,"MessageTraceId":"a823bf1c-54ea-4ce2-b2a1-08dc6f120199","StartDate":"##$TimeStamp-0d0h10m0s$##","EndDate":"##$TimeStamp-0d0h0m0s$##","Index":10423}
+```
+
+### Example 2: Classic Message Trace – Non-Delivery Report / System Alarm (Null Sender)
+```json
+{"Organization":"contosocorp.onmicrosoft.com","MessageId":"<982348123-alarm-service@datacenter02.internal>","Received":"##$TimeStamp-0d1h15m0s$##","SenderAddress":"<>","RecipientAddress":"it-oncall@contosocorp.com","Subject":"CRITICAL: Primary HVAC Temp Threshold Exceeded [DC-East-B]","Status":"Delivered","ToIP":null,"FromIP":"10.240.12.8","Size":8412,"MessageTraceId":"f410c9aa-2104-4c8d-88b1-08dc6f0119ee","StartDate":"##$TimeStamp-0d1h20m0s$##","EndDate":"##$TimeStamp-0d1h10m0s$##","Index":10424}
+```
+
+### Example 3: MDO Advanced Hunting – Phishing Email Quarantined (EmailEvents)
+```json
+{"time": "##$TimeStamp-0d0h1m30s$##","tenantId": "e3b0c442-98fc-1c14-9af0-2b94420e6a12","operationName": "Publish","category": "AdvancedHunting-EmailEvents","properties": {"ReportId": "7d91e84a-9011-4822-b912-08dc7e112233-19283746152431-1","NetworkMessageId": "7d91e84a-9011-4822-b912-08dc7e112233","InternetMessageId": "<20241018092144.9182736@spoofed-payroll-portal.com>","Timestamp": "##$TimeStamp-0d0h2m00s$##","EmailClusterId": 8812736410,"SenderIPv4": "185.220.101.5","SenderIPv6": null,"SenderMailFromAddress": "bounce@spoofed-payroll-portal.com","SenderFromAddress": "hr-updates@contosocorp.com","SenderMailFromDomain": "spoofed-payroll-portal.com","SenderFromDomain": "contosocorp.com","RecipientEmailAddress": "jsmith@contosocorp.com","Subject": "ACTION REQUIRED: Update Direct Deposit Information for Next Pay Period","EmailDirection": "Inbound","DeliveryAction": "Quarantine","DeliveryLocation": "Quarantine","EmailAction": "Quarantine","EmailActionPolicy": "AntiPhishPolicy_Strict","EmailActionPolicyGuid": "41c0ea4b-1234-4567-89ab-cdef01234567","AttachmentCount": 0,"UrlCount": 1,"EmailLanguage": "en","RecipientObjectId": "9a128e44-bcde-4321-8123-fedcba987654","SenderObjectId": null,"SenderDisplayName": "Contoso HR Benefits","ThreatNames": "Phish_CredSteal","ThreatTypes": "Phish","DetectionMethods": "Spoof intelligence","Connectors": null,"OrgLevelAction": "Quarantine","OrgLevelPolicy": "Anti-spoofing policy","UserLevelAction": null,"UserLevelPolicy": null,"ConfidenceLevel": "High","AdditionalFields": null,"AuthenticationDetails": "{\"DKIM\":\"fail (no key for signature)\",\"DMARC\":\"fail (p=reject sp=reject d=contosocorp.com)\",\"SPF\":\"fail (IP 185.220.101.5 is not permitted)\",\"CompAuth\":\"fail reason=001\"}","BulkComplaintLevel": null},"Tenant": "DefaultTenant"}
+```
+
+### Example 4: MDO Advanced Hunting – Malicious Email Attachment (EmailAttachmentInfo)
+```json
+{"time": "##$TimeStamp-0d0h1m30s$##","tenantId": "e3b0c442-98fc-1c14-9af0-2b94420e6a12","operationName": "Publish","category": "AdvancedHunting-EmailAttachmentInfo","properties": {"ReportId": "7d91e84a-9011-4822-b912-08dc7e112233-19283746152431-1","NetworkMessageId": "7d91e84a-9011-4822-b912-08dc7e112233","Timestamp": "##$TimeStamp-0d0h2m00s$##","SenderFromAddress": "hr-updates@contosocorp.com","RecipientEmailAddress": "jsmith@contosocorp.com","FileName": "Payroll_DirectDeposit_Form.html","FileType": "html","SHA256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a","RecipientObjectId": "9a128e44-bcde-4321-8123-fedcba987654","SenderObjectId": null,"SenderDisplayName": "Contoso HR Benefits","ThreatNames": "HTML/PhishCrypt","ThreatTypes": "Phish","DetectionMethods": "File reputation","FileSize": 14205},"Tenant": "DefaultTenant"}
+```
+
+### Example 5: Microsoft Graph API – Inbound Message Filtered as Spam
+```json
+{"id": "61a8ef21-9982-41f0-8c22-b98a123f0011","messageId": "<bulk-marketing-20241019012@massmail-blast.info>","status": "filteredAsSpam","receivedDateTime": "##$TimeStamp-0d0h30m0s$##","recipientAddress": "todd.miller@contosocorp.com","senderAddress": "offers@massmail-blast.info","subject": "Claim your complimentary executive travel voucher today!","size": 182301,"fromIP": "192.0.2.198","toIP": "10.0.4.15"}
+```
+
+---
+
+## 6. Key Constraints & Generation Pitfalls
+
+1. **RFC 5322 Message-ID vs. NetworkMessageId**:
+   * `MessageId` (and `InternetMessageId`) represents the client-generated RFC 5322 header and **MUST** be enclosed in angle brackets (e.g., `<unique-id@server.domain>`).
+   * `MessageTraceId` and `NetworkMessageId` are Microsoft routing GUIDs and **MUST NOT** include angle brackets (e.g., `cc9ea6a5-c2a5-4d19-6eb7-08db322ea3b8`).
+
+2. **Null Sender Addresses for System Messages**:
+   * Bounce messages, Non-Delivery Reports (NDRs), and automated alerts legitimately use empty sender strings or `<>` as the `SenderAddress` / `SenderMailFromAddress`. Do not replace these with dummy emails in NDR scenarios.
+
+3. **Escaped Nested JSON (`AuthenticationDetails`)**:
+   * In Variant B, `AuthenticationDetails` is a JSON string embedded inside another JSON object. All inner quotation marks must be escaped (`\"`).
+   * Example: `"AuthenticationDetails": "{\"DKIM\":\"pass\",\"DMARC\":\"pass\",\"SPF\":\"pass\"}"`.
+
+4. **Sender From vs. Sender Mail From Discrepancy (Spoofing Scenarios)**:
+   * For spoofing/phishing generation, differentiate `SenderMailFromAddress` (P1 envelope / bounce address, e.g., `evil.com`) from `SenderFromAddress` (P2 display header, e.g., `ceo@target.com`). Set `DMARC` and `CompAuth` to `"fail"` in `AuthenticationDetails`.
+
+5. **JSON Null Handling**:
+   * Use literal `null` (not `"null"`, `"None"`, or `""`) for missing IPs (`ToIP`), internal sender IDs on inbound external email (`SenderObjectId`), and clean verdicts (`ThreatTypes`, `ThreatNames`).

@@ -1,0 +1,63 @@
+api_version: "2.0"
+identifier: LogJammer
+name: "LogJammer"
+description: "AI-driven synthetic security log generator for Google SecOps (Chronicle). Reverse-engineers curated YARA-L detection rules, validates against bundled schema guides, grounds IOCs with Google Threat Intelligence (GTI), and injects authentic multi-source telemetry directly into SecOps via v1alpha logs:import API."
+categories:
+  - "Simulation"
+  - "Threat Intelligence"
+author: "Christopher Martin"
+version: 2.8
+python_version: "3.11"
+is_custom: true
+svg_logo_path: resources/logo.svg
+image_path: resources/image.png
+
+parameters:
+  - name: "Gemini API Key"
+    description: "API Key for Google Gemini API authentication (optional if Service Account or ADC is used)."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "Google Threat Intelligence API Key"
+    description: "API Key for Google Threat Intelligence (GTI) / VirusTotal Agentic enrichment."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "Service Account JSON"
+    description: "Google Cloud Service Account JSON key credentials for Vertex AI and SecOps API."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "Workload Identity Email"
+    description: "Target Google Cloud Service Account email for keyless authentication via Workload Identity Federation."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "Model Name"
+    description: "Gemini model to power scenario generation (e.g., gemini-3.7-flash, gemini-3.8-flash)."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: string
+    default_value: "gemini-3.7-flash"
+  - name: "GCP Project ID"
+    description: "Google Cloud Project ID or Number for SecOps Ingestion and Vertex AI."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: string
+    default_value: "37679061640"
+  - name: "SecOps Customer ID"
+    description: "Google SecOps Customer ID GUID for log ingestion."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: string
+    default_value: "a556547c-1cff-43ef-a2e4-cf5b12a865df"
+  - name: "SecOps Region"
+    description: "Google SecOps instance region (e.g. us, europe, asia-southeast1)."
+    integration_identifier: LogJammer
+    is_mandatory: false
+    type: string
+    default_value: "us"

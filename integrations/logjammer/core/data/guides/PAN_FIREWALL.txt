@@ -1,0 +1,273 @@
+# Palo Alto Networks PAN-OS Firewall (PAN_FIREWALL) Log Generation Playbook
+
+## 1. Overview & Log Purpose
+
+Palo Alto Networks Next-Generation Firewalls (NGFW) and Panorama management platforms produce logs for network security, session tracking, threat prevention, system operations, decryption analysis, and endpoint remote access (GlobalProtect). 
+
+### Primary Log Categories & Activities Recorded:
+* **TRAFFIC**: Network sessions, start/end states, bytes/packets transferred, NAT translation, rules matched, session end reasons (e.g., `aged-out`, `tcp-fin`, `policy-deny`).
+* **THREAT**: Intrusion prevention (vulnerabilities), anti-spyware, antivirus, DNS security, file blocking, URL filtering, WildFire cloud sandbox analysis, and data filtering.
+* **SYSTEM**: Chassis/hardware events, software updates, DHCP assignments, high-availability (HA) transitions, configuration commits, and administrative login/authentication events.
+* **CONFIG**: Changes to firewall policies, objects, virtual routers, commit actions, and administrative settings.
+* **USERID**: User-to-IP mappings, domain authentication tracking, GlobalProtect and XML API user mapping.
+* **GLOBALPROTECT**: Gateway/portal authentications, client connect/disconnect, Host Information Profile (HIP) checks, client OS versions, and quarantine states.
+* **DECRYPTION**: SSL/TLS decryption inspection details, cipher suites, certificate validation status, and fatal alerts.
+* **CORRELATION / AUDIT / GTP**: Automated IOC correlation engine triggers, CLI audit logs, and telecom GTP inspection.
+
+---
+
+## 2. Format Specifications
+
+PAN-OS logs are transmitted primarily over Syslog in three common encapsulations: **Native CSV (Standard PAN-OS Syslog)**, **CEF (Common Event Format)**, and **LEEF (Log Event Extended Format)**. Structured wrappers (JSON / Cortex Data Lake / NXLog) also carry these payloads.
+
+### Format Variations Breakdown
+
+#### Variant A: Standard PAN-OS CSV over BSD Syslog (RFC 3164)
+```text
+<PRI>MMM DD HH:MM:SS HOSTNAME 1,YYYY/MM/DD HH:MM:SS,SERIAL,LOG_TYPE,SUBTYPE,CONFIG_VER,TIME_GEN,...
+```
+* **Syslog Header**: `<PRI>` priority code, 3-letter month, day (space-padded if single digit `Nov  9`), time `HH:MM:SS`, firewall hostname/IP.
+* **Delimiters**: Comma-separated values (`,`).
+* **Quoting**: Fields containing commas, spaces, or quotes (such as URLs, user agents, threat names, CLI commands, email subjects) are enclosed in double quotes (`"..."`). Internal double quotes are escaped as `""`. Empty fields are left blank between commas (`,,`).
+
+#### Variant B: Standard PAN-OS CSV over Syslog (RFC 5424)
+```text
+<PRI>1 YYYY-MM-DDTHH:MM:SS+ZZ:ZZ HOSTNAME APP-NAME PROCID MSGID SD 1,YYYY/MM/DD HH:MM:SS,SERIAL,LOG_TYPE,...
+```
+* **Syslog Header**: RFC 5424 structure with structured data placeholders `- - - -`.
+
+#### Variant C: Common Event Format (CEF)
+```text
+<PRI>MMM DD HH:MM:SS HOSTNAME CEF:0|Palo Alto Networks|PAN-OS|VERSION|SUBTYPE|TYPE|SEVERITY|key=value key2=value2 ...
+```
+* **Header**: Pipe-delimited (`|`) with standard 7 CEF header fields.
+* **Extension**: Key-value pairs separated by spaces. Values containing spaces or special characters are wrapped in double quotes or escaped.
+
+#### Variant D: Log Event Extended Format (LEEF 1.0 / 2.0)
+```text
+<PRI>MMM DD HH:MM:SS HOSTNAME LEEF:2.0|Palo Alto Networks|PAN-OS Syslog Integration|VERSION|EVENT_ID|x7C|cat=TYPE|key=value|key2=value2|...
+```
+* **Header & Extension**: Delimited by pipe characters (`|`) or the delimiter defined in the header (e.g. `x7C`).
+
+#### Variant E: Structured JSON (Cortex Data Lake / API Forwarder)
+```json
+{
+  "source": "Palo Alto Networks FLS LF",
+  "host": "FW-NAME",
+  "time": "1730265996460",
+  "event": {
+    "LogType": "TRAFFIC",
+    "Subtype": "end",
+    "SourceAddress": "10.0.1.5",
+    "DestinationAddress": "198.51.100.4"
+  }
+}
+```
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### A. Common CSV Header (Positions 1 to 7)
+All PAN-OS CSV log records share the identical first 7 positional fields:
+
+| Pos | Field Name | Data Type | Description / Valid Values | Example |
+| :--- | :--- | :--- | :--- | :--- |
+| **1** | `FUTURE_USE` | Integer | Format revision identifier (almost always `1`) | `1` |
+| **2** | `Receive Time` | Timestamp | Time log was logged/received on management plane (`YYYY/MM/DD HH:MM:SS`) | `2024/05/15 16:12:42` |
+| **3** | `Serial Number` | String | 12-14 digit hardware/VM serial number | `013101009958`, `007051000184334` |
+| **4** | `Type` | Enum | `TRAFFIC`, `THREAT`, `SYSTEM`, `CONFIG`, `USERID`, `GLOBALPROTECT`, `CORRELATION`, `DECRYPTION`, `GTP`, `AUTH` | `TRAFFIC` |
+| **5** | `Subtype` | Enum | Dependent on Log Type (see subtype breakdown below) | `end`, `vulnerability`, `auth-fail` |
+| **6** | `Config Version` | String/Hex | Internal configuration version code or release | `2561`, `2562`, `2817`, `2305`, `0` |
+| **7** | `Time Generated`| Timestamp | Time session/event occurred on dataplane (`YYYY/MM/DD HH:MM:SS`) | `2024/05/15 16:12:42` |
+
+---
+
+### B. Field Index Mapping by Log Type
+
+#### 1. TRAFFIC Log Schema (Positional Index)
+* `8`: **Source IP** (`10.10.10.50`)
+* `9`: **Destination IP** (`198.51.100.25`)
+* `10`: **NAT Source IP** (`198.51.100.200` or `0.0.0.0`)
+* `11`: **NAT Destination IP** (`198.51.100.25` or `0.0.0.0`)
+* `12`: **Rule Name** (`Allow-Web-Outbound`, `Drop-Internal-Lateral`)
+* `13`: **Source User** (`DOMAIN\username` or blank)
+* `14`: **Destination User** (`DOMAIN\username` or blank)
+* `15`: **Application** (`ssl`, `web-browsing`, `dns-base`, `ms-ds-smbv3`, `ping`, `incomplete`)
+* `16`: **Virtual System** (`vsys1`, `vsys2`)
+* `17`: **Source Zone** (`Trust`, `LAN`, `Corp-VPN`, `Internal`)
+* `18`: **Destination Zone** (`Untrust`, `WAN`, `DMZ`, `External`)
+* `19`: **Inbound Interface** (`ethernet1/1`, `ae1.100`, `tunnel.101`)
+* `20`: **Outbound Interface** (`ethernet1/2`, `ae1.200`, `tunnel.102`)
+* `21`: **Log Forwarding Profile** (`Panorama-All`, `Syslog-SOC`, `CortexDataLake`)
+* `22`: **Session Timestamp / Time Generated** (`2024/05/15 16:12:42`)
+* `23`: **Session ID** (`34035704`, numeric 1-99999999)
+* `24`: **Repeat Count** (`1` to `N`)
+* `25`: **Source Port** (`1024-65535`)
+* `26`: **Destination Port** (`80`, `443`, `53`, `22`, `445`, `3389`, etc.)
+* `27`: **NAT Source Port** (`0` or translated port)
+* `28`: **NAT Destination Port** (`0` or translated port)
+* `29`: **Flags** (`0x19`, `0x400019`, `0x80002000`, `0x0`)
+* `30`: **Protocol** (`tcp`, `udp`, `icmp`, `esp`, `gre`)
+* `31`: **Action** (`allow`, `deny`, `drop`, `reset-client`, `reset-server`, `reset-both`)
+* `32`: **Bytes Total** (Integer sum of Bytes Sent + Received)
+* `33`: **Bytes Sent** (Integer)
+* `34`: **Bytes Received** (Integer)
+* `35`: **Packets Total** (Integer sum of Packets Sent + Received)
+* `36`: **Start Time** (`YYYY/MM/DD HH:MM:SS`)
+* `37`: **Elapsed Time** (Duration in seconds, e.g. `0`, `14`, `120`)
+* `38`: **URL Category** (`any`, `computer-and-internet-info`, `malicious`, `low-risk`)
+* `39`: **Future Use** (blank)
+* `40`: **Sequence Number** (64-bit int, e.g. `7448799336706319459`)
+* `41`: **Action Flags** (`0x0`, `0x8000000000000000`, `0x2000000000000000`)
+* `42`: **Source Country/Region** (`United States`, `China`, `FI`, `10.0.0.0-10.255.255.255`)
+* `43`: **Destination Country/Region** (`United States`, `Germany`, `198.51.100.0-198.51.100.255`)
+* `44`: **Packets Sent** (Integer)
+* `45`: **Packets Received** (Integer)
+* `46`: **Session End Reason** (`aged-out`, `tcp-fin`, `tcp-rst-from-client`, `tcp-rst-from-server`, `policy-deny`, `decrypt-unsupport-param`, `n/a`)
+* `47`: **Device Group Hierarchy Level 1** (`0` or ID)
+* `48-50`: **Device Group Hierarchy Levels 2-4**
+* `51`: **Virtual System Name** (e.g. `vsys1` or blank)
+* `52`: **Device Name** (`PA-VM-01`, `Hub-DC-IGW-Palo1`)
+* `53`: **Action Source** (`from-policy`)
+* `54-60`: **UUIDs, Tunnel IDs, Parent Session Details**
+* `61`: **Rule UUID** (`2cb9a33a-24d7-44af-a1b7-2a90bc7359d6`)
+* `70+`: **High-Res Timestamp** (`2024-05-15T16:12:42.990+03:00`), App Categories (`internet-utility`, `networking`, `browser-based`), Risk Level (`1` to `5`), App Characteristics (`used-by-malware,has-known-vulnerability`), Is Tunneled (`no`/`yes`).
+
+---
+
+#### 2. THREAT Log Schema (Key Positions)
+* `8-21`: Same network attributes (Src/Dst IP, NAT, Rule, User, App, Zones, Interfaces).
+* `22-31`: Session metadata, Session ID, Ports, Flags, Protocol, Action (`alert`, `sinkhole`, `block-url`, `reset-both`, `drop`).
+* `32`: **Miscellaneous / Threat Name** (`"Suspicious DNS Query (c2.evil.com)"`, `"20240315.pdf"`, `"payload.exe"`, URL path, or `""`).
+* `33`: **Threat ID / Signature Name** (`Apache Log4j Remote Code Execution Vulnerability(92046)`, `Suspicious TLS Evasion Found(14978)`, `(9999)` for URL filtering, `125561816(125561816)` for DNS security).
+* `34`: **URL Category / Threat Category** (`malicious`, `phishing`, `command-and-control`, `grayware`, `social-networking`, `any`).
+* `35`: **Severity** (`informational`, `low`, `medium`, `high`, `critical`).
+* `36`: **Direction** (`client-to-server`, `server-to-client`).
+* `37`: **Sequence Number** (64-bit Int).
+* `38`: **Action Flags** (`0x2000000000000000`, `0x8000000000000000`).
+* `39-40`: **Source / Destination Location**.
+* `53`: **Device Name**.
+* `58`: **Threat Category Code** (`vulnerability`, `spyware`, `virus`, `file`, `url`, `code-execution`, `dns-security`, `protocol-anomaly`).
+* `59`: **Content Version** (`AppThreat-8627-7627`, `Antivirus-3901-4412`, `WildFire-0`).
+* `63`: **Rule UUID** (`eb68e357-7a22-4ccd-9633-d916370bbed7`).
+* `70+`: **High-Res Timestamp**, App Category hierarchy, Risk factor (`1-5`).
+
+---
+
+#### 3. SYSTEM Log Schema (Key Positions)
+* `8`: **Virtual System** (`vsys1`, `shared`, or blank).
+* `9`: **Event ID / Subtype Specific** (`general`, `auth-fail`, `auth-success`, `lease-start`, `if-renew-trigger`, `vpn-link-down`).
+* `10`: **Object** (Auth profile name, interface name, e.g. `Portal-Auth-Sequence`, `DUO_TEST_RADIUS`, `eth0`, or blank).
+* `11-12`: **Future Use** (`0`, `0`).
+* `13`: **Module** (`general`, `auth`, `dhcp`, `vpn`, `routing`, `ha`, `url-filtering`).
+* `14`: **Severity** (`informational`, `low`, `medium`, `high`, `critical`).
+* `15`: **Description Message** (Enclosed in double quotes. e.g. `"authenticated for user 'admin'. From: 198.51.100.1."`, `"failed authentication for user 'tester'. Reason: Invalid username/password. From: 198.51.100.5."`).
+* `16`: **Sequence Number**.
+* `17`: **Action Flags** (`0x0`, `0x8000000000000000`).
+* `22`: **Device Name** (`FW02-HQs-00-DC1-CO`).
+* `25`: **High-Res Timestamp** (`2024-09-02T15:07:21.014+01:00`).
+
+---
+
+#### 4. GLOBALPROTECT Log Schema (Key Positions)
+* `8`: **Virtual System** (`vsys1`).
+* `9`: **Event ID / Stage** (`portal-auth`, `gateway-auth`, `portal-getconfig`, `gateway-logout`, `gateway-connect`, `gateway-hip-report`).
+* `10`: **Stage / Action Description** (`login`, `logout`, `configuration`, `host-info`).
+* `11`: **Auth Method** (`LDAP`, `RADIUS`, `SAML`, `LocalDatabase`, `Certificate`, or blank).
+* `12`: **Tunnel Type** (blank or `IPSec`, `SSL`).
+* `13`: **Source User** (`domain\user.name` or `user@domain.com`).
+* `14`: **Source Region / Country** (`US`, `GB`, `FI`, `PL`).
+* `15`: **Machine Name / Hostname** (`LAPTOP-A1904B`, `MacBook-Pro`).
+* `16`: **Public Source IP** (`89.64.52.107`, `98.97.104.21`).
+* `17`: **Public IPv6** (`0.0.0.0` or blank).
+* `18`: **Private Assigned IPv4** (`172.17.110.6`, `0.0.0.0`).
+* `19`: **Private Assigned IPv6** (`0.0.0.0` or blank).
+* `20`: **Client MAC / Host ID** (`88:e9:fe:5a:36:c4`, `faaa111c-4f95-4b23-aa65-f00000fff00f`).
+* `21`: **Client Serial Number** (`C02WM103HTDD`, `FVFZN26LL414`).
+* `22`: **GlobalProtect Client Version** (`5.2.5`, `5.2.11`, `6.0.5`, `6.1.2`).
+* `23`: **Endpoint OS Type** (`Windows`, `Mac`, `Linux`, `Android`, `iOS`).
+* `24`: **Endpoint OS Version** (`"Microsoft Windows 10 Pro , 64-bit"`, `"Apple Mac OS X 12.5.1"`).
+* `25`: **Repeat Count** (`1`).
+* `28`: **Status / Error Description** (`"user session expired"`, `"Invalid username or password"`, `"Config name: Tek, Machine Certificate CN : (null)"`, `""`).
+* `29`: **Outcome** (`success`, `failure`).
+* `32`: **Connection Method** (`on-demand`, `user-logon`, `manual only`).
+* `34`: **Portal / Gateway Name** (`GPAccess_Portal`, `GP_Gateway_HO`, `Office_GP`).
+* `35`: **Sequence Number**.
+* `37`: **High-Res Timestamp** (`2023-06-30T11:51:50.593+01:00`).
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+PAN-OS uses multiple synchronized timestamp formats across the syslog header, message body, and metadata extensions. Synthetic log generators must use the designated time tags to ensure dynamic consistency.
+
+### Required Formats:
+1. **Syslog Header Timestamp (RFC 3164)**: `MMM DD HH:MM:SS` (Space-padded day for 1-9: `Nov  9`, `Jan 22`).
+   * Template Tag: `##$SyslogTime-0d0h0m0s$##`
+2. **RFC 5424 Header Timestamp**: `YYYY-MM-DDTHH:MM:SS.sss+ZZ:ZZ` or `YYYY-MM-DDTHH:MM:SSZ`.
+   * Template Tag: `##$TimeStamp-0d0h0m0s$##`
+3. **PAN-OS Native CSV Body Timestamps**: `YYYY/MM/DD HH:MM:SS` (used for Receive Time, Time Generated, Session Start Time).
+   * Template Tag: `##$TimeStamp-0d0h0m0s:YYYY/MM/DD HH:mm:ss$##`
+4. **PAN-OS High-Resolution / ISO Timestamp**: `YYYY-MM-DDTHH:MM:SS.sss+ZZ:ZZ` or `YYYY-MM-DDTHH:MM:SS.sssZ`.
+   * Template Tag: `##$TimeStamp-0d0h0m0s:YYYY-MM-DDTHH:mm:ss.SSSZZ$##`
+5. **CEF / LEEF Header / devTime**: `MMM DD YYYY HH:MM:SS GMT` or `YYYY/MM/DD HH:MM:SS`.
+   * Template Tag: `##$TimeStamp-0d0h0m0s:MMM dd YYYY HH:mm:ss GMT$##`
+6. **Epoch Timestamp (Seconds or Milliseconds)**:
+   * Template Tag: `##$Epoch-0d0h0m0s$##` (seconds) or `##$EpochMS-0d0h0m0s$##` (milliseconds)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: TRAFFIC Log - Normal Outbound Web/TLS Session End (Standard Syslog CSV)
+* **Scenario**: Standard employee accessing external web application, session completed normally with FIN handshake.
+```text
+<14>##$SyslogTime-0d0h2m10s$## FW-CORP-EDGE01 1,##$TimeStamp-0d0h2m10s:YYYY/MM/DD HH:mm:ss$##,013101009958,TRAFFIC,end,2561,##$TimeStamp-0d0h2m10s:YYYY/MM/DD HH:mm:ss$##,10.200.4.152,104.18.25.10,198.51.100.45,104.18.25.10,Corporate-Internet-Access,ACME\jsmith,,ssl,vsys1,Trust-LAN,Untrust-WAN,ae1.200,ae1.100,LogToPanorama,##$TimeStamp-0d0h2m10s:YYYY/MM/DD HH:mm:ss$##,4820194,1,54892,443,18420,443,0x400019,tcp,allow,8492,3120,5372,26,##$TimeStamp-0d0h2m45s:YYYY/MM/DD HH:mm:ss$##,35,web-browsing,,7448799336706319459,0x8000000000000000,10.0.0.0-10.255.255.255,United States,14,12,tcp-fin,12,4,0,0,,FW-CORP-EDGE01,from-policy,,,0,,0,,N/A,0,0,0,0,ad72847a-c59a-4124-af78-a06c037b2457,0,0,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,##$TimeStamp-0d0h2m10s:YYYY-MM-DDTHH:mm:ss.SSS+00:00$##,,,encrypted-tunnel,networking,browser-based,4,"used-by-malware,able-to-transfer-file,has-known-vulnerability,tunnel-other-application,pervasive-use",,ssl,no,no,0
+```
+
+### Example 2: THREAT Log - Vulnerability Exploit Blocked (RFC 5424 Syslog CSV)
+* **Scenario**: Log4Shell/RCE attack pattern detected from external host against internal DMZ server; connection reset by firewall.
+```text
+<10>1 ##$TimeStamp-0d0h5m30s$## FW-DMZ-CORE - - - - 1,##$TimeStamp-0d0h5m30s:YYYY/MM/DD HH:mm:ss$##,016301014752,THREAT,vulnerability,2561,##$TimeStamp-0d0h5m30s:YYYY/MM/DD HH:mm:ss$##,198.51.100.188,10.100.10.45,0.0.0.0,0.0.0.0,DMZ-Inbound-Web,,,web-browsing,vsys1,Untrust,DMZ,ethernet1/1,ethernet1/2,SOC-Alerts,##$TimeStamp-0d0h5m30s:YYYY/MM/DD HH:mm:ss$##,9482711,1,41298,8080,0,0,0x2000,tcp,reset-both,"","Apache Log4j Remote Code Execution Vulnerability(92046)",any,critical,client-to-server,7458528154831845711,0x8000000000000000,Netherlands,10.0.0.0-10.255.255.255,,,0,,,0,,,,,,,,0,1835,0,0,0,,FW-DMZ-CORE,,,,,0,,0,,N/A,code-execution,AppThreat-8957-9347,0x0,0,4294967295,,,9ade7419-d894-4367-8ca8-3728881f5523,0,,,,,,,,,,,,,,,,,,,,,,,,,##$TimeStamp-0d0h5m30s:YYYY-MM-DDTHH:mm:ss.SSS+00:00$##
+```
+
+### Example 3: THREAT Log - C2 Spyware / DNS Sinkhole Action (CEF Format)
+* **Scenario**: Infected internal endpoint making a DNS query for a known malware C2 domain; firewall intercepts and sinkholes the query.
+```text
+<12>##$SyslogTime-0d0h8m15s$## PA-EDGE-7050-1 CEF:0|Palo Alto Networks|PAN-OS|10.2.8|125561816(125561816)|THREAT|3|rt=##$TimeStamp-0d0h8m15s:MMM dd YYYY HH:mm:ss GMT$## deviceExternalId=016301009603 src=10.50.22.84 dst=8.8.8.8 sourceTranslatedAddress=0.0.0.0 destinationTranslatedAddress=0.0.0.0 cs1Label=Rule cs1=Corp-DNS-Egress suser=ACME\victim_user duser= app=dns-base cs3Label=Virtual System cs3=vsys1 cs4Label=Source Zone cs4=Trust-Workstations cs5Label=Destination Zone cs5=Untrust deviceInboundInterface=ae1.14 deviceOutboundInterface=ae1.13 cs6Label=LogProfile cs6=LF-SOC-Threat cn1Label=SessionID cn1=1802733 cnt=1 spt=59231 dpt=53 sourceTranslatedPort=0 destinationTranslatedPort=0 flexString1Label=Flags flexString1=0x80403000 proto=udp act=sinkhole request="malicious-c2-beacon.ru" cs2Label=URL Category cs2=command-and-control flexString2Label=Direction flexString2=client-to-server PanOSActionFlags=0xa000000000000000 externalId=5045107073 cat=spyware fileId=1208663386108245416 PanOSDGl1=20 PanOSDGl2=14 PanOSDGl3=0 PanOSDGl4=0 PanOSVsysName= dvchost=PA-EDGE-7050-1 PanOSSrcUUID= PanOSDstUUID= PanOSTunnelID=0 PanOSMonitorTag= PanOSParentSessionID=0 PanOSParentStartTime= PanOSTunnelType=N/A PanOSThreatCategory=dns-security PanOSContentVer=AppThreat-0-0 PanOSAssocID=0 PanOSPPID=4294967295 PanOSHTTPHeader= PanOSRuleUUID=a9f78a7c-10ab-43d7-85be-9299fd08f834 PanOSURLCatList="command-and-control,high-risk" PanOSHTTP2Con=0 PanDynamicUsrgrp=
+```
+
+### Example 4: GLOBALPROTECT Log - Multi-Factor / Password Spray Failure (Syslog CSV)
+* **Scenario**: External actor attempting brute-force / credential stuffing on the GlobalProtect SSL VPN portal.
+```text
+<14>##$SyslogTime-0d0h12m00s$## PA-VPN-GW01.corp.local 1,##$TimeStamp-0d0h12m00s:YYYY/MM/DD HH:mm:ss$##,013201014281,GLOBALPROTECT,0,2561,##$TimeStamp-0d0h12m00s:YYYY/MM/DD HH:mm:ss$##,vsys1,portal-auth,login,LDAP,,admin_svc@corp.local,RU,UNKNOWN-HOST,185.220.101.5,0.0.0.0,0.0.0.0,0.0.0.0,faaa111c-4f95-4b23-aa65-f00000fff00f,UNKNOWN-SN,6.1.2,Windows,"Microsoft Windows 10 Pro , 64-bit",1,,Invalid username or password,,failure,,0,,1,Corporate_GP_Portal,7223553835555137804,0x8000000000000000,##$TimeStamp-0d0h12m00s:YYYY-MM-DDTHH:mm:ss.SSS+00:00$##,,,,,,40,74,0,0,,PA-VPN-GW01,1
+```
+
+### Example 5: SYSTEM Log - Administrative Authentication Failure (Syslog CSV)
+* **Scenario**: Unauthorized attempt to access the web GUI management console using an unlisted administrative account.
+```text
+<12>##$SyslogTime-0d0h15m45s$## PA-MGMT-FW01 1,##$TimeStamp-0d0h15m45s:YYYY/MM/DD HH:mm:ss$##,028101004709,SYSTEM,auth,2817,##$TimeStamp-0d0h15m45s:YYYY/MM/DD HH:mm:ss$##,,auth-fail,Admin-Console-Auth,0,0,general,medium,"failed authentication for user 'superadmin'.  Reason: Invalid username/password. auth profile 'Admin-Console-Auth', vsys 'vsys1', From: 198.51.100.99.",7462945434219068430,0x0,0,0,0,0,,PA-MGMT-FW01,0,0,##$TimeStamp-0d0h15m45s:YYYY-MM-DDTHH:mm:ss.SSS+00:00$##
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Mandatory Parsing Rules
+1. **Positional Integrity in CSV**:
+   * PAN-OS CSV parsers rely on **exact comma index counts** (often up to 100+ fields depending on PAN-OS version).
+   * **Never truncate trailing commas** if fields are unused; preserve exact empty delimiters (e.g., `,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,`).
+2. **Double Quoting Rules**:
+   * If a string field contains a comma (`,`), double quote (`"`), newline, or leading/trailing space, wrap the entire field in double quotes (`"..."`).
+   * Escape inner quotes with two double quotes (`""`). Example: `"Sub: Message from ""John Doe"""`.
+3. **Session Metric Consistency**:
+   * In `TRAFFIC` end logs: `Bytes Total = Bytes Sent + Bytes Received` and `Packets Total = Packets Sent + Packets Received`.
+   * If `Action = drop` or `Action = deny` at start, `Bytes Received` and `Packets Received` are typically `0`.
+4. **Hexadecimal Flag Formats**:
+   * Flags and Action Flags must always be represented in hexadecimal prefixed by `0x` (e.g., `0x0`, `0x19`, `0x400019`, `0x8000000000000000`, `0x2000000000000000`).
+5. **Port & Protocol Alignment**:
+   * When `proto=icmp`, Source and Destination ports should be `0` (or the ICMP Type/Code).
+   * When NAT is not applied, NAT Source IP and NAT Destination IP are either `0.0.0.0`, identical to original IPs, or left blank, while NAT ports are `0`.
+6. **Subtype & Type Cohesion**:
+   * Do not mix subtypes across types. `vulnerability`, `virus`, `spyware`, `url`, `file`, `wildfire` belong exclusively to `THREAT`. `start`, `end`, `drop`, `deny` belong exclusively to `TRAFFIC`.

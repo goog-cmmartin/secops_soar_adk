@@ -1,0 +1,7 @@
+- version: "1.0.0"
+  date: "2026-10-26"
+  notes:
+    - "Initial release of the WHOIS XML API integration."
+    - "Added Ping action for connectivity testing."
+    - "Added Get Domain Details action."
+    - "Added Enrich Entities action for HOSTNAME and URL entities."

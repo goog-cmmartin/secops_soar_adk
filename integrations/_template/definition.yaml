@@ -1,0 +1,30 @@
+api_version: "2.0"
+identifier: template_integration
+name: "Template Integration"
+description: "Scaffold template for building custom Google SecOps SOAR integrations."
+category: "Custom"
+author: "Google SecOps Developer"
+version: "1.0.0"
+python_version: "3.11"
+is_custom: true
+
+configuration:
+  - name: "API Root"
+    description: "The base URL for the service endpoint (e.g., https://api.example.com)."
+    type: string
+    is_mandatory: true
+    default_value: "https://api.example.com"
+  - name: "API Key"
+    description: "Confidential authentication key or token."
+    type: string
+    is_mandatory: true
+    is_password: true
+    default_value: ""
+  - name: "Verify SSL"
+    description: "Whether to verify SSL certificates on outgoing HTTPS requests."
+    type: boolean
+    is_mandatory: false
+    default_value: true
+
+simulation_data:
+  provider_name: "Template Integration"

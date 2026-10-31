@@ -1,0 +1,43 @@
+{
+  "scenario_id": "3cf3532e-9a41-4bc8-b102-8d9103ab4912",
+  "scenario_id_label": "3cf3532e",
+  "scenario_tag": "SOAR_Case_108606_Simulation",
+  "base_timestamp": "2026-10-31T02:15:10Z",
+  "udm_query": "metadata.ingestion_labels.value = \"3cf3532e\"",
+  "udm_query_full": "metadata.ingestion_labels.key = \"SCENARIO_ID\" AND metadata.ingestion_labels.value = \"3cf3532e\"",
+  "udm_tag_query": "metadata.ingestion_labels.key = \"SCENARIO_TAG\" AND metadata.ingestion_labels.value = \"SOAR_Case_108606_Simulation\"",
+  "title": "AWS CloudTrail Tampering Attack Simulation",
+  "summary": "Simulated attacker stopping CloudTrail logging to evade detection.",
+  "model": "gemini-3.7-flash",
+  "total_events": 5,
+  "log_types": ["AWS_CLOUDTRAIL"],
+  "gti_enriched": false,
+  "duration_seconds": 2.45,
+  "rule": {
+    "rule_id": "ur_9b75da94-4ab2-4b7b-99f5-197e44ddff09",
+    "display_name": "CloudWatch Log Group Deleted",
+    "severity": "HIGH",
+    "category": "cloud_threats",
+    "tactics": ["TA0005"],
+    "techniques": ["T1562.001"]
+  },
+  "secops_ingestion": {
+    "status": "SUCCESS",
+    "ingested_count": 5,
+    "scenario_id_label": "3cf3532e",
+    "scenario_tag": "SOAR_Case_108606_Simulation",
+    "udm_query": "metadata.ingestion_labels.value = \"3cf3532e\"",
+    "udm_query_full": "metadata.ingestion_labels.key = \"SCENARIO_ID\" AND metadata.ingestion_labels.value = \"3cf3532e\"",
+    "udm_tag_query": "metadata.ingestion_labels.key = \"SCENARIO_TAG\" AND metadata.ingestion_labels.value = \"SOAR_Case_108606_Simulation\"",
+    "labels": {
+      "SOURCE": "LOGJAMMER",
+      "SCENARIO_ID": "3cf3532e",
+      "SCENARIO_TAG": "SOAR_Case_108606_Simulation"
+    }
+  },
+  "logs": {
+    "AWS_CLOUDTRAIL": [
+      "{\"eventVersion\":\"1.08\",\"userIdentity\":{\"type\":\"IAMUser\",\"userName\":\"attacker\"},\"eventName\":\"StopLogging\"}"
+    ]
+  }
+}

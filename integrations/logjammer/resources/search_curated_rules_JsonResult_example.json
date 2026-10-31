@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "ur_9b75da94-4ab2-4b7b-99f5-197e44ddff09",
+    "display_name": "CloudWatch Log Group Deleted",
+    "severity": "HIGH",
+    "category": "cloud_threats",
+    "tactics": ["TA0005"],
+    "techniques": ["T1562.001"]
+  }
+]

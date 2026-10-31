@@ -1,0 +1,157 @@
+# AI Generation Playbook: Blue Coat / Symantec ProxySG (BLUECOAT_WEBPROXY)
+
+---
+
+## 1. Overview & Log Purpose
+
+**Blue Coat / Symantec Edge SWG (ProxySG)** logs capture enterprise forward and reverse web proxy activity, SSL interception/decryption, content analysis, user authentication, and web security policy enforcement.
+
+### Common Recorded Activities
+*   **Web Browsing & HTTP/HTTPS Transactions**: Client requests, upstream server responses, MIME types, cache status, transfer volume, and latency.
+*   **Secure Web Gateway (SWG) Enforcement**: Policy-based allows, blocks, redirects, malware/threat risk filtering, and WebPulse/Global Intelligence Network (GIN) URL categorization.
+*   **Proxy Authentication & Access Challenges**: Kerberos, NTLM, Digest, or Basic authentication handshakes, failures (HTTP `407 Proxy Authentication Required`), and virtual-host authentication redirects (`302`/`307`).
+*   **SSL/TLS Handshake & Visibility (SSLV)**: Negotiated SSL/TLS ciphers, protocol versions, server certificate inspection, JA3 fingerprints, and resign/decrypt decisions.
+*   **Appliance Internal System Events**: Health checks, upload failures, ICAP daemon events, and proxy process state transitions.
+
+---
+
+## 2. Format Specifications
+
+Blue Coat logs are delivered in multiple formats depending on the SGOS access log configuration, syslog daemon settings, or log collector (SIEM/Chronicle/Splunk) ingestion pipeline:
+
+```
++-------------------------------------------------------------------------------+
+| BLUECOAT_WEBPROXY Formats                                                     |
++-------------------------------------------------------------------------------+
+| 1. Space-Delimited W3C ELFF (Extended Log File Format) [Standard / Custom]   |
+| 2. Syslog RFC 5424 Enclosing W3C ELFF JSON Object Payload                    |
+| 3. Syslog RFC 3164 Pipe-Delimited Key-Value (Custom ELFF KV / ArcSight CEF-like)|
+| 4. Syslog RFC 3164 SSL Visibility (ssldata) Engine Stream                     |
+| 5. SGOS Appliance Event / Error Syslog Message                                |
++-------------------------------------------------------------------------------+
+```
+
+### Delimiters and Quoting Rules
+*   **Space-Delimited ELFF**: Fields are separated by single ASCII spaces (`0x20`). Strings containing spaces (such as `cs_user_agent`, `cs_categories`, or `app_name`) **must** be enclosed in double quotes (`"`).
+*   **Null / Empty Representation**: In standard ELFF and KV pairs, non-existent, unauthenticated, or unrecorded fields use a single hyphen (`-`) or the literal string `None` / `unavailable`.
+*   **URL Encoding**: Embedded whitespace or special query parameters inside categories, URIs, content types, and groups are percent-encoded (e.g., `text/plain;%20charset=utf-8`, `Domain%20Users`).
+*   **Pipe-Delimited KV**: Formatted as `Header|key1=value1|key2=value2|...`. Keys matching sub-fields use parenthetical syntax (e.g., `rs(Content-Type)`, `cs(User-Agent)`).
+*   **JSON Format**: Standard JSON escaping rules apply; nested quotes inside query strings or headers must be escaped (`\"`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### A. W3C / SGOS ELFF Field Prefixes
+Blue Coat utilizes standard W3C log prefixes denoting communication endpoints:
+*   `c-`: Client
+*   `s-`: Proxy Server
+*   `r-`: Remote / Origin Server
+*   `cs-`: Client-to-Server (Proxy)
+*   `sc-`: Server (Proxy)-to-Client
+*   `rs-`: Remote-to-Server (Proxy)
+*   `sr-`: Server (Proxy)-to-Remote
+*   `x-`: Extended / Symantec Proprietary
+
+### B. Core Body Fields & Realistic Value Distributions
+
+| Field Name (ELFF / KV / JSON) | Type | Sample Values / Allowed Enums | Description |
+| :--- | :--- | :--- | :--- |
+| `date` / `time` | String | `2023-10-15`, `14:22:05` | UTC date (`YYYY-MM-DD`) and time (`HH:MM:SS`) of proxy transaction completion. |
+| `time-taken` / `time_taken` | Integer | `1`, `45`, `229`, `60070` | Transaction duration in milliseconds (ms). |
+| `c-ip` / `src` | IPv4/IPv6 | `10.1.2.3`, `172.20.30.41`, `192.168.1.50` | Client source IP address. |
+| `cs-username` / `username` | String | `jdoe`, `svc-backup`, `ravagor`, `-` | Authenticated username. `-` if unauthenticated. |
+| `cs-auth-group` | String | `CORP\Domain%20Users`, `AD\Allow_Internet` | User group membership (percent-encoded). |
+| `x-exception-id` / `exception-id` | String | `-`, `authentication_failed`, `policy_denied`, `content_filter_denied`, `invalid_request`, `dns_server_failure`, `unsupported_protocol`, `policy_redirect` | Internal SGOS exception code triggering block or redirect. |
+| `sc-filter-result` / `filter-result` | String | `OBSERVED`, `PROXIED`, `DENIED` | Policy evaluation outcome. |
+| `cs-categories` / `filter-category` | String | `"Search Engines/Portals"`, `"Technology/Internet;File Storage/Sharing"`, `"Malicious Sources/Malnets;Software Downloads"` | Semicolon-delimited WebPulse category classifications. |
+| `cs-referer` / `cs(Referer)` | String | `https://www.google.com/`, `-` | HTTP Referer header or `-`. |
+| `sc-status` | Integer | `200`, `206`, `301`, `302`, `304`, `307`, `400`, `401`, `403`, `407`, `500`, `503`, `0` | HTTP status code returned to client. |
+| `rs-status` | Integer | `200`, `404`, `500`, `0`, `-` | Upstream origin server HTTP response code. |
+| `s-action` | String | `TCP_HIT`, `TCP_MISS`, `TCP_NC_MISS`, `TCP_DENIED`, `TCP_TUNNELED`, `TCP_ACCELERATED`, `TCP_AUTH_REDIRECT`, `TCP_POLICY_REDIRECT`, `TCP_REFRESH_MISS`, `TCP_ERR_MISS`, `TCP_RESCAN_HIT`, `TUNNELED`, `FAILED` | Cache engine and connection proxy action. |
+| `cs-method` | String | `GET`, `POST`, `CONNECT`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `CCM_POST`, `TUNNEL`, `unknown` | HTTP request method. |
+| `rs-content-type` / `rs(Content-Type)` | String | `text/html;%20charset=utf-8`, `application/json`, `application/octet-stream`, `-` | MIME type returned by upstream server. |
+| `cs-uri-scheme` | String | `http`, `https`, `tcp`, `ssl`, `ftp` | Protocol scheme used. |
+| `cs-host` | String | `login.microsoftonline.com`, `docs.google.com` | Destination FQDN or target IP. |
+| `cs-uri-port` / `dstport` | Integer | `80`, `443`, `8080`, `5228`, `3128` | Destination TCP port. |
+| `cs-uri-path` | String | `/`, `/api/v1/data`, `/spreadsheets/d/1s3_/bind` | Absolute resource request path. |
+| `cs-uri-query` | String | `?id=123&token=xyz`, `-` | URI query parameter string (starting with `?`). |
+| `cs-uri-extension` | String | `html`, `json`, `cab`, `exe`, `dll`, `zip`, `-` | Extracted file extension from path. |
+| `cs-user-agent` / `cs(User-Agent)` | String | `"Mozilla/5.0..."`, `"Microsoft-CryptoAPI/10.0"`, `"curl/7.68.0"`, `-` | Raw or sanitized HTTP User-Agent string. |
+| `s-ip` | IPv4/IPv6 | `10.88.220.1`, `172.21.140.18` | Proxy interface IP address communicating with client. |
+| `sc-bytes` | Integer | `385`, `979`, `17986`, `75451` | Total bytes transmitted from proxy to client. |
+| `cs-bytes` | Integer | `323`, `915`, `5108`, `1932` | Total bytes received by proxy from client. |
+| `x-virus-id` / `virus-id` | String | `-`, `Trojan.GenericKD`, `EICAR-Test-File` | Anti-malware scanner detection name. |
+| `x-bluecoat-application-name` / `app-name` | String | `"Microsoft Update"`, `"Google Drive"`, `"Cisco WebEx"`, `"Office 365 General"`, `"none"`, `"unavailable"` | Cloud App / Application attribute. |
+| `x-bluecoat-application-operation` / `app-operation` | String | `"Update Software"`, `"Modify Files"`, `"Upload"`, `"none"` | App operation/action parsed from request payload. |
+| `x-bluecoat-transaction-uuid` | String | `86a1afe2142c57c1-000000005053b64e-000000005d26dbef` | Globally unique 48-hex/hyphenated transaction identifier. |
+| `cs-threat-risk` | Integer/String | `1`, `2`, `4`, `7`, `10`, `-` | WebPulse threat score (1 = Minimal Risk, 10 = Known Malicious). |
+| `x-rs-connection-negotiated-ssl-version` | String | `TLSv1.2`, `TLSv1.3`, `TLSv1.1`, `none` | Negotiated TLS version on upstream connection. |
+| `x-rs-connection-negotiated-cipher` | String | `ECDHE-RSA-AES128-GCM-SHA256`, `TLS_AES_256_GCM_SHA384` | Cipher suite negotiated with origin server. |
+| `x-rs-certificate-hostname` | String | `*.sharepoint.com`, `upload.video.abc.com` | Subject CN/SAN from upstream server certificate. |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Blue Coat logs use several timestamp representations depending on the transport format.
+
+### Supported Formats
+1. **W3C Standard Date/Time**: Two space-separated columns: `YYYY-MM-DD` and `HH:MM:SS` (e.g., `2023-10-15 12:24:53`).
+2. **Squid / Apache Style**: Bracketed format with timezone offset: `[10/Feb/2023:00:43:08 -0500]`.
+3. **ISO 8601 UTC (Syslog RFC 5424 / JSON)**: `2023-10-15T12:24:53.413445Z` and `"@timestamp":"2023-10-15T12:24:53.000000Z"`.
+4. **Syslog RFC 3164 Standard**: `MMM DD HH:MM:SS` (e.g., `Feb 10 00:24:53` or `Sep 22 12:26:39`).
+5. **Epoch Seconds (SSLV ssldata)**: 10-digit UNIX timestamp (e.g., `1697372693`).
+
+### Dynamic Time Macros for Scenario Generators
+When generating synthetic log streams, insert relative time template tags to maintain sequential timing across scenarios:
+
+*   `##$TimeStamp-0d0h0m0s$##` -> `2023-10-15T12:24:53.413445Z` (ISO 8601 with fractional seconds)
+*   `##$SyslogTime-0d0h0m0s$##` -> `Oct 15 12:24:53` (RFC 3164 standard header)
+*   `##$Epoch-0d0h0m0s$##` -> `1697372693` (UNIX epoch seconds)
+*   `##$Date-0d0h0m0s$##` -> `2023-10-15` (W3C date)
+*   `##$Time-0d0h0m0s$##` -> `12:24:53` (W3C time)
+*   `##$DeviceTime-0d0h0m0s$##` -> `[15/10/2023:12:24:53 GMT]` or `[15/Oct/2023:12:24:53 -0400]`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Standard ELFF Text Log (Normal Authenticated User Activity - Allowed & Accelerated)
+```text
+2023-10-15 14:10:22 145 10.1.4.55 jsmith CORP\Domain%20Users - OBSERVED "Office/Business Applications;File Storage/Sharing" https://login.microsoftonline.com/ 200 TCP_ACCELERATED GET application/json https portal.office.com 443 /api/files/metadata ?user=jsmith&tenant=corp - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36" 10.88.220.1 4820 1250 - "Office 365 General" "Access Files" 858b47d86335fdf4-0000000000d6ffd7-0000000060f04ad5 1 "portal.office.com" "Office/Business Applications" "1" 10.88.220.1 52.96.166.130
+```
+
+### Example 2: Syslog RFC 5424 / JSON Log Payload (Malicious Category / Policy Denied Block)
+```json
+<14>1 ##$TimeStamp-0d0h5m12s$## proxy-core01.corp backstory - - - {"@timestamp":"##$TimeStamp-0d0h5m12s$##","date":"##$Date-0d0h5m12s$##","time":"##$Time-0d0h5m12s$##","time_taken":18,"c_ip":"192.168.10.45","cs_username":"rjenkins","cs_auth_group":"CORP\\Standard%20Users","cs_content_disposition":"-","rs_server":"-","rs_content_disposition":"-","r_ip":"198.51.100.23","r_port":"80","r_dns":"malicious-c2-drop.xyz","r_supplier_dns":"-","s_supplier_name":"10.0.50.2","s_supplier_ip":"10.0.50.2","s_supplier_port":"0","s_supplier_country":"Russian Federation","s_supplier_failures":"-","x_exception_id":"content_filter_denied","x_icap_error_code":"none","x_exception_header":"-","x_icap_error_details":"-","sc_filter_result":"DENIED","cs_categories":"Malicious Sources/Malnets;Suspicious","cs_referer":"-","sc_status":"403","rs_status":"0","s_action":"TCP_DENIED","cs_method":"GET","rs_content_type":"-","cs_uri":"http://malicious-c2-drop.xyz/payload.exe","cs_uri_scheme":"http","cs_host":"malicious-c2-drop.xyz","cs_uri_port":"80","cs_uri_path":"/payload.exe","cs_uri_query":"-","cs_uri_extension":"exe","cs_user_agent":"Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)","s_ip":"10.0.50.2","sc_bytes":1438,"cs_bytes":210,"x_virus_id":"Trojan.Downloader.Win32","x_virus_details":"Blocked by Sophos AV Engine","x_bluecoat_application_name":"unavailable","x_bluecoat_application_operation":"unavailable","x_bluecoat_transaction_uuid":"468935933f06b2e3-00000001bd7c92b1-0000000061078ec5","cs_threat_risk":"10","x_rs_certificate_observed_errors":"none","x_cs_connection_negotiated_cipher":"-","x_rs_connection_negotiated_cipher":"-","x-cs-connection-negotiated-ssl-version":"-","x-rs-connection-negotiated-ssl-version":"-","x_exception_reason":"Access denied by Blue Coat WebPulse security rating policy"}
+```
+
+### Example 3: Syslog RFC 3164 Pipe-Delimited Key-Value (Proxy Authentication Challenge - 407 Required)
+```text
+<13>##$SyslogTime-0d0h2m0s$## proxy-edge02 Bluecoat|date=##$Date-0d0h2m0s$##|time=##$Time-0d0h2m0s$##|exception-id=authentication_failed|src=10.200.15.112|s-ip=10.200.0.1|srcport=58920|s-port=8080|dst=203.0.113.88|dstport=443|username=-|s-action=TCP_DENIED|devicetime=##$DeviceTime-0d0h2m0s$##|cs-method=CONNECT|sc-status=407|time-taken=2|sc-bytes=512|cs-bytes=218|cs-uri-scheme=tcp|cs-host=internal-app.legacy.local|cs-categories="Business/Economy"|cs-uri-path=/|cs-uri-extension=-|cs-auth-group=-|rs(Content-Type)=-|virus-id=-|app-name="none"|app-operation="none"|country="None"|cs-threat-risk=1|cs-usr-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)|cs(Referer)=-|filter-category=Business/Economy|filter-result=DENIED|cs-ssl-cn=-|cs-ssl-org=-|cs-uri-query=-|cs-uri=tcp://internal-app.legacy.local:443/
+```
+
+### Example 4: SSL Visibility Appliance (SSLV ssldata) Log (Inspection Resign Success)
+```text
+##$SyslogTime-0d0h1m30s$## SSLV-APPLIANCE ssldata[6124]: [A:41b2e1.8] ##$Epoch-0d0h1m30s$## 10.1.10.82:54122 -> 142.250.190.46:443 TLS1.3 TLS_AES_128_GCM_SHA256 www.google.com Search Engines/Portals cert fp: A4:12:99:BC:E3:44:91:88:FF:11:42:01:DE:AA:19:93:81:72:01:29 rule:12 inspect:resign SUCCESS (0x0000000000000000) 0x5af663f34a5c0967 Full x509:V V[235765]:pT[0x17792659019]:eF[0x500201a0048317f7]:type[Full]:pol[P0P1]:init[TI]:SNI[Match]:dname[SAN]:dix[0]:chix[12(M)]:rfw[N]:rov[N]:isix[S4]:cver[0x0304]:ver[03.04]cat[Search Engines/Portals]:CF[0x8402017b407]:ChF[0x1000003800b41]:Cmrx[SH|SC|SKE|SHD|FINs]:Cmtx[CH|CKE|FINc]:Cocx[0x265]:Cchx[0x265]:Cshx[0x1040]:Chrx[0x0]:Ceex[0x0]:SF[0x8402007b706]:ShF[0x192a00800b47]:Smrx[CH|CKE|FINc]:Smtx[SH|SC|SKE|SHD|FINs]:Socx[0x265]:Schx[0x265]:Sshx[0x1040]:Shrx[0x0]:Seex[0x0]:Pxy[---]:sint[0x0]:nt[0x0]:Corr[0x0]:ALPN[h2]:css[strong]:JA3[cbeb73a0e85f288fdc2e7b1e87eec9cb]:S017
+```
+
+### Example 5: ProxySG Appliance System Diagnostic Event
+```text
+<25>##$SyslogTime-0d0h0m45s$## ProxySG: E0008 Access Log (syslog_stream): Log uploading failed. Remote filename: Not Applicable size: 512 KB.(0) SEVERE_ERROR alog_manager.cpp 1273
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Critical SIEM Parser Dependencies
+1. **Positional Token Alignment in ELFF**: Parsers (such as Chronicle, Splunk Add-on for Symantec Blue Coat ProxySG, and Micro Focus ArcSight) rely on fixed column indexing for space-delimited text. If an optional field is missing, it **must** be populated with a `-` or `""` placeholder. Do not truncate rows prematurely.
+2. **Quoted Spaces**: Any field that can contain whitespace (`cs_categories`, `cs_user_agent`, `x_bluecoat_application_name`, `rs_content_type`) **must** be enclosed in quotes. A missing quote will offset parser column counts, corrupting downstream field extraction.
+3. **HTTP Status vs. Action Consistency**:
+   * If `sc-status` is `407`, `s-action` should be `TCP_DENIED`, and `x-exception-id` should be `authentication_failed`.
+   * If `sc-status` is `403`, `s-action` should be `TCP_DENIED`, and `sc-filter-result` should be `DENIED`.
+   * If `sc-status` is `200` on a HTTPS CONNECT request, `s-action` should typically be `TCP_TUNNELED` or `TCP_ACCELERATED`.
+4. **UUID Format Integrity**: `x-bluecoat-transaction-uuid` values consist of three hyphen-separated hex strings (e.g., `16hex-16hex-16hex` like `86a1afe2142c57c1-000000005053b64e-000000005d26dbef`).
+5. **Escape Sequences in JSON Formats**: Ensure URI query parameters, WAF rule dumps, or user-agent strings embedded inside the JSON payload correctly escape double quotes (`\"`) and backslashes (`\\`).

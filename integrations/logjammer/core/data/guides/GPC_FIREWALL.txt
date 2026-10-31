@@ -1,0 +1,167 @@
+# AI Generation Playbook: Google Cloud Platform (GCP) Firewall Logs (`GPC_FIREWALL`)
+
+---
+
+## 1. Overview & Log Purpose
+
+**GPC_FIREWALL** logs (officially Google Cloud VPC Firewall Rules Logging) capture TCP, UDP, ICMP, and other IP traffic evaluated by Google Compute Engine (GCE) VPC firewall rules. When firewall logging is enabled on a subnet or firewall rule, Google Cloud Logging generates structured records for every connection (or sampled packets) matching the configured rules.
+
+### Primary Activities Recorded:
+* **Allowed / Denied Ingress Traffic**: External or lateral inbound traffic hitting GCE virtual machine network interfaces.
+* **Allowed / Denied Egress Traffic**: Outbound communication initiated from instances within a VPC network.
+* **Port Scanning & Reconnaissance**: Probing of common management ports (e.g., SSH 22, RDP 3389, Database 1433/3306/5432).
+* **Command and Control (C2) / Exfiltration Attempts**: Outbound egress attempts to unauthorized ports or suspicious external IP addresses.
+
+---
+
+## 2. Format Specification
+
+* **Classification**: Google Cloud Logging `LogEntry` structure containing a structured `jsonPayload` (JSON-formatted event per line).
+* **Delivery & Encoding**: Strict JSON (`application/json`), UTF-8 encoded.
+* **Special Character Handling**: Non-ASCII characters (e.g., accents in geolocation names like `Île-de-France` or `Łódź`) are Unicode-escaped (`\u00cele-de-France`, `\u0141\u00f3d\u017aVoivodeship`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+GCP Firewall logs have top-level `LogEntry` envelope fields and nested payload structures.
+
+### Top-Level Envelope Fields
+
+| Field Name | Type | Description | Example / Allowed Values |
+| :--- | :--- | :--- | :--- |
+| `insertId` | String | Unique event identifier (base36/alphanumeric hash). | `1o2en3g1af0lkj`, `1g63acbg1130fxs` |
+| `logName` | String | Cloud Logging resource path (URL-encoded). | `projects/<project_id>/logs/compute.googleapis.com%2Ffirewall` |
+| `timestamp` | String | ISO 8601 UTC timestamp when the packet occurred on the vNIC. | `2023-10-15T14:22:05.123456789Z` |
+| `receiveTimestamp` | String | ISO 8601 UTC timestamp when Cloud Logging ingested the event (typically 1–15 seconds after `timestamp`). | `2023-10-15T14:22:10.892716301Z` |
+| `resource` | Object | Monitored resource descriptor (`gce_subnetwork`). | Subnet metadata (see below). |
+| `jsonPayload` | Object | Payload containing connection, rule, and instance details. | Firewall rule decision (see below). |
+
+---
+
+### `resource` Object
+
+| Field | Type | Description | Example |
+| :--- | :--- | :--- | :--- |
+| `type` | String | Resource type (always `gce_subnetwork`). | `gce_subnetwork` |
+| `labels.project_id` | String | GCP Project ID. | `logging-271618`, `prod-vpc-core` |
+| `labels.location` | String | Compute zone of the instance. | `us-central1-a`, `europe-west3-b` |
+| `labels.subnetwork_id` | String | GCP internal numeric ID for the subnetwork. | `4738025575977389850` |
+| `labels.subnetwork_name`| String | Name of the VPC subnetwork. | `default`, `prod-dmz-subnet` |
+
+---
+
+### `jsonPayload` Object Fields
+
+#### 1. `connection` (Object)
+* **`dest_ip`** (String): Destination IPv4/IPv6 address. (e.g., `10.128.0.3` for ingress, `172.217.16.206` for egress).
+* **`dest_port`** (Integer): Destination port number (`1`–`65535`). Omitted for protocols without ports (e.g., ICMP).
+* **`src_ip`** (String): Source IPv4/IPv6 address.
+* **`src_port`** (Integer): Ephemeral/source port number (`1024`–`65535`).
+* **`protocol`** (Integer): IANA Protocol number:
+  * `6`: TCP
+  * `17`: UDP
+  * `1`: ICMP
+  * `58`: ICMPv6
+
+#### 2. `disposition` (String)
+* Overall verdict of the firewall rule evaluation.
+* Values: `"ALLOWED"`, `"DENIED"`.
+
+#### 3. `instance` (Object)
+* **`project_id`** (String): Project hosting the VM instance.
+* **`vm_name`** (String): Name of the Compute Engine VM instance (e.g., `elastic-siem-01`, `bastion-prod-01`).
+* **`region`** (String): GCP Region (e.g., `us-central1`, `europe-west1`).
+* **`zone`** (String): GCP Zone (e.g., `us-central1-a`, `europe-west1-b`).
+
+#### 4. `remote_location` (Object)
+*Populated when one endpoint is external/public.*
+* **`city`** (String, Optional): City name (no spaces or Unicode-escaped).
+* **`country`** (String, Optional): Lowercase ISO 3166-1 alpha-3 code (e.g., `usa`, `chn`, `fra`, `deu`, `bra`, `arg`, `tur`, `jpn`, `rus`, `gbr`).
+* **`continent`** (String, Optional): `America`, `Europe`, `Asia`, `Africa`, `Oceania`.
+* **`region`** (String, Optional): Administrative subdivision / state / province.
+* *Note: If GeoIP cannot resolve the address, this object can be empty (`{}`) or contain only `continent` and `country`.*
+
+#### 5. `rule_details` (Object)
+* **`action`** (String): `"ALLOW"` or `"DENY"`.
+* **`direction`** (String): `"INGRESS"` or `"EGRESS"`.
+* **`priority`** (Integer): Rule priority (`0` to `65535`). Lower numbers have higher precedence (`65534` is typical for default rules; `1000` is common for custom rules).
+* **`reference`** (String): Resource path referencing network and rule name. Format: `network:<vpc_name>/firewall:<rule_name>`.
+* **`source_range`** (Array of Strings, Ingress only): CIDR ranges matching the rule (e.g., `["0.0.0.0/0"]`, `["10.0.0.0/8"]`).
+* **`destination_range`** (Array of Strings, Egress only): Target CIDR ranges matching the rule (e.g., `["0.0.0.0/0"]`).
+* **`ip_port_info`** (Array of Objects): Protocols and port specifications configured in the rule:
+  ```json
+  [
+    {
+      "ip_protocol": "TCP",
+      "port_range": ["22"]
+    }
+  ]
+  ```
+
+#### 6. `vpc` (Object)
+* **`project_id`** (String): Project containing the VPC network.
+* **`vpc_name`** (String): VPC network name (e.g., `default`, `custom-prod-vpc`).
+* **`subnetwork_name`** (String): Name of the subnetwork where the VM interface resides.
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+GCP logs use UTC ISO 8601 strings with nanosecond precision:
+`YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ`
+
+When generating dynamic test scenarios:
+* Use the **`timestamp`** field for the event occurrence.
+* Use the **`receiveTimestamp`** field with a relative delta of +1 to +10 seconds to mimic real-world cloud ingestion pipeline delay.
+
+### Template Tag Reference:
+* `##$TimeStamp-0d0h5m0s$##` -> Evaluates to `YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ`
+* Ensure the nanosecond portion contains up to 9 digits followed by `Z`.
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Allowed External Ingress SSH (Brute Force / Public Access)
+```json
+{"insertId":"1o2en3g1af0lkj","jsonPayload":{"connection":{"dest_ip":"10.128.0.3","dest_port":22,"protocol":6,"src_ip":"176.236.208.200","src_port":43144},"disposition":"ALLOWED","instance":{"project_id":"security-prod-1092","region":"us-central1","vm_name":"bastion-host-01","zone":"us-central1-a"},"remote_location":{"city":"Adana","continent":"Asia","country":"tur","region":"Adana"},"rule_details":{"action":"ALLOW","direction":"INGRESS","ip_port_info":[{"ip_protocol":"TCP","port_range":["22"]}],"priority":1000,"reference":"network:default/firewall:allow-external-ssh","source_range":["0.0.0.0/0"]},"vpc":{"project_id":"security-prod-1092","subnetwork_name":"default","vpc_name":"default"}},"logName":"projects/security-prod-1092/logs/compute.googleapis.com%2Ffirewall","receiveTimestamp":"##$TimeStamp-0d0h10m12s$##","resource":{"labels":{"location":"us-central1-a","project_id":"security-prod-1092","subnetwork_id":"4738025575977389850","subnetwork_name":"default"},"type":"gce_subnetwork"},"timestamp":"##$TimeStamp-0d0h10m20s$##"}
+```
+
+### Example 2: Denied Ingress Inbound Scan on Port 3389 (RDP)
+```json
+{"insertId":"9xk302g17ba91f","jsonPayload":{"connection":{"dest_ip":"10.132.0.15","dest_port":3389,"protocol":6,"src_ip":"198.51.100.42","src_port":54128},"disposition":"DENIED","instance":{"project_id":"finance-corp-9912","region":"europe-west3","vm_name":"app-server-win01","zone":"europe-west3-b"},"remote_location":{"city":"Frankfurt","continent":"Europe","country":"deu","region":"Hessen"},"rule_details":{"action":"DENY","direction":"INGRESS","ip_port_info":[{"ip_protocol":"TCP","port_range":["3389"]}],"priority":65534,"reference":"network:corp-vpc/firewall:default-deny-ingress","source_range":["0.0.0.0/0"]},"vpc":{"project_id":"finance-corp-9912","subnetwork_name":"finance-subnet-01","vpc_name":"corp-vpc"}},"logName":"projects/finance-corp-9912/logs/compute.googleapis.com%2Ffirewall","receiveTimestamp":"##$TimeStamp-0d0h5m40s$##","resource":{"labels":{"location":"europe-west3-b","project_id":"finance-corp-9912","subnetwork_id":"8839021235977381234","subnetwork_name":"finance-subnet-01"},"type":"gce_subnetwork"},"timestamp":"##$TimeStamp-0d0h5m45s$##"}
+```
+
+### Example 3: Allowed Internal Lateral Egress to Postgres Database (Port 5432)
+```json
+{"insertId":"5u11a0g100pl9m","jsonPayload":{"connection":{"dest_ip":"10.150.0.50","dest_port":5432,"protocol":6,"src_ip":"10.150.0.12","src_port":49152},"disposition":"ALLOWED","instance":{"project_id":"finance-corp-9912","region":"us-east1","vm_name":"api-backend-srv","zone":"us-east1-c"},"remote_location":{},"rule_details":{"action":"ALLOW","direction":"EGRESS","ip_port_info":[{"ip_protocol":"TCP","port_range":["5432"]}],"priority":2000,"reference":"network:internal-vpc/firewall:allow-internal-postgres","destination_range":["10.150.0.0/24"]},"vpc":{"project_id":"finance-corp-9912","subnetwork_name":"db-tier-subnet","vpc_name":"internal-vpc"}},"logName":"projects/finance-corp-9912/logs/compute.googleapis.com%2Ffirewall","receiveTimestamp":"##$TimeStamp-0d1h15m02s$##","resource":{"labels":{"location":"us-east1-c","project_id":"finance-corp-9912","subnetwork_id":"1029384756102938475","subnetwork_name":"db-tier-subnet"},"type":"gce_subnetwork"},"timestamp":"##$TimeStamp-0d1h15m05s$##"}
+```
+
+### Example 4: Denied Egress / Blocked Suspicious Outbound C2 (Port 4444)
+```json
+{"insertId":"c2blk88g11ff01","jsonPayload":{"connection":{"dest_ip":"203.0.113.89","dest_port":4444,"protocol":6,"src_ip":"10.128.0.8","src_port":38920},"disposition":"DENIED","instance":{"project_id":"security-prod-1092","region":"us-central1","vm_name":"workstation-dev-02","zone":"us-central1-b"},"remote_location":{"city":"Seoul","continent":"Asia","country":"kor","region":"Seoul"},"rule_details":{"action":"DENY","direction":"EGRESS","ip_port_info":[{"ip_protocol":"TCP","port_range":["4444"]}],"priority":100,"reference":"network:default/firewall:deny-suspicious-egress","destination_range":["0.0.0.0/0"]},"vpc":{"project_id":"security-prod-1092","subnetwork_name":"default","vpc_name":"default"}},"logName":"projects/security-prod-1092/logs/compute.googleapis.com%2Ffirewall","receiveTimestamp":"##$TimeStamp-0d0h22m10s$##","resource":{"labels":{"location":"us-central1-b","project_id":"security-prod-1092","subnetwork_id":"4738025575977389850","subnetwork_name":"default"},"type":"gce_subnetwork"},"timestamp":"##$TimeStamp-0d0h22m15s$##"}
+```
+
+### Example 5: Allowed Inbound HTTPS Web Traffic (Port 443)
+```json
+{"insertId":"7v9aa1kg1289fe","jsonPayload":{"connection":{"dest_ip":"10.142.0.4","dest_port":443,"protocol":6,"src_ip":"8.8.8.8","src_port":51234},"disposition":"ALLOWED","instance":{"project_id":"web-infra-5019","region":"europe-west1","vm_name":"nginx-frontend-01","zone":"europe-west1-b"},"remote_location":{"city":"Newark","continent":"America","country":"usa","region":"NewJersey"},"rule_details":{"action":"ALLOW","direction":"INGRESS","ip_port_info":[{"ip_protocol":"TCP","port_range":["443"]}],"priority":1000,"reference":"network:web-vpc/firewall:allow-public-https","source_range":["0.0.0.0/0"]},"vpc":{"project_id":"web-infra-5019","subnetwork_name":"frontend-subnet","vpc_name":"web-vpc"}},"logName":"projects/web-infra-5019/logs/compute.googleapis.com%2Ffirewall","receiveTimestamp":"##$TimeStamp-0d0h1m02s$##","resource":{"labels":{"location":"europe-west1-b","project_id":"web-infra-5019","subnetwork_id":"5920394810293847561","subnetwork_name":"frontend-subnet"},"type":"gce_subnetwork"},"timestamp":"##$TimeStamp-0d0h1m08s$##"}
+```
+
+---
+
+## 6. Key Constraints & Common Pitfalls
+
+1. **Type Strictness**:
+   * `connection.protocol`, `connection.dest_port`, `connection.src_port`, and `rule_details.priority` **must be numeric integers**, never enclosed in quotes.
+   * `rule_details.ip_port_info[].ip_protocol` is an **uppercase string** (e.g. `"TCP"`, `"UDP"`), whereas `connection.protocol` is an **integer** (e.g. `6`, `17`).
+   * `port_range` is an array of strings (e.g. `["22"]`, `["80-443"]`), **not** an array of integers.
+2. **Field Consistency**:
+   * If `rule_details.direction` is `"INGRESS"`, the rule must include `source_range`.
+   * If `rule_details.direction` is `"EGRESS"`, the rule must include `destination_range`.
+   * `disposition` is past-participle uppercase (`ALLOWED` / `DENIED`), while `rule_details.action` is base-form uppercase (`ALLOW` / `DENY`).
+3. **Log Name Formatting**:
+   * The `logName` string must start with `projects/<project_id>/logs/compute.googleapis.com%2Ffirewall`. The forward slash in the log ID is always URL-encoded as `%2F`.
+4. **GeoIP Structure**:
+   * Country codes in `remote_location.country` are always lowercase 3-letter codes (`usa`, `chn`, `fra`, `deu`, `bra`, `tur`).
+   * For RFC 1918 (internal) IP communications, `remote_location` must be an empty object `{}`.

@@ -1,0 +1,217 @@
+# AI Generation Playbook: FORTINET_FIREWALL (FortiOS)
+
+---
+
+## 1. Overview & Log Purpose
+
+**Fortinet FortiGate Firewalls (FortiOS)** generate structured key-value event, traffic, and security monitoring logs. These logs capture edge security operations, deep packet inspections, VPN connectivity, identity tracking, routing events, and system administration activities.
+
+### Key Recorded Activities
+- **Traffic Logging (`traffic`)**: Evaluated packet flows through firewall policies (e.g., `forward`, `local` traffic to/from FortiOS kernel).
+- **Unified Threat Management (`utm`)**: Security profile inspection events including Antivirus (`virus`), Intrusion Prevention System (`ips`), Web Filtering (`webfilter`), Application Control (`app-ctrl`), DNS Filter (`dns`), VoIP (`voip`), and SSL/SSH Inspection (`ssl`).
+- **Event Logging (`event`)**: Device health and operational state changes including administrative operations (`system`), user logins/logoffs (`user`), VPN tunnel lifecycle (`vpn`), FortiClient telemetry (`endpoint`), and Web Application Daemon (`wad`).
+- **Anomalies / DoS (`anomaly`)**: Layer 3/4/7 volumetric anomaly detection and denial-of-service mitigation.
+
+---
+
+## 2. Format Specification
+
+Fortinet firewalls predominantly use **Syslog-encapsulated Key-Value (KV)** format. Variants include native Syslog (RFC 3164/5424), Fortinet CEF format, or JSON-wrapped log pipelines (e.g., Filebeat/Cloud Logging).
+
+### 2.1 Syslog Envelope
+- **Syslog Facility**: Typically `local7` (numeric `23`).
+- **Syslog Severity Values**:
+  - `Emergency` (`0`): `<184>`
+  - `Alert` (`1`): `<185>`
+  - `Critical` (`2`): `<186>`
+  - `Error` (`3`): `<187>`
+  - `Warning` (`4`): `<188>`
+  - `Notice` (`5`): `<189>`
+  - `Information` (`6`): `<190>`
+  - `Debug` (`7`): `<191>`
+- **Header Structure Options**:
+  - **Option A (Raw FortiOS Native KV)**: `<PRI>logver=XX timestamp=... devname=...`
+  - **Option B (RFC 3164 Prefix)**: `<PRI>MMM DD HH:MM:SS <hostname_or_ip> date=YYYY-MM-DD time=HH:MM:SS ...`
+  - **Option C (RFC 5424 Prefix)**: `<PRI>1 YYYY-MM-DDTHH:MM:SSZ <hostname_or_ip> - - - - logver=...`
+
+### 2.2 Delimiters and Quoting Rules
+- **Pair Delimiter**: Single space (` `).
+- **Key-Value Separator**: Equal sign (`=`) with **no whitespace** around it (`key=value`).
+- **Quoting**:
+  - Values containing spaces, colons, commas, semicolons, brackets, or backslashes **must** be enclosed in double quotes (`"`), e.g., `msg="URL belongs to a denied category in policy"`, `url="/path?param=1"`.
+  - Simple numeric values, IP addresses, single-word alphanumeric tokens, and port numbers are typically unquoted: `proto=6`, `srcip=198.51.100.1`, `srcport=443`, `vd=root`.
+  - Hexadecimal hashes, MAC addresses, and UUIDs can appear unquoted or quoted: `srcmac="44:44:44:44:44:44"` or `mac=44:44:44:44:44:44`, `poluuid="16e680c4-32bb-51e7-8603-ef6a6ba47eb2"`.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Standard Header & Envelope Fields
+
+| Field Name | Type | Description | Allowed / Typical Values |
+| :--- | :--- | :--- | :--- |
+| `logver` | String/Int | FortiOS log format version | `54`, `56`, `60`, `62`, `600120419`, `604081914`, `700000000` |
+| `timestamp` | Integer | Unix epoch time in seconds | E.g., `1584535807` |
+| `tz` | String | Timezone offset | `"UTC-4"`, `"UTC-5:00"`, `"-0500"`, `"+0200"`, `"UTC+9:00"` |
+| `devname` | String | Configured firewall hostname | `"ACME_FG800D"`, `"TLVCyber-FW"`, `"acme-cl105"` |
+| `devid` | String | FortiGate serial number (16 chars) | `"FG800D3916801392"`, `"FG200FT920902954"`, `"FGT37D4615800555"` |
+| `vd` | String | Virtual Domain (VDOM) name | `"root"`, `"corp-inet"`, `"ACME-DC"`, `"mgmt"` |
+| `date` | String | Date of log creation (`YYYY-MM-DD`) | E.g., `2023-11-16` |
+| `time` | String | Time of log creation (`HH:MM:SS`) | E.g., `14:58:26` |
+| `logid` | String | 10-digit zero-padded log identifier | `"0000000013"`, `"0419016384"`, `"0101039948"`, `"1059028704"` |
+| `type` | String | Primary log category | `traffic`, `utm`, `event`, `anomaly`, `dns` |
+| `subtype` | String | Secondary sub-classification | `forward`, `local`, `virus`, `webfilter`, `ips`, `app-ctrl`, `dns`, `ssl`, `system`, `user`, `vpn`, `endpoint` |
+| `level` | String | Log level | `information`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency` |
+| `eventtime` | Integer | Unix epoch in seconds or nanoseconds | `1584535807` or `1591121920905877654` |
+
+---
+
+### 3.2 Log Categories & Subtypes
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 FortiOS Log Type Hierarchy                  │
+├──────────────┬──────────────────────────────────────────────┤
+│ traffic      │ forward, local                               │
+│ utm          │ virus, webfilter, ips, app-ctrl, dns, ssl    │
+│ event        │ system, user, vpn, endpoint, wad             │
+│ anomaly      │ anomaly (DoS / flood detection)              │
+│ dns          │ dns-query, dns-response                      │
+└──────────────┴──────────────────────────────────────────────┘
+```
+
+#### Common LogIDs Reference
+- `0000000011` / `0000000013` / `0000000020`: Traffic forward session start, close, or intermediate update
+- `0001000014`: Traffic local session (destined to FortiGate itself)
+- `0100000000` - `0100032095`: System events (DHCP, admin login, GUI activity)
+- `0101037141` / `0101039943` - `0101039948`: VPN events (IPsec/SSL-VPN tunnel up, down, stats, error)
+- `0102043014` / `0102043015` / `0102043040`: User authentication (FSSO logon/logoff, Web auth)
+- `0211008192` / `0201009233`: Antivirus inspection (infected file blocked, sandbox submission)
+- `0316013056` / `0317013312`: Web filter events (URL blocked, URL allowed)
+- `0419016384`: IPS signature detection
+- `0720018432`: Anomaly / DoS attack detection
+- `1059028704`: Application Control detection
+- `1500054000` / `1501054802`: DNS query / DNS response inspection
+
+---
+
+### 3.3 Core Log Body Fields
+
+#### Network & Routing Fields
+- `srcip`, `dstip`: IPv4 (`198.51.100.1`) or IPv6 (`fe80::5efe:a58:821`).
+- `srcport`, `dstport`: 0 - 65535.
+- `srcintf`, `dstintf`: Interface names (`"port1"`, `"wan1"`, `"ssl.root"`, `"VLAN51"`, `"internal"`).
+- `srcintfrole`, `dstintfrole`: Role classifications (`"lan"`, `"wan"`, `"dmz"`, `"undefined"`).
+- `proto`: IANA protocol number (`1` = ICMP, `6` = TCP, `17` = UDP, `47` = GRE, `58` = ICMPv6).
+- `service`: Service mapping (`"HTTPS"`, `"HTTP"`, `"DNS"`, `"LDAP_UDP"`, `"SMB"`, `"SNMP"`, `"udp/5200"`).
+- `trandisp`: NAT translation disposition (`"noop"`, `"snat"`, `"dnat"`).
+- `transip`, `transport`: Translated source/destination IP and port during NAT operations.
+- `sessionid`: Numeric tracking session index (`1454857804`).
+- `policyid`: Rule ID matched in FortiOS configuration (`0` for implicit deny, local-in, or non-policy traffic).
+- `policytype`: `"policy"`, `"local-in-policy"`, `"DoS-policy"`.
+- `poluuid`: String UUID of the firewall rule.
+
+#### Identity & Endpoint Fields
+- `user`, `unauthuser`: Username or identity principal (`"jdoe"`, `"abc.xyz"`, `"jdoe@domain.com"`).
+- `group`: User group name (`"SSL-VPN"`, `"DomainUsers"`, `"GROUP_VPN3_203_SEC"`).
+- `authserver`: Authentication provider (`"Duo RADIUS"`, `"OKTA_Agent"`, `"FAC-FSSO-Groups-Connector"`).
+- `unauthusersource`: Identity harvesting source (`"forticlient"`, `"kerberos"`).
+- `fctuid`: FortiClient Unique ID (32-char hex string, e.g., `"42FDE6971F434C68B4A3A0A2C0A1BD7B"`).
+- `srcmac`, `dstmac`: Physical MAC address formatted as `XX:XX:XX:XX:XX:XX`.
+- `osname`, `osversion`, `srcswversion`: Host operating system telemetry (`"Windows"`, `"10"`, `"Linux"`, `"iOS"`).
+- `srchwvendor`, `devtype`, `devcategory`: Device fingerprinting metadata (`"Apple"`, `"Phone"`, `"Windows PC"`).
+
+#### UTM & Security Context Fields
+- **Action Verbs (`action`)**:
+  - Traffic: `"accept"`, `"deny"`, `"close"`, `"client-rst"`, `"server-rst"`, `"timeout"`, `"ip-conn"`, `"dns"`.
+  - UTM: `"blocked"`, `"dropped"`, `"detected"`, `"pass"`, `"passthrough"`, `"analytics"`, `"permit"`.
+  - VPN: `"tunnel-up"`, `"tunnel-down"`, `"tunnel-stats"`, `"ssl-new-con"`, `"ssl-exit-error"`.
+  - User/Auth: `"auth-logon"`, `"auth-logout"`, `"FSSO-logon"`, `"FSSO-logoff"`.
+- `app`, `appid`, `appcat`, `apprisk`: Application control metadata (e.g., `app="LDAP"`, `appid=16173`, `appcat="Network.Service"`, `apprisk="elevated"`).
+  - Risk values: `"low"`, `"medium"`, `"elevated"`, `"high"`, `"critical"`.
+- `attack`, `attackid`, `severity`: IPS signature metadata (e.g., `attack="PHP.Malicious.Shell"`, `attackid=44580`, `severity="critical"`).
+- `virus`, `virusid`, `filename`, `dtype`: AV engine findings (e.g., `virus="W32/Kryptik.HCGI!tr"`, `filename="malware.exe"`, `dtype="Virus"`).
+- `hostname`, `url`, `cat`, `catdesc`: Web filter targets (e.g., `hostname="example.com"`, `url="/login"`, `cat=37`, `catdesc="Social Networking"`).
+- `crscore`, `crlevel`, `craction`: Cyber Risk score calculated by FortiOS engine (e.g., `crscore=50`, `crlevel="critical"`, `craction=4096`).
+
+#### Quantitative & Statistical Metrics
+- `duration`: Session lifetime in seconds.
+- `sentbyte`, `rcvdbyte`: Directional byte counts (`0` for initial block/deny events).
+- `sentpkt`, `rcvdpkt`: Packet counts.
+- `sentdelta`, `rcvddelta`: Delta bytes transferred since the last intermediate update.
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+FortiOS events emit time across multiple fields simultaneously:
+1. `timestamp`: Standard Unix epoch (seconds).
+2. `eventtime`: Unix epoch (seconds or 19-digit nanoseconds).
+3. `date` and `time`: Local date formatted as `YYYY-MM-DD` and time as `HH:MM:SS`.
+4. `tz`: Timezone representation (e.g., `"UTC-5"`, `"-0500"`, `"UTC+2:00"`).
+
+### Dynamic Template Macro Reference
+
+When generating synthetic Fortinet logs, match the scenario time offset across all related date/time fields:
+
+| Field Representation | Dynamic Template Tag | Example Output |
+| :--- | :--- | :--- |
+| Epoch Seconds (`timestamp`, `eventtime`) | `##$Epoch-0d0h0m0s$##` | `1698249600` |
+| ISO Date (`date`) | `##$TimeStamp-0d0h0m0s:%Y-%m-%d$##` | `2023-10-25` |
+| Local Time (`time`) | `##$TimeStamp-0d0h0m0s:%H:%M:%S$##` | `14:40:00` |
+| Syslog RFC 3164 Prefix | `##$SyslogTime-0d0h0m0s$##` | `Oct 25 14:40:00` |
+| Syslog RFC 5424 Timestamp | `##$TimeStamp-0d0h0m0s:%Y-%m-%dT%H:%M:%SZ$##` | `2023-10-25T14:40:00Z` |
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Standard Forward Traffic with SNAT (Web Browsing)
+*Scenario: Standard workstation browsing HTTPS, NAT applied, session allowed and closed normally.*
+```text
+<189>logver=604081914 timestamp=##$Epoch-0d0h5m0s$## tz="UTC-5" devname="FW-EDGE-01" devid="FG200FT920902954" vd="root" date=##$TimeStamp-0d0h5m0s:%Y-%m-%d$## time=##$TimeStamp-0d0h5m0s:%H:%M:%S$## logid="0000000013" type="traffic" subtype="forward" level="notice" eventtime=##$Epoch-0d0h5m0s$## srcip=10.10.40.55 srcname="DESKTOP-8K21V9" srcport=54210 srcintf="VLAN40_Corp" srcintfrole="lan" dstip=142.250.190.46 dstport=443 dstintf="wan1" dstintfrole="wan" poluuid="16e680c4-32bb-51e7-8603-ef6a6ba47eb2" sessionid=284918231 proto=6 action="close" policyid=12 policytype="policy" service="HTTPS" dstcountry="United States" srccountry="Reserved" trandisp="snat" transip=198.51.100.100 transport=54210 appid=40568 app="HTTPS.BROWSER" appcat="Web.Client" apprisk="medium" applist="default_app_control" duration=45 sentbyte=4820 rcvdbyte=18492 sentpkt=22 rcvdpkt=28 osname="Windows" osversion="10" mastersrcmac="00:50:56:a1:b2:c3" srcmac="00:50:56:a1:b2:c3"
+```
+
+### Example 2: Antivirus Detection & File Blocking (HTTP/SMB)
+*Scenario: FortiGate AV engine intercepts and blocks a malicious file download.*
+```text
+<188>logver=604065785 timestamp=##$Epoch-0d0h12m0s$## tz="UTC-4:00" devname="FW-CORE-HA" devid="FGT37D4615800460" vd="root" date=##$TimeStamp-0d0h12m0s:%Y-%m-%d$## time=##$TimeStamp-0d0h12m0s:%H:%M:%S$## logid="0211008192" type="utm" subtype="virus" eventtype="infected" level="warning" eventtime=##$Epoch-0d0h12m0s$## msg="File is infected." action="blocked" service="HTTPS" sessionid=1984210491 srcip=10.20.10.104 dstip=198.51.100.77 srcport=61244 dstport=443 srcintf="port2" srcintfrole="lan" dstintf="port1" dstintfrole="wan" policyid=101 proto=6 direction="incoming" filename="invoice_scan_october.exe" quarskip="File-was-not-quarantined." virus="W32/Kryptik.HCGI!tr" dtype="Virus" ref="https://www.fortiguard.com/encyclopedia/virus/8198935" virusid=8198935 url="https://malicious-distribution.net/invoices/invoice_scan_october.exe" profile="AV_Deep_Inspect" user="m.jenkins" group="Domain_Users" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)" analyticscksum="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" analyticssubmit="false" crscore=50 crlevel="critical"
+```
+
+### Example 3: IPS Exploit Signature Drop
+*Scenario: IPS profile blocks an attempted PHP remote code execution / web exploit.*
+```text
+<185>logver=604081914 timestamp=##$Epoch-0d0h22m0s$## tz="+0200" devname="DC-INTERNET-FW" devid="FG3H0E5819907456" vd="dmz-vdom" date=##$TimeStamp-0d0h22m0s:%Y-%m-%d$## time=##$TimeStamp-0d0h22m0s:%H:%M:%S$## eventtime=##$Epoch-0d0h22m0s$## logid="0419016384" type="utm" subtype="ips" eventtype="signature" level="alert" severity="critical" srcip=203.0.113.88 srccountry="Russian Federation" dstip=198.51.100.25 srcintf="wan1" srcintfrole="wan" dstintf="port10" dstintfrole="dmz" sessionid=892341102 action="dropped" proto=6 service="HTTP" policyid=405 attack="PHP.Malicious.Shell" srcport=41902 dstport=80 hostname="portal.company.com" url="/upload/webshell.php" direction="incoming" attackid=44580 profile="strict_ips" ref="https://www.fortiguard.com/encyclopedia/ips/44580" incidentserialno=904812371 msg="web_app3: PHP.Malicious.Shell," crscore=50 craction=4096 crlevel="critical"
+```
+
+### Example 4: Web Filter URL Policy Deny
+*Scenario: User attempts to reach a blocked high-risk or prohibited website.*
+```text
+<188>logver=604065785 timestamp=##$Epoch-0d0h35m0s$## tz="UTC-5" devname="BRANCH-FW02" devid="FG200FT920902954" vd="root" date=##$TimeStamp-0d0h35m0s:%Y-%m-%d$## time=##$TimeStamp-0d0h35m0s:%H:%M:%S$## logid="0316013056" type="utm" subtype="webfilter" eventtype="ftgd_blk" level="warning" eventtime=##$Epoch-0d0h35m0s$## policyid=55 sessionid=114872901 user="c.smith" group="Finance-Staff" authserver="OKTA_Agent" srcip=10.15.2.80 srcport=58912 srcintf="Internal_VLAN" srcintfrole="lan" dstip=198.51.100.200 dstport=443 dstintf="wan1" dstintfrole="wan" proto=6 service="HTTPS" hostname="proxy-bypass-tool.cc" profile="Strict_WebFilter" action="blocked" reqtype="direct" url="https://proxy-bypass-tool.cc/" sentbyte=517 rcvdbyte=0 direction="outgoing" msg="URL belongs to a denied category in policy" method="domain" cat=59 catdesc="Proxy Avoidance" crscore=10 craction=4194304 crlevel="medium"
+```
+
+### Example 5: SSL-VPN Tunnel Authentication & Session Termination
+*Scenario: SSL-VPN user session reaches its duration limit and shuts down normally.*
+```text
+<190>logver=60 timestamp=##$Epoch-0d1h10m0s$## tz="UTC-4" devname="HQ-VPN-CONCENTRATOR" devid="FG800D3916801392" vd="root" date=##$TimeStamp-0d1h10m0s:%Y-%m-%d$## time=##$TimeStamp-0d1h10m0s:%H:%M:%S$## logid="0101039948" type="event" subtype="vpn" level="information" eventtime=##$Epoch-0d1h10m0s$## logdesc="SSL VPN tunnel down" action="tunnel-down" tunneltype="ssl-tunnel" tunnelid=981240182 remip=203.0.113.145 tunnelip=10.254.0.12 user="alex.williams" group="VPN-FullAccess" dst_host="N/A" reason="Server terminated session normally" duration=28800 sentbyte=184920194 rcvdbyte=34910281 msg="SSL tunnel shutdown"
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Mandatory Parsing Anchor Fields
+SIEM parsers (Splunk Add-on for Fortinet, Elastic Filebeat Fortinet Module, Microsoft Sentinel FortiGate Data Connector) strictly expect the following fields:
+1. `date=YYYY-MM-DD time=HH:MM:SS` (or unparsed RFC header + `timestamp=<epoch>`).
+2. `devname="<string>"` and `devid="<string>"` (used for asset correlation).
+3. `type="<type>"` and `subtype="<subtype>"` (determines sub-parser mapping).
+4. `logid="<10-digit-id>"` (required for categorization).
+5. `action="<action>"` (determines success/failure/block semantics).
+
+### Common Mistakes & Pitfalls
+- **Quotes on Plain Integers**: Do not quote numeric metrics like `sentbyte="100"` or `proto="6"`. Standard FortiOS prints them as `sentbyte=100` and `proto=6`.
+- **Spaces Inside Quotes**: Strings with spaces (e.g., `msg="URL belongs to a denied category in policy"`) **must** be enclosed in quotes. A missing quote breaks key-value splitting engines.
+- **LogID Length**: `logid` is always a 10-digit zero-padded number (or exact numeric code in older v5.2, but strictly 10 digits in modern FortiOS 6.x/7.x). Always generate it as a string formatted as `"0000000013"`, `"0419016384"`, etc.
+- **Policy ID on Denied Traffic**: When traffic is blocked by the default implicit deny rule, `policyid=0` and `poluuid` is usually absent.
+- **Zero Values on Drops/Blocks**: For denied/dropped connections (`action="deny"`, `action="dropped"`, `action="blocked"`), byte and packet counts should generally be zero: `duration=0 sentbyte=0 rcvdbyte=0 sentpkt=0 rcvdpkt=0`.
+- **Escaping Special Characters**: In paths and URLs (such as `url` or `filename`), backslashes should be single escaped if ingested into raw syslog or double-escaped if embedded in a JSON envelope (e.g., `\\` inside JSON).

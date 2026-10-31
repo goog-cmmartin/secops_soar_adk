@@ -1,0 +1,185 @@
+# AI Generation Guide: Azure AD (Entra ID) Audit Logs (`AZURE_AD_AUDIT`)
+
+---
+
+## 1. Overview & Log Purpose
+
+**Azure AD Audit Logs** (now known as **Microsoft Entra ID Audit Logs**) capture end-to-end traceability for all configuration, identity lifecycle, and governance operations performed within an Azure Active Directory tenant. These logs are generated natively by Microsoft Entra ID services (Core Directory, B2C Identity Experience Engine, Cloud Sync/Provisioning, Self-Service Password Reset, Role Management, and Access Reviews).
+
+### Recorded Activities
+- **User & Group Lifecycle**: Creation, modification, soft-deletion, hard-deletion, group membership modifications, and attribute changes (e.g., `AccountEnabled`, `UserPrincipalName`, `UserType`).
+- **Azure AD B2C / Identity Workflows**: Token exchange, authorization code issuance, credential validation, email/SMS MFA verification, and policy execution.
+- **Role & Privilege Management (PIM)**: Role definition, role assignment (e.g., assigning Global Administrator, Security Admin), activation of eligible roles.
+- **Application & Service Principal Management**: App registrations, consent grant operations, credential updates (adding certificates/secrets to service principals).
+- **Tenant & Policy Configuration**: Conditional Access Policy updates, tenant configuration initialization, authentication method modifications.
+
+---
+
+## 2. Format Specification
+
+Azure AD audit logs are structured **JSON** objects. In enterprise ingestion pipelines (Azure Event Hub, Log Analytics workspace, Microsoft Graph API, or SIEM collectors), logs are delivered as single-line JSON objects (NDJSON) or wrapped inside an Azure Monitor Diagnostic envelope.
+
+### Structural Variants
+
+1. **Direct Microsoft Graph API Format (`directoryAudit`)**:
+   Standard flat JSON payload containing root audit properties (`activityDateTime`, `activityDisplayName`, `initiatedBy`, `targetResources`, `additionalDetails`).
+2. **Azure Monitor Diagnostic Envelope Format**:
+   Wrapper containing standard Azure Monitor metadata (`time`, `resourceId`, `category: "AuditLogs"`, `properties: { ... }`) where `properties` holds the inner `directoryAudit` JSON.
+
+### Syntax & Quoting Rules
+- **Encapsulation**: Single-line JSON objects per event.
+- **Key-Value Serialization**: `additionalDetails` is an array of key-value objects (`[{"key": "k1", "value": "v1"}]`), **not** a flat JSON map.
+- **Stringified Inner Arrays**: In `modifiedProperties`, values are often represented as stringified arrays or stringified JSON primitives (e.g., `"newValue": "[\"Member\"]"` or `"newValue": "[true]"`).
+- **Null Values**: Explicit `null` values are strictly preserved for unpopulated fields (e.g., `"displayName": null`, `"user": null`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Core Schema Fields (Microsoft Graph / Direct Schema)
+
+| Field Name | Type | Description / Constraints | Example Values |
+| :--- | :--- | :--- | :--- |
+| `activityDateTime` | String (ISO 8601) | Timestamp when the activity was executed. | `2023-10-24T08:54:05.64932Z` |
+| `activityDisplayName` | String | Human-readable name of the action performed. | `Add user`, `Update user`, `Exchange token`, `Add member to role` |
+| `category` | String | Sub-service or functional domain classification. | `UserManagement`, `GroupManagement`, `Authentication`, `Authorization`, `RoleManagement`, `ApplicationManagement`, `Policy` |
+| `correlationId` | UUID | Unique trace identifier grouping related operations. | `6a0797dc-a455-4e96-9ba8-7c49071988f2` |
+| `id` | String | Unique audit event identifier with service prefix. | `Directory_a81fa8ef..._N7Q7F_123983508`, `B2C_6a0797dc..._L8GYQ_15740812` |
+| `loggedByService` | String | Internal service engine logging the event. | `Core Directory`, `B2C`, `Account Provisioning`, `Self-service Password Reset`, `PIM` |
+| `operationType` | String | CRUD action type. Often empty string for B2C events. | `Add`, `Update`, `Delete`, `Assign`, `""` |
+| `result` | String | Execution outcome. | `success`, `failure`, `timeout` |
+| `resultReason` | String | Detailed reason, system error code, or exception. | `""`, `N/A`, `Microsoft.Online.Workflows.ObjectAlreadyExistsException` |
+| `initiatedBy` | Object | The principal (user or application) executing the operation. | *See Sub-Object Breakdown below* |
+| `targetResources` | Array of Objects | Entities targeted/modified by the activity. | *See Sub-Object Breakdown below* |
+| `additionalDetails` | Array of Objects | Contextual metadata key-value pairs. | `[{"key": "ClientIpAddress", "value": "1.1.1.1"}]` |
+
+---
+
+### Sub-Objects Breakdown
+
+#### 1. `initiatedBy`
+Can be initiated by a **User**, an **Application/Service Principal**, or **both/neither** (system internal).
+
+```json
+{
+  "initiatedBy": {
+    "app": {
+      "appId": "a03bbb51-cc9e-4a1d-9006-f06c03bd562a",
+      "displayName": "Azure AD Cloud Sync",
+      "servicePrincipalId": "9a3a85ee-a70c-40ea-81d0-3a4f7730ea87",
+      "servicePrincipalName": null
+    },
+    "user": {
+      "displayName": "Global Admin",
+      "id": "088280f7-b74e-4808-8939-48a446f00d35",
+      "ipAddress": "198.51.100.25",
+      "userPrincipalName": "admin@contoso.onmicrosoft.com",
+      "userType": null
+    }
+  }
+}
+```
+*Note: When `app` is active, `user` is typically `null`, and vice-versa.*
+
+#### 2. `targetResources`
+Array containing one or more targeted objects.
+
+```json
+[
+  {
+    "id": "1c5b7c6c-3eaa-4498-b2cc-a6bf984d73a1",
+    "displayName": "Jane Doe",
+    "type": "User",
+    "userPrincipalName": "jdoe@contoso.com",
+    "groupType": null,
+    "administrativeUnits": [],
+    "modifiedProperties": [
+      {
+        "displayName": "AccountEnabled",
+        "oldValue": "[false]",
+        "newValue": "[true]"
+      },
+      {
+        "displayName": "Included Updated Properties",
+        "oldValue": null,
+        "newValue": "\"AccountEnabled\""
+      }
+    ]
+  }
+]
+```
+
+#### 3. `additionalDetails` (Common Key Values)
+- `ClientIpAddress` / `ipaddr`: Source IP address.
+- `Client` / `User-Agent`: Full HTTP User Agent string.
+- `TenantId`: Tenant domain or GUID.
+- `PolicyId`: B2C Policy or TrustFramework policy name.
+- `GrantType`: e.g., `authorization_code`, `client_credentials`, `refresh_token`.
+- `Scopes`: e.g., `openid,offline_access,User.Read`.
+- `PhoneNumber`: Target MFA phone number.
+- `VerificationMethod`: `SMS`, `PhoneCall`, `Email`.
+- `LocalAccountUsername`: Account username submitted during B2C login.
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Azure AD audit logs represent timestamps strictly in **UTC ISO 8601 format** with up to 7 decimal digits of sub-second precision followed by `Z` or `+00:00`.
+
+### Dynamic Time Substitution Tags
+When synthetically generating scenarios, use relative timestamp injection tags:
+- `##$TimeStamp-0d0h0m0s$##` -> Current event time (e.g., `2023-10-24T12:00:00.0000000Z`)
+- `##$TimeStamp-0d0h0m5s$##` -> Event occurring 5 seconds prior
+- `##$TimeStamp-0d1h30m0s$##` -> Event occurring 1 hour and 30 minutes prior
+- `##$Epoch-0d0h0m0s$##` -> Unix Epoch timestamp format (if mapping to numeric fields)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: User Account Creation (Failed - Duplicate User)
+*Action*: Administrator attempts to create a user that already exists.
+```json
+{"activityDateTime":"##$TimeStamp-0d0h15m00s$##","activityDisplayName":"Add user","additionalDetails":[],"category":"UserManagement","correlationId":"a81fa8ef-d71b-4afd-8e75-7ec326ae3d11","id":"Directory_a81fa8ef-d71b-4afd-8e75-7ec326ae3d11_N7Q7F_123983508","initiatedBy":{"app":null,"user":{"displayName":"Admin User","id":"088280f7-b74e-4808-8939-48a446f00d35","ipAddress":"198.51.100.45","userPrincipalName":"secops-admin@contoso.com","userType":null}},"loggedByService":"Core Directory","operationType":"Add","result":"failure","resultReason":"Microsoft.Online.Workflows.ObjectAlreadyExistsException","targetResources":[{"displayName":null,"groupType":null,"id":"1c5b7c6c-3eaa-4498-b2cc-a6bf984d73a1","modifiedProperties":[{"displayName":"AccountEnabled","newValue":"[true]","oldValue":"[]"},{"displayName":"DisplayName","newValue":"[\"Lawrence Keleher\"]","oldValue":"[]"},{"displayName":"MailNickname","newValue":"[\"lkeleher\"]","oldValue":"[]"},{"displayName":"UserPrincipalName","newValue":"[\"lkeleher@contoso.com\"]","oldValue":"[]"},{"displayName":"UserType","newValue":"[\"Member\"]","oldValue":"[]"},{"displayName":"Included Updated Properties","newValue":"\"AccountEnabled, DisplayName, MailNickname, UserPrincipalName, UserType\"","oldValue":null},{"displayName":"MethodExecutionResult.","newValue":"\"Microsoft.Online.Workflows.ObjectAlreadyExistsException\"","oldValue":null}],"type":"User","userPrincipalName":"lkeleher@contoso.com"}]}
+```
+
+### Example 2: Azure AD B2C Phone MFA Challenge (SMS Sent)
+*Action*: B2C identity experience engine triggers phone verification for authentication.
+```json
+{"activityDateTime":"##$TimeStamp-0d0h10m12s$##","activityDisplayName":"Send SMS to verify phone number","additionalDetails":[{"key":"TenantId","value":"contoso.onmicrosoft.com"},{"key":"PolicyId","value":"B2C_1A_signup_signin"},{"key":"ApplicationId","value":"a03bbb51-cc9e-4a1d-9006-f06c03bd562a"},{"key":"Client","value":"Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"},{"key":"VerificationMethod","value":"SMS"},{"key":"PhoneNumber","value":"+15550192834"},{"key":"ClientIpAddress","value":"203.0.113.195"},{"key":"DomainName","value":"https://contosob2c.b2clogin.com"}],"category":"Authentication","correlationId":"0f858426-3737-4de6-aa7a-553fa324df4a","id":"B2C_0f858426-3737-4de6-aa7a-553fa324df4a_CEUAA_15276771","initiatedBy":{"app":{"appId":"bafc98dd-345c-460a-8852-7515df115274","displayName":null,"servicePrincipalId":null,"servicePrincipalName":"a03bbb51-cc9e-4a1d-9006-f06c03bd562a"},"user":null},"loggedByService":"B2C","operationType":"","result":"success","resultReason":"N/A","targetResources":[{"displayName":null,"groupType":null,"id":"75739cf7-fc3d-4491-a6cc-1052b292e90e","modifiedProperties":[],"type":"User","userPrincipalName":null}]}
+```
+
+### Example 3: Privilege Escalation (Global Administrator Role Assignment)
+*Action*: High-privilege role assigned to a compromised or target user.
+```json
+{"activityDateTime":"##$TimeStamp-0d0h05m30s$##","activityDisplayName":"Add member to role","additionalDetails":[{"key":"RoleDefinitionOrigin","value":"DirectoryRole"},{"key":"RoleDefinitionName","value":"Company Administrator"}],"category":"RoleManagement","correlationId":"3c61d5e2-4bf1-4e4b-9703-9d6837c76891","id":"Directory_3c61d5e2-4bf1-4e4b-9703-9d6837c76891_AB12C_99481234","initiatedBy":{"app":null,"user":{"displayName":"Global Administrator","id":"84cf50a1-9a72-4b2a-8743-392942bfae11","ipAddress":"198.51.100.12","userPrincipalName":"secadmin@contoso.onmicrosoft.com","userType":null}},"loggedByService":"Core Directory","operationType":"Assign","result":"success","resultReason":"","targetResources":[{"displayName":"Company Administrator","groupType":null,"id":"62e90394-69f5-4237-9190-012177145e10","modifiedProperties":[{"displayName":"Role.DisplayName","newValue":"\"Company Administrator\"","oldValue":null}],"type":"Role","userPrincipalName":null},{"displayName":"Attacker User","groupType":null,"id":"a9e16cb0-b3e1-45bc-8a3d-49b068da88a1","modifiedProperties":[],"type":"User","userPrincipalName":"compromised_user@contoso.com"}]}
+```
+
+### Example 4: Account Enabled (Administrative Action with User-Agent)
+*Action*: Disabling/Enabling account status via Azure Portal.
+```json
+{"activityDateTime":"##$TimeStamp-0d0h02m10s$##","activityDisplayName":"Enable account","additionalDetails":[{"key":"User-Agent","value":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"}],"category":"UserManagement","correlationId":"155e87bf-1061-40a9-93fb-8a66a18b0568","id":"Directory_155e87bf-1061-40a9-93fb-8a66a18b0568_IS08K_112279226","initiatedBy":{"app":null,"user":{"displayName":null,"id":"088280f7-b74e-4808-8939-48a446f00d35","ipAddress":"203.0.113.88","userPrincipalName":"helpdesk@contoso.com","userType":null}},"loggedByService":"Core Directory","operationType":"Update","result":"success","resultReason":"","targetResources":[{"displayName":null,"groupType":null,"id":"ec1fd042-da50-444d-9d59-af9e9a4cf22e","modifiedProperties":[{"displayName":"AccountEnabled","newValue":"[true]","oldValue":"[false]"},{"displayName":"Included Updated Properties","newValue":"\"AccountEnabled\"","oldValue":null}],"type":"User","userPrincipalName":"target-employee@contoso.com"}]}
+```
+
+### Example 5: Azure Monitor Diagnostic Envelope Format (AuditLogs Wrapper)
+*Action*: Account Provisioning / Sync rule skipping a soft delete.
+```json
+{"time":"##$TimeStamp-0d0h01m00s$##","resourceId":"/tenants/c990bb7a-51f4-439b-bd36-9c07fb1041c0/providers/Microsoft.aadiam","operationName":"Synchronization rule action","operationVersion":"1.0","category":"AuditLogs","tenantId":"c990bb7a-51f4-439b-bd36-9c07fb1041c0","resultSignature":"None","resultDescription":"The User 'sync-user@contoso.com' was evaluated to be soft-deleted in the source system.","durationMs":0,"correlationId":"cfd5dae6-8d8c-4524-9c69-0adc8d76a704","identity":"Azure AD Cloud Sync","Level":4,"properties":{"id":"Sync_cfd5dae6-8d8c-4524-9c69-0adc8d76a704_JNBQW_60143616","category":"ProvisioningManagement","correlationId":"cfd5dae6-8d8c-4524-9c69-0adc8d76a704","result":"success","resultReason":"The soft delete operation will be skipped.","activityDisplayName":"Synchronization rule action","activityDateTime":"##$TimeStamp-0d0h01m00s$##","loggedByService":"Account Provisioning","operationType":"","userAgent":null,"initiatedBy":{"app":{"appId":null,"displayName":"Azure AD Cloud Sync","servicePrincipalId":null,"servicePrincipalName":null},"user":null},"targetResources":[{"id":"99b7667a-f504-477a-820a-3bf99ba2ea8e","displayName":"Enterprise App SSO","type":"ServicePrincipal","modifiedProperties":[{"displayName":"accountEnabled","oldValue":null,"newValue":"\"False\""},{"displayName":"IsSoftDeleted","oldValue":null,"newValue":"\"False\""}],"administrativeUnits":[]}],"additionalDetails":[{"key":"Details","value":"Skip reason = RedundantSoftDelete"},{"key":"EventName","value":"EntrySynchronizationSkip"}]}}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Mandatory Rules for Generator Engines
+1. **Never Output Empty Dictionaries for Initiators**: `initiatedBy` MUST contain both `app` and `user` keys. Set the non-initiating entity explicitly to `null` (e.g., `"user": null` when `"app"` is present).
+2. **Strict Key-Value Array Representation**: Never convert `additionalDetails` into `{"key": "value"}`. It must always be an array of objects: `[{"key": "TenantId", "value": "xyz"}]`.
+3. **Array Encapsulation in Modified Properties**:
+   - Boolean modifications: `"newValue": "[true]"`, `"oldValue": "[false]"`
+   - String modifications: `"newValue": "[\"Value\"]"`, `"oldValue": "[]"`
+   - Property summary lists: `"newValue": "\"AccountEnabled, DisplayName, UserPrincipalName\""`
+4. **Valid Category / Service Correlations**:
+   - `loggedByService`: `"Core Directory"` -> `category`: `"UserManagement"`, `"GroupManagement"`, `"RoleManagement"`, `"ApplicationManagement"`
+   - `loggedByService`: `"B2C"` -> `category`: `"Authentication"`, `"Authorization"`
+   - `loggedByService`: `"Account Provisioning"` -> `category`: `"ProvisioningManagement"`
+5. **No Trailing Commas**: Keep raw JSON payload single-line and compliant with strict RFC 8259 syntax to prevent SIEM ingestion pipeline parser errors.

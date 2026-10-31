@@ -1,0 +1,251 @@
+# Proofpoint Email Security (PROOFPOINT_MAIL) Log Generation Playbook
+
+---
+
+## 1. Overview & Log Purpose
+
+**Proofpoint Email Security** generates events covering inbound, outbound, and internal email processing, threat detection, policy enforcement, and post-delivery URL click telemetry. The data originates from two primary architectures:
+
+1. **Proofpoint Targeted Attack Protection (TAP) SIEM API**:
+   - Pulls real-time detection intelligence regarding malicious messages and credential-phishing/malware URLs.
+   - Categorizes events into four core telemetry streams:
+     - `messagesBlocked`: High-risk or malicious messages quarantined/dropped at gateway.
+     - `messagesDelivered`: Clean or policy-altered messages successfully passed to the destination mail server (e.g., Microsoft 365, Google Workspace, Exchange).
+     - `clicksBlocked`: User clicks on rewritten URLs (URL Defense) that were blocked at click-time.
+     - `clicksPermitted`: User clicks on rewritten URLs where the threat was weaponized post-delivery or permitted by policy.
+2. **Proofpoint Protection Server (PPS) Enterprise Gateway Syslog**:
+   - Streamed via RFC 3164 or RFC 5424 from physical/virtual appliances or hosted clusters (`pphosted.com`).
+   - Details low-level SMTP filter stages (`filter_instance`), module execution (`spf`, `dkim`, `av`, `zerohour`, `spam`, `sandbox`, `urldefense`), and final MTA routing (`sendmail`).
+
+---
+
+## 2. Format Specification
+
+Proofpoint events exist in two primary formats depending on the ingestion pipeline:
+
+```
++------------------------------------+---------------------------------------------+
+| Telemetry Type                     | Wire Format                                 |
++------------------------------------+---------------------------------------------+
+| Proofpoint TAP SIEM REST API       | Minified / Formatted JSON (Batch Envelope)  |
+| Proofpoint Protection Server (PPS) | Syslog (RFC 3164 / RFC 5424) + Key-Value   |
++------------------------------------+---------------------------------------------+
+```
+
+### 2.1 TAP SIEM API Format (JSON)
+- **Root Object**: Top-level envelope containing batch arrays: `messagesBlocked`, `messagesDelivered`, `clicksBlocked`, `clicksPermitted`, and the query metadata field `queryEndTime`.
+- **Delimiters & Quoting**: Standard RFC 8259 JSON.
+- **Character Escaping**: RFC 822 email headers and IDs containing HTML angle brackets (`<`, `>`) and ampersands (`&`) in URLs are escaped via Unicode encoding (e.g., `\u003cabc@domain.com\u003e`, `\u0026id=...`).
+
+### 2.2 PPS Appliance Syslog Format (Key-Value)
+- **Syslog Envelope**: Standard BSD Syslog (RFC 3164) `<PRI>MMM DD HH:MM:SS host app[PID]:` or RFC 5424 `<PRI>YYYY-MM-DDTHH:MM:SS.ffffffZZ:ZZ host app[PID]:`.
+- **Facility / Priority**:
+  - `<141>` (local1.notice): Filter execution, disposition, and message reporting (`rprt`).
+  - `<142>` (local1.info): Informational operational events (`info`).
+  - `<140>` (local1.warning): Gateway warnings (`warn`).
+  - `<139>` (local1.error): Gateway errors and encryption faults (`err`).
+  - `<22>` (mail.info): MTA/Sendmail message transit, queues, and deferral statuses.
+- **Message Payload**: Space-delimited `key=value` tokens. Values containing spaces, complex expressions, or URLs MUST be enclosed in double quotes (e.g., `subject="Invoice 123"`, `record="v=spf1 ..."`). Empty key-values end with an equals sign with no whitespace (`size= smtputf8=`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 TAP JSON Fields
+
+#### Top-Level Envelope
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `queryEndTime` | String (ISO 8601) | Query execution/watermark timestamp (e.g., `2023-10-25T14:30:00Z`). |
+| `messagesBlocked` | Array of Objects | Inbound messages blocked/quarantined by threat policies. |
+| `messagesDelivered`| Array of Objects | Messages passed to downstream mail infrastructure. |
+| `clicksBlocked` | Array of Objects | URL clicks terminated by URL Defense page blocks. |
+| `clicksPermitted` | Array of Objects | URL clicks permitted through to the target destination. |
+
+#### Message Object (`messagesBlocked` / `messagesDelivered`)
+| Field | Type | Example / Allowed Values | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | String (UUID) | `"9fbbeb4e-de16-4020-9f3f-0a376e416e1e"` | Unique event identifier. |
+| `GUID` / `guid` | String | `"f2sxNCTBdTK6joYxktj2NO5Vgk-9TNal"` | Proofpoint global message ID. |
+| `QID` / `qid` | String | `"3ckgw0ggdq-1"`, `"1AUBXIXd007308"` | Internal queue identifier. |
+| `messageID` | String | `"\u003c004a01d8@mail.com\u003e"` | RFC 822 `Message-ID` header. |
+| `messageTime` | String (ISO 8601) | `"2023-10-25T14:15:00.000Z"` | Message arrival time at Proofpoint gateway. |
+| `sender` | String | `"payroll@external-vendor.com"` | Envelope Sender (`MAIL FROM`). |
+| `senderIP` | String (IPv4/IPv6)| `"198.51.100.25"` | Connecting client IP address. |
+| `recipient` | Array of Strings | `["victim@company.com"]` | Envelope Recipient (`RCPT TO`). |
+| `fromAddress` | Array of Strings | `["spoofed@partner.com"]` | Header `From:` address list. |
+| `toAddresses` | Array of Strings | `["victim@company.com"]` | Header `To:` address list. |
+| `ccAddresses` | Array of Strings | `[]`, `["manager@company.com"]` | Header `CC:` address list. |
+| `replyToAddress` | Array of Strings | `["attacker@evil-domain.com"]` | Header `Reply-To:` address list. |
+| `headerFrom` | String | `"HR Support \u003chr@external.com\u003e"`| Friendly From display string. |
+| `subject` | String | `"Action Required: Update Direct Deposit"` | Email Subject line. |
+| `messageSize` | Integer | `17701` | Size of the entire message in bytes. |
+| `spamScore` | Integer | `0` to `100` | MLX Spam score (100 = definite spam). |
+| `phishScore` | Integer | `0` to `100` | Phishing probability score. |
+| `malwareScore` | Integer | `0` to `100` | Malware probability score. |
+| `impostorScore` | Float / Int | `0.0` to `100.0` | Business Email Compromise / Impostor score. |
+| `completelyRewritten`| Boolean | `true`, `false` | Indicates if URLs inside were rewritten by URL Defense. |
+| `cluster` / `clusterId`| String | `"ussignal_production-vm"` | PPS cluster processing the message. |
+| `policyRoutes` | Array of Strings | `["default_inbound", "allow_relay"]` | Internal policy evaluation routes traversed. |
+| `modulesRun` | Array of Strings | `["access", "spf", "dkimv", "spam", "sandbox", "urldefense"]` | Modules executed against the message. |
+| `quarantineFolder`| String | `"Phish"`, `"Spam 100"`, `"Low Priority"`, `""` | Destination quarantine container if held. |
+| `quarantineRule` | String | `"module.spam.rule.inbound_phish"`, `""` | Exact rule matching message for quarantine. |
+| `threatsInfoMap` | Array of Objects | *(See Threat Object below)* | Array of identified threats in the message. |
+| `messageParts` | Array of Objects | *(See Message Part Object below)* | MIME attachments and text bodies. |
+
+#### Message Part Object (`messageParts[]`)
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `filename` | String | Name of file (e.g., `"invoice.pdf"`, `"text.html"`, `"text.txt"`). |
+| `contentType` | String | MIME type (e.g., `"application/pdf"`, `"text/html"`). |
+| `oContentType` | String | Original MIME type parsed prior to decoding. |
+| `disposition` | String | `"inline"`, `"attached"`. |
+| `sha256` | String (Hex 64) | SHA256 cryptographic hash of the part. |
+| `md5` | String (Hex 32) | MD5 hash of the part. |
+| `sandboxStatus` | String / Null | `"THREAT"`, `"CLEAN"`, `"NOT_SUPPORTED"`, `null`, `""`. |
+
+#### Threat Object (`threatsInfoMap[]`)
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `threatID` | String (Hex 64) | Proofpoint unique threat identifier hash. |
+| `threatType` | String | `"url"`, `"attachment"`, `"messageText"`. |
+| `threatStatus` | String | `"active"`, `"inactive"`, `"cleared"`. |
+| `classification` | String | `"phish"`, `"malware"`, `"spam"`, `"impostor"`. |
+| `threat` | String | Malicious payload indicator (URL string or attachment hash). |
+| `threatUrl` / `threatURL`| String (URI) | Proofpoint Threat Insight portal URL for investigation. |
+| `threatTime` | String (ISO 8601) | Time threat was identified globally by Proofpoint. |
+| `campaignID` | String / Null | Associated attack campaign ID if mapped, else `null` or `""`. |
+
+#### Click Object (`clicksBlocked` / `clicksPermitted`)
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `id` | String (UUID) | Unique click log ID. |
+| `clickIP` | String (IPv4/IPv6)| Source public IP address of the endpoint clicking the link. |
+| `clickTime` | String (ISO 8601) | Timestamp the user triggered the click. |
+| `url` | String (URI) | Target destination URL decoded from URL Defense wrapper. |
+| `userAgent` | String | Full HTTP User-Agent string from the client browser. |
+| `sender` | String | Email address of the original sender. |
+| `senderIP` | String (IPv4/IPv6)| IP of the server that originally delivered the email. |
+| `recipient` | String | Email address of the user who received and clicked the link. |
+| `GUID` / `guid` | String | Proofpoint global identifier of the parent email. |
+| `threatID` / `threadID` | String (Hex 64) | Associated Threat Intelligence hash ID. |
+| `threatURL` | String (URI) | Threat Insight portal detail URL. |
+| `classification` | String | `"phish"`, `"malware"`, `"spam"`. |
+
+---
+
+### 3.2 PPS Syslog Fields
+
+#### Common PPS Syslog Header Tokens
+- `s=<session_id>`: Alphanumeric session tracker (e.g., `3d3sasg9d2`).
+- `m=<msg_num>`: Message index within the SMTP session (e.g., `1`).
+- `x=<tracking_id>`: Composite transaction identifier (e.g., `3d3sasg9d2-1`).
+- `mod=<module>`: Component emitting the log (`mail`, `session`, `spf`, `av`, `zerohour`, `spam`, `sandbox`, `smtpsrv`, `crypto`, `dkim`, `urldefense`, `filter`).
+- `cmd=<action>`: Sub-routine executed (`env_from`, `data`, `headers`, `run`, `attachment`, `dispose`, `send`, `msg`, `stat`, `connect`, `starttls`).
+
+#### Detailed Filter Module Key-Values
+| Module (`mod`) | Key Attribute Pairs |
+| :--- | :--- |
+| `spf` | `result=pass\|fail\|softfail\|neutral\|none`, `record="v=spf1 ..."`, `dnsid=<int>`, `querydepth=<int>` |
+| `dkim` | `cmd=run`, `domain=<str>`, `selector=<str>`, `result=pass\|fail`, `hfrom_domain=<str>` |
+| `av` | `cmd=run`, `rule=clean\|infected`, `vendor=<engine>`, `version="definitions=..."`, `duration=<float>` |
+| `zerohour` | `cmd=run`, `rule=none\|virus`, `virusthreat=unknown\|clean\|malware`, `virusthreatid="<id>"` |
+| `spam` | `rule=inbound_bulk\|inbound_spam_definite\|inbound_phish`, `spamscore=<int>`, `phishscore=<int>`, `malwarescore=<int>`, `bulkscore=<int>`, `tests=<COMMA_SEPARATED_PROOFPOINT_RULES>`, `duration=<float>` |
+| `sandbox` | `cmd=run`, `token="X-Proofpoint-TraceToken: ..."`, `msghold_response="verdict => PROCEED\|BLOCK"` |
+| `session` | `cmd=dispose`, `module=<mod>`, `rule=<rule>`, `action=continue\|reject\|quarantine\|set-header\|add-header`, `value="..."` |
+| `mail` | `cmd=msg`, `qid=<MTA_QID>`, `size=<int>`, `guid=<GUID>`, `hdr_mid=<Message-ID>`, `duration=<float>`, `elapsed=<float>` |
+
+#### Sendmail MTA Key-Values
+| Action Type | Syslog Line Format Key-Values |
+| :--- | :--- |
+| `Connect / TLS` | `STARTTLS=client\|server, relay=<fqdn>, version=TLSv1.2\|TLSv1.3, verify=OK\|NONE, cipher=<cipher>, bits=<int>` |
+| `Incoming Envelope` | `<QID>: from=<<email>>, size=<bytes>, class=<int>, nrcpts=<int>, msgid=<<mid>>, proto=ESMTP, relay=<host> [<ip>]` |
+| `Outbound Dispatch` | `<QID>: to=<<email>>, delay=HH:MM:SS, xdelay=HH:MM:SS, mailer=esmtp, tls_verify=OK, tls_version=TLSv1.2, cipher=<cipher>, pri=<int>, relay=<host> [<ip>], dsn=2.0.0\|4.2.2\|5.7.1, stat=Sent\|Deferred\|User unknown` |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+To support high-fidelity, dynamic log generation across diverse scenarios, use the following relative timestamp macros:
+
+| Format Name | Specification | Generation Template Tag | Example Output |
+| :--- | :--- | :--- | :--- |
+| **TAP ISO 8601 Milliseconds** | `YYYY-MM-DDTHH:MM:SS.000Z` | `##$TimeStamp-0d2h15m0s$##` | `2023-10-25T12:45:00.000Z` |
+| **TAP Query End Time** | `YYYY-MM-DDTHH:MM:SSZ` | `##$TimeStamp-0d0h0m0s$##` | `2023-10-25T15:00:00Z` |
+| **BSD Syslog (RFC 3164)** | `MMM D HH:MM:SS` (space-padded day) | `##$SyslogTime-0d0h10m0s$##` | `Oct 25 14:50:00` |
+| **RFC 5424 Timestamp** | `YYYY-MM-DDTHH:MM:SS.ffffffZZ:ZZ` | `##$ISO8601-0d0h10m0s$##` | `2023-10-25T14:50:00.156633-04:00` |
+| **Epoch Unix Timestamp** | Seconds since Unix epoch | `##$Epoch-0d0h10m0s$##` | `1698245400` |
+
+### Timestamp Offsetting Logic
+- When generating an email threat lifecycle:
+  1. `threatTime`: Threat identified by Proofpoint Threat Intel hours/days before (`##$TimeStamp-1d4h0m0s$##`).
+  2. `messageTime`: Message received by gateway (`##$TimeStamp-0d1h15m0s$##`).
+  3. `clickTime`: User clicked on rewritten URL minutes/hours later (`##$TimeStamp-0d0h30m0s$##`).
+  4. `queryEndTime`: Pull execution timestamp representing current ingestion cycle (`##$TimeStamp-0d0h0m0s$##`).
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: TAP SIEM API - Phishing Message Blocked (JSON)
+*Scenario: Credential phishing email with an active malicious attachment and weaponized URL, caught and quarantined.*
+
+```json
+{"messagesBlocked":[{"spamScore":100,"phishScore":100,"threatsInfoMap":[{"threatID":"9f8a3c82de1984bcfa284091a182736450192837465019283746501928374650","threatStatus":"active","classification":"phish","threatUrl":"https://threatinsight.proofpoint.com/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/threat/email/9f8a3c82de1984bcfa284091a182736450192837465019283746501928374650","threatTime":"##$TimeStamp-1d2h10m0s$##","threat":"https://login.microsoftonline.portal-security-auth.top/auth/login","campaignID":"CAMP-2023-9941","threatType":"url"},{"threatID":"a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091","threatStatus":"active","classification":"phish","threatUrl":"https://threatinsight.proofpoint.com/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/threat/email/a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091","threatTime":"##$TimeStamp-1d2h10m0s$##","threat":"a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091","campaignID":"CAMP-2023-9941","threatType":"attachment"}],"messageTime":"##$TimeStamp-0d1h10m0s$##","impostorScore":0.0,"malwareScore":0,"cluster":"cluster1_production-vm","subject":"Urgent: Password Expiry Notification for jdoe@victimcorp.com","quarantineFolder":"Phish","quarantineRule":"module.spam.rule.inbound_phish","policyRoutes":["default_inbound","Corporate_Enforcement"],"modulesRun":["access","regulation","smtpsrv","av","zerohour","spf","dkimv","sandbox","spam","pdr","urldefense"],"messageSize":14520,"headerFrom":"Microsoft Account Security \u003cno-reply@security-auth-check.com\u003e","headerReplyTo":"Security Team \u003chelpdesk-reply@security-auth-check.com\u003e","fromAddress":["no-reply@security-auth-check.com"],"ccAddresses":[],"replyToAddress":["helpdesk-reply@security-auth-check.com"],"toAddresses":["jdoe@victimcorp.com"],"xmailer":null,"messageParts":[{"disposition":"inline","sha256":"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945","md5":"5d41402abc4b2a76b9719d911017c592","filename":"text.html","sandboxStatus":"NOT_SUPPORTED","oContentType":"text/html","contentType":"text/html"},{"disposition":"attached","sha256":"a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091","md5":"098f6bcd4621d373cade4e832627b4f6","filename":"Password_Reset_Portal.htm","sandboxStatus":"THREAT","oContentType":"text/html","contentType":"text/html"}],"completelyRewritten":false,"id":"e71029c3-982e-4b11-b0e9-b5912a784561","QID":"3d5aa1ff80-1","GUID":"k9LmNOpqRStUVwXyz1234567890abcdef","sender":"no-reply@security-auth-check.com","recipient":["jdoe@victimcorp.com"],"senderIP":"198.51.100.44","messageID":"\u003c202310251410.3d5aa1ff80@security-auth-check.com\u003e"}],"queryEndTime":"##$TimeStamp-0d0h0m0s$##"}
+```
+
+### Example 2: TAP SIEM API - Post-Delivery Malicious URL Click Blocked (JSON)
+*Scenario: An employee clicks a rewritten link in an older email; the link is detected as malicious and URL Defense blocks access.*
+
+```json
+{"queryEndTime":"##$TimeStamp-0d0h0m0s$##","clicksBlocked":[{"id":"71bf230a-9d8a-40a1-a477-9df6023cb112","campaignId":"CAMP-2023-4011","classification":"phish","clickIP":"203.0.113.88","clickTime":"##$TimeStamp-0d0h22m15s$##","guid":"k9LmNOpqRStUVwXyz1234567890abcdef","recipient":"jdoe@victimcorp.com","sender":"billing@cloud-docs-portal.com","senderIP":"192.0.2.145","threadID":"f1e2d3c4b5a60718293a4b5c6d7e8f01a2b3c4d5e6f708192a3b4c5d6e7f8091","threatTime":"##$TimeStamp-0d0h25m00s$##","threatURL":"https://threatinsight.proofpoint.com/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/threat/email/f1e2d3c4b5a60718293a4b5c6d7e8f01a2b3c4d5e6f708192a3b4c5d6e7f8091","threatID":"f1e2d3c4b5a60718293a4b5c6d7e8f01a2b3c4d5e6f708192a3b4c5d6e7f8091","threatStatus":"active","url":"https://cloud-docs-portal.com/shared-files/d/e/invoice_review.php?auth=user\u0026token=x89a","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.5993.89 Safari/537.36","messageID":"\u003c01928374a-b928-4e8c-8199-0a9b8c7d6e5f@cloud-docs-portal.com\u003e"}]}
+```
+
+### Example 3: TAP SIEM API - Clean Message Delivered with URL Rewriting (JSON)
+*Scenario: Legitimate external business newsletter scanned, URLs wrapped with URL Defense, delivered to inbox.*
+
+```json
+{"messagesDelivered":[{"spamScore":0,"phishScore":0,"threatsInfoMap":[],"messageTime":"##$TimeStamp-0d0h45m10s$##","impostorScore":0.0,"malwareScore":0,"cluster":"cluster1_production-vm","subject":"Weekly Industry Insights: October Edition","quarantineFolder":"","quarantineRule":"","policyRoutes":["default_inbound"],"modulesRun":["access","regulation","smtpsrv","av","zerohour","spf","dkimv","spam","urldefense"],"messageSize":42310,"headerFrom":"Global Tech Insights \u003cnewsletter@globaltechinsights.com\u003e","headerReplyTo":"Global Tech \u003ccontact@globaltechinsights.com\u003e","fromAddress":["newsletter@globaltechinsights.com"],"ccAddresses":[],"replyToAddress":["contact@globaltechinsights.com"],"toAddresses":["bsmith@victimcorp.com"],"xmailer":"MailChimp Mailer - 10023","messageParts":[{"disposition":"inline","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","md5":"d41d8cd98f00b204e9800998ecf8427e","filename":"text.txt","sandboxStatus":null,"oContentType":"text/plain","contentType":"text/plain"},{"disposition":"inline","sha256":"6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b","md5":"60b725f10c9c85c70d97880dfe8191b3","filename":"text.html","sandboxStatus":null,"oContentType":"text/html","contentType":"text/html"}],"completelyRewritten":true,"id":"43a910bf-71de-4c28-910a-66291a182049","QID":"1CU4K0lx021948","GUID":"T6qR_V5p0Lkd8mNwX-4gJpYRt_u12IoA","sender":"newsletter@globaltechinsights.com","recipient":["bsmith@victimcorp.com"],"senderIP":"198.51.100.120","messageID":"\u003c0.1.2.3.1DA07C7491C3E60.0@globaltechinsights.com\u003e"}],"queryEndTime":"##$TimeStamp-0d0h0m0s$##"}
+```
+
+### Example 4: PPS Appliance Syslog - Inbound Processing Pipeline (RFC 3164)
+*Scenario: Full pipeline log sequence representing connection, SPF validation, spam/phish analysis, and disposition for an inbound message.*
+
+```syslog
+<141>##$SyslogTime-0d0h05m30s$## pps-gw01 filter_instance1[11450]: rprt s=3e4fgh78jk mod=session cmd=connect ip=198.51.100.44 country=US lip=10.0.10.25 prot=smtp:smtp hops_active=f routes=default_inbound notroutes=Internal_Relay,Trusted_Partners perlwait=0.002
+<141>##$SyslogTime-0d0h05m29s$## pps-gw01 filter_instance1[11450]: rprt s=3e4fgh78jk m=1 x=3e4fgh78jk-1 mod=mail cmd=env_from value=no-reply@security-auth-check.com size=14520 smtputf8= qid=3e4fgh78jk-1 tls=ECDHE-RSA-AES256-GCM-SHA384 routes=default_inbound notroutes=* host=mail.security-auth-check.com ip=198.51.100.44
+<142>##$SyslogTime-0d0h05m29s$## pps-gw01 filter_instance1[11450]: info s=3e4fgh78jk m=1 x=3e4fgh78jk-1 mod=spf dnsid=1 record="v=spf1 ip4:198.51.100.0/24 -all" querydepth=0
+<142>##$SyslogTime-0d0h05m29s$## pps-gw01 filter_instance1[11450]: info s=3e4fgh78jk m=1 x=3e4fgh78jk-1 mod=spf cmd=run cmd=eob result=pass
+<141>##$SyslogTime-0d0h05m28s$## pps-gw01 filter_instance1[11450]: rprt s=3e4fgh78jk m=1 x=3e4fgh78jk-1 mod=av cmd=run rule=clean vendor=fsecure version="definitions=2023-10-25_01" duration=0.002
+<141>##$SyslogTime-0d0h05m28s$## pps-gw01 filter_instance1[11450]: rprt s=3e4fgh78jk m=1 x=3e4fgh78jk-1 mod=spam cmd=run rule=inbound_phish policy=inbound score=100 suspectscore=0 phishscore=100 impostorscore=0 adultscore=0 mlxlogscore=999 lowpriorityscore=0 spamscore=100 clxscore=100 mlxscore=100 malwarescore=0 bulkscore=0 priorityscore=0 classifier=phish adjust=0 reason=mlx scancount=1 engine=8.18.0-2309150000 definitions=main-2310250012 raw=0 tests=PP_ROUTE_INBOUND,PP_ATTACHMENT_HTML,PP_URL_AUTH_CHECK,PP_CRED_PHISH_SUSPECT duration=0.015
+<141>##$SyslogTime-0d0h05m27s$## pps-gw01 filter_instance1[11450]: rprt s=3e4fgh78jk m=1 x=3e4fgh78jk-1 mod=session cmd=dispose module=spam rule=inbound_phish action=quarantine folder="Phish"
+```
+
+### Example 5: PPS Sendmail MTA Syslog - Delivery Deferral & Quota Exceeded (RFC 5424)
+*Scenario: Downstream mail server defers connection due to mailbox storage quota limits.*
+
+```syslog
+<22>##$ISO8601-0d0h02m10s$## pps-agent02 sendmail[19842]: STARTTLS=client, relay=mxa-internal.victimcorp.com., version=TLSv1.2, verify=OK, cipher=ECDHE-RSA-AES256-GCM-SHA384, bits=256/256
+<22>##$ISO8601-0d0h02m09s$## pps-agent02 sendmail[19842]: 1CU4K0lx021948: to=<jdoe@victimcorp.com>, delay=00:00:04, xdelay=00:00:02, mailer=esmtp, tls_verify=OK, tls_version=TLSv1.2, cipher=ECDHE-RSA-AES256-GCM, pri=145200, relay=mxa-internal.victimcorp.com. [10.0.20.15], dsn=4.2.2, reply=452-4.2.2 The email account that you tried to reach is over quota. Please direct, stat=Deferred: 452-4.2.2 The email account that you tried to reach is over quota. Please direct
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Critical Schema Dependencies
+- **Case Variance in TAP API**:
+  - Legacy or mixed TAP API responses may alternate casing: `GUID` vs `guid`, `QID` vs `qid`, `threatURL` vs `threatUrl`, and `impostorScore` vs `imposterScore`. When building SIEM validation models, adhere to the casing present in the specific schema version under test.
+- **Top-Level Root Container**:
+  - TAP SIEM API events are **never** delivered as naked individual message objects. They are wrapped within top-level array envelopes (`messagesBlocked: [...]`, `messagesDelivered: [...]`, etc.) with a `queryEndTime` watermark.
+
+### Parsing & Escaping Rules
+- **Angle Bracket Encoding**:
+  - `headerFrom`, `headerReplyTo`, `messageID`, and envelope addresses frequently contain `<user@domain.com>`. In JSON logs, these MUST be encoded as `\u003c` and `\u003e` (e.g., `\u003cuser@domain.com\u003e`).
+- **Syslog Space Quoting**:
+  - In PPS Syslog lines, any field value containing spaces (e.g., `subject`, `record`, `version`, `tests`, `stat`) MUST be enclosed in double quotes (`"`).
+  - Internal quotes within quoted strings must be escaped (e.g., `subject="[EXT] Re: \"Important Documents\""`).
+- **Correlation Chain Integrity**:
+  - An end-to-end simulated flow MUST maintain correlation across identifiers:
+    - TAP JSON: `GUID` / `id` / `QID`
+    - PPS Syslog: Session tracker `s=<ID>`, filter tracking token `x=<ID>-<subID>`, and MTA queue ID `qid=<MTA_QID>`.

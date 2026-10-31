@@ -1,0 +1,17 @@
+action_identifier: Generate Attack Scenario Logs
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 550
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: full_width
+description: Renders synthetic security scenario telemetry, MITRE ATT&CK mappings, multi-log source tabs, syntax highlighting, and SecOps Chronicle ingestion status with theme synchronization.
+scope: alert
+title: LogJammer Attack Simulation
+type: html

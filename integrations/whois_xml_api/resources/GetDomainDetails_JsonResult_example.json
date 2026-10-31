@@ -1,0 +1,46 @@
+{
+  "WhoisRecord": {
+    "createdDate": "1997-09-15T04:00:00Z",
+    "updatedDate": "2019-09-09T15:39:04Z",
+    "expiresDate": "2028-09-14T04:00:00Z",
+    "registrant": {
+      "organization": "Google LLC",
+      "state": "California",
+      "country": "UNITED STATES",
+      "countryCode": "US",
+      "email": "dns-admin@google.com"
+    },
+    "administrativeContact": {
+      "organization": "Google LLC",
+      "country": "UNITED STATES"
+    },
+    "technicalContact": {
+      "organization": "Google LLC",
+      "country": "UNITED STATES"
+    },
+    "domainName": "google.com",
+    "nameServers": {
+      "rawText": "ns1.google.com\nns2.google.com\nns3.google.com\nns4.google.com",
+      "hostNames": [
+        "ns1.google.com",
+        "ns2.google.com",
+        "ns3.google.com",
+        "ns4.google.com"
+      ]
+    },
+    "status": "clientDeleteProhibited clientTransferProhibited clientUpdateProhibited",
+    "rawText": "",
+    "parseCode": 0,
+    "header": "",
+    "strippedText": "",
+    "footer": "",
+    "audit": {
+      "createdDate": "2026-10-26 11:00:00.000 UTC",
+      "updatedDate": "2026-10-26 11:00:00.000 UTC"
+    },
+    "registrarName": "MarkMonitor, Inc.",
+    "registrarIANAID": "292",
+    "whoisServer": "whois.markmonitor.com",
+    "estimatedDomainAge": 10634
+  }
+}

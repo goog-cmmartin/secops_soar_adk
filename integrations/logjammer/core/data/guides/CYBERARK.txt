@@ -1,0 +1,221 @@
+# CyberArk Log Generation Playbook
+
+## 1. Overview & Log Purpose
+
+CyberArk Privileged Access Security (PAS) and Endpoint Privilege Manager (EPM) solutions record privileged access management, credential rotations, session activity, administrative operations, and endpoint privilege elevations.
+
+### Primary Systems & Subcomponents
+* **CyberArk Digital Vault (EPV)**: Core repository managing privileged accounts, safe permissions, policy rules, and cryptographic operations.
+* **Central Policy Manager (CPM)**: Automated engine performing password verification, rotation, and reconciliation.
+* **Privileged Session Manager (PSM / PSMP)**: Proxy service recording and isolating interactive privileged sessions (RDP, SSH, Web), monitoring keystrokes, and tracking application window titles.
+* **Password Vault Web Access (PVWA)**: Web-based administrative and end-user access console.
+* **Endpoint Privilege Manager (EPM)**: Host-based agent controlling application execution, administrative delegation, and privilege elevation.
+
+---
+
+## 2. Format Specification
+
+CyberArk logs exist primarily in two main formats across enterprise environments:
+
+### Format A: Syslog Wrapped Common Event Format (CEF) — *Standard & Dominant*
+Used by Digital Vault, CPM, PSM, and PVWA syslog outbound feeds.
+
+* **Syslog Envelopes**:
+  * **RFC 5424 Format**: `<PRI>1 YYYY-MM-DDTHH:MM:SSZ <HOST> CEF:0|Cyber-Ark|Vault|<Version>|<DeviceEventClassID>|<Name>|<Severity>|<Extension>`
+  * **RFC 3164 Format**: `<PRI>MMM DD HH:MM:SS <HOST/IP> CEF:0|Cyber-Ark|Vault|<Version>|<DeviceEventClassID>|<Name>|<Severity>|<Extension>`
+  * *Note*: Some legacy configurations emit `CEF: 0|` (with a space) or omit the `<PRI>` syslog prefix entirely.
+* **CEF Header Delimiters**: Pipe `|` separated into 7 fixed segments.
+* **CEF Extension Delimiters**: Space-separated `key=value` pairs.
+* **Quoting & Escaping**:
+  * Values containing `=` must escape it as `\=`.
+  * Values containing `\` or `|` must be escaped with `\\` or `\|`.
+  * Custom label keys (e.g., `cs1Label="Safe Name"` or `cs1Label=Safe Name`) can appear with or without double quotes depending on the vault translator version.
+  * Empty keys are emitted explicitly without a space before the next key (e.g., `dhost= duser= externalId= `).
+
+### Format B: Endpoint Privilege Manager (EPM) JSON
+Used by EPM API extractions and agent SIEM streaming.
+
+* **Classification**: Minified Single-line JSON.
+* **Encoding**: UTF-8.
+* **Delimiters**: Standard JSON syntax (commas separating key-value pairs).
+
+### Format C: Secondary / Legacy Formats *(Reference Only)*
+* **Native Vault Syslog**: `<PRI>1 YYYY-MM-DDTHH:MM:SSZ <HOST> %CYBERARK: MessageID="51";Version="14.2.0001";Message="Retrieve File";Issuer="...";...`
+* **LEEF Format**: `YYYY-MM-DDTHH:MM:SSZ <HOST> LEEF:1.0|Cyber-Ark|Vault|<Version>|<ID>|sev=6\tAction=...\t...`
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### CEF Syslog Format (Digital Vault / PAS)
+
+#### CEF Header Fields
+
+| Field Name | Type | Sample Value | Description |
+| :--- | :--- | :--- | :--- |
+| `CEF Version` | Integer | `CEF:0` | ArcSight CEF specification version. |
+| `Device Vendor`| String | `Cyber-Ark` | Vendor identifier. |
+| `Device Product`| String | `Vault` | Component identifier. |
+| `Device Version`| String | `10.10.0002`, `12.6.0010`, `14.2.0001` | CyberArk software build version. |
+| `DeviceEventClassID` | Integer | `4`, `7`, `24`, `295`, `300`, `304`, `361` | CyberArk numeric action/event code. |
+| `Name` | String | `Retrieve password`, `Logon`, `PSM Connect` | Human-readable name of the event. |
+| `Severity` | Integer | `5` (Normal/Info), `7` (Failure/Error) | SIEM severity rating. |
+
+#### CEF Extension Keys
+
+| CEF Key | CyberArk Meaning | Type | Example Values |
+| :--- | :--- | :--- | :--- |
+| `act` | Action Verb | String | `Retrieve password`, `CPM Change Password`, `Logon`, `PSM Connect`, `Keystroke logging` |
+| `suser` | Vault Actor / Operator | String | `Administrator`, `PasswordManager`, `ABC1234`, `Batch`, `DR`, `user@domain` |
+| `fname` | Vault Object / File Name | String | `Root\Operating System-WinDomain-1.2.3.9-adm`, `Root\098d2024.WIN.txt`, `Root\Policies\Policy.ini` |
+| `dvc` | Gateway / PVWA IP | IP String | `10.1.1.50`, `192.168.1.10`, *(empty)* |
+| `shost` | Source Station / Host / IP | Host/IP | `10.20.30.40`, `0.0.0.0` (Batch jobs), `workstation01` |
+| `dhost` | Target Host / FQDN | Host/IP | `srv-dc01.corp.local`, `192.168.10.15`, *(empty)* |
+| `duser` | Target Managed Account | String | `root`, `Administrator`, `svc_backup`, `sqladmin` |
+| `externalId` | PSM Session UUID | UUID/String | `1cfbfce0-cbe4-456b-969a-d0cdb03896dc`, *(empty)* |
+| `app` | Connection Protocol / App | String | `RDP`, `SSH`, `HTTP`, `chrome.exe`, *(empty)* |
+| `reason` | Justification / Window Title / Commands | String | `Emergency Breakglass`, `chrome.exe (Incognito)`, `sudo su -` |
+| `cs1Label` | Label for `cs1` | String | Fixed: `"Affected User Name"` or `Affected User Name` |
+| `cs1` | Affected User Value | String | Target user affected by administrative operations or auth. |
+| `cs2Label` | Label for `cs2` | String | Fixed: `"Safe Name"` or `Safe Name` |
+| `cs2` | Safe Name Value | String | `PSMRecordings`, `PVWAPrivateUserPrefs`, `Corp-Domain-Admins`, `Linux-Root-Safe` |
+| `cs3Label` | Label for `cs3` | String | Fixed: `"Device Type"` or `Device Type` |
+| `cs3` | Target Device Type Value | String | `Operating System`, `Database`, `PSM Secure Connect`, *(empty)* |
+| `cs4Label` | Label for `cs4` | String | Fixed: `"Database"` or `Database` |
+| `cs4` | Database Instance Name | String | `ORCL_PRD`, `MSSQLSERVER`, *(empty)* |
+| `cs5Label` | Label for `cs5` | String | Fixed: `"Other info"` or `Other info` |
+| `cs5` | Extended Metadata / Status | String | Station IP, `CPMDisabled10.1.1.1`, `PSMStatus`, category keys |
+| `cn1Label` | Label for `cn1` | String | Fixed: `"Request Id"` or `Request Id` |
+| `cn1` | Dual-Control Request ID | Integer | Request ID if Dual Control approval workflow was used. |
+| `cn2Label` | Label for `cn2` | String | Fixed: `"Ticket Id"` or `Ticket Id` |
+| `cn2` | Ticketing System / Reason Info | String | `(Action: Show Password)(Ticket ID=INC102938)(Ticketing System=ServiceNow)`, `ImmediateTask` |
+| `msg` | Audit Message / Error Details | String | Error text (`ITATS...`), reason mirror, or CPM stack traces. |
+
+#### Core Event ID & Action Matrix
+
+| Event ID | Action Name (`act` and CEF Name) | Typical Severity | Common `suser` |
+| :--- | :--- | :--- | :--- |
+| `4` | `Failure: User Authentication` | `7` | Any end-user |
+| `5` | `Failure: Unauthorized Station` | `7` | Any end-user |
+| `7` | `Logon` | `5` | Vault users, PVWA |
+| `8` | `Logoff` | `5` | Vault users, PVWA |
+| `19` | `Full Gateway Connection` | `5` | Gateway users, PSMP |
+| `20` | `Partial Gateway Connection` | `5` | Gateway users |
+| `22` | `CPM Verify Password` | `5` | `PasswordManager` |
+| `24` | `CPM Change Password` | `5` | `PasswordManager` |
+| `31` | `CPM Reconcile Password` | `5` | `PasswordManager` |
+| `38` | `Failure: CPM Verify Password Failed` | `7` | `PasswordManager` |
+| `50` | `Store File` | `5` | `PasswordManager`, `PSM` |
+| `51` | `Retrieve File` | `5` | `PasswordManager`, PVWA |
+| `52` | `Delete File` | `5` | `PasswordManager` |
+| `55` | `Failure: Find Files` | `7` | End-users, service accts |
+| `57` | `Failure: CPM Change Password Failed` | `7` | `PasswordManager` |
+| `98` | `Open File (Write Only)` | `5` | End-users, PVWA |
+| `99` | `Open File` | `5` | End-users, PVWA |
+| `105` | `Add File Category` | `5` | Vault users, CPM |
+| `106` | `Update File Category` | `5` | Vault users, PSM |
+| `107` | `Delete File Category` | `5` | Vault users, CPM |
+| `288` / `289`| `Auto Clear Users History start/end` | `5` | `Batch` |
+| `294` | `Store password` | `5` | `PasswordManager` |
+| `295` | `Retrieve password` | `5` | End-users, `PasswordManager` |
+| `296` | `Open Safe` | `5` | End-users, PVWA |
+| `300` | `PSM Connect` | `5` | End-users |
+| `302` | `PSM Disconnect` | `5` | End-users |
+| `304` | `PSM Upload Recording` | `5` | End-users, PSM |
+| `308` | `Use Password` | `5` | End-users (PSM direct) |
+| `310` / `311`| `Monitor DR Replication start/end` | `5` | `Batch`, `DR` |
+| `357` / `358`| `Monitor FW Rules start/end` | `5` | `Batch` |
+| `361` | `Keystroke logging` | `5` | End-users via PSM/SSH |
+| `378` | `PSM Secure Connect Session Start` | `5` | End-users |
+| `411` | `Window Title` | `5` | End-users via PSM |
+
+---
+
+### EPM JSON Format (Endpoint Privilege Manager)
+
+| Field Name | Type | Description | Example Values |
+| :--- | :--- | :--- | :--- |
+| `ApplicationType` | String | Type of application targeted | `Executable`, `AdminTask`, `Script`, `MSI` |
+| `EventName` | String | Executable name or Task title | `mmc.exe`, `cmd.exe`, `Services Configuration (mmc.exe)` |
+| `EventType` | String | Policy action triggered | `ElevationRequest`, `StartElevated`, `Launch`, `Trust`, `Block` |
+| `FileQualifier` | Long | Internal EPM unique 64-bit ID | `-6151227912572614000`, `3762565144647786500` |
+| `Hash` | String | SHA1 file hash with prefix | `SHA1##9269F1FBCF65FEFBC88A2E239519C21EFE0F6BA5`, `""` |
+| `IsMalware` | Boolean | Reputation intelligence indicator | `false`, `true` |
+| `LastEventComputer` | String | Endpoint hostname | `WKSTN-FIN-091`, `WKSTN-ADMIN-01`, `Deleted` |
+| `LastEventDate` | String | Event timestamp (ISO 8601) | `2026-03-19T13:09:07.653` |
+| `LastEventID` | Long | Unique event sequence number | `161141548`, `696742914` |
+| `LastEventPackageName` | String | Software display/package name | `Microsoft Management Console (mmc.exe)`, `Visual Studio` |
+| `LastEventPreHistorySourceName`| String| Context source launcher | `Updater (Kaseya)`, `Microsoft Windows`, `""` |
+| `LastEventPreHistorySourceType`| String| Context launcher type | `Updater`, `Windows`, `Unknown` |
+| `LastEventSourceName` | String | Absolute binary path or source | `C:\WINDOWS\system32\mmc.exe`, `Microsoft Windows` |
+| `LastEventSourceType` | String | Origin type of source | `LocalDisk`, `NetworkShare`, `Windows`, `OldApplication` |
+| `LastEventUserName` | String | Domain\Username of user | `CORP\\jdoe`, `corpdomain\\sysadmin` |
+| `PolicyName` | String | Applied EPM policy rule | `Corp-IT-Elevate-Task`, `Default Elevate Unhandled` |
+| `Publisher` | String | Authenticode digital signature | `Microsoft Windows`, `Microsoft Corporation`, `""` |
+| `TotalEvents` | Integer | Aggregate counter for this event | `1`, `11`, `14` |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+CyberArk implementations output timestamps based on the configured log destination protocol:
+
+1. **RFC 5424 ISO 8601 (Syslog Header)**: `YYYY-MM-DDTHH:MM:SSZ`
+   * Dynamic Tag: `##$TimeStamp-0d0h0m0s$##` (Evaluated format: `2026-03-10T12:50:18Z`)
+2. **RFC 3164 BSD Syslog (Syslog Header)**: `MMM DD HH:MM:SS` (Single-digit days use a leading space)
+   * Dynamic Tag: `##$SyslogTime-0d0h0m0s$##` (Evaluated format: `Mar 10 04:54:09` or `Mar  5 20:33:56`)
+3. **EPM JSON Timestamps**: `YYYY-MM-DDTHH:MM:SS.sss`
+   * Dynamic Tag: `##$TimeStamp-0d0h0m0s$##` (Evaluated format: `2026-03-19T13:09:07.653`)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Normal Privileged Password Retrieval (RFC 5424 Syslog CEF)
+*Scenario: An engineer views/copies an Active Directory Domain Admin credential via PVWA with ServiceNow justification.*
+```text
+<5>1 ##$TimeStamp-0d0h5m12s$## PROD-VAULT-01 CEF:0|Cyber-Ark|Vault|12.6.0010|295|Retrieve password|5|act=Retrieve password suser=JSmith fname=Root\Operating System-CorpDomain-dc01.corp.acme.com-svc_domainadmin dvc=10.100.4.15 shost=10.100.4.15 dhost=dc01.corp.acme.com duser=svc_domainadmin externalId= app= reason= cs1Label="Affected User Name" cs1= cs2Label="Safe Name" cs2=Domain-Admins-Safe cs3Label="Device Type" cs3=Operating System cs4Label="Database" cs4= cs5Label="Other info" cs5=10.100.4.15 cn1Label="Request Id" cn1= cn2Label="Ticket Id" cn2=(Action: Show Password)(Ticket ID=CHG0089124)(Ticketing System=ServiceNow)(Ticketing Audit=Approved emergency change)  msg=(Action: Show Password)(Ticket ID\=CHG0089124)(Ticketing System\=ServiceNow)(Ticketing Audit\=Approved emergency change)
+```
+
+### Example 2: CPM Password Rotation Failure (RFC 3164 Syslog CEF)
+*Scenario: Automated CPM reconciliation fails due to domain password complexity constraints.*
+```text
+##$SyslogTime-0d1h15m00s$## 10.10.20.5 CEF: 0|Cyber-Ark|Vault|12.2.0008|57|Failure: CPM Change Password Failed|7|act=CPM Change Password Failed suser=PasswordManager fname=Root\Operating System-CORP-SQL-CLUSTER-sa_sql dvc= shost=10.10.20.6 dhost=sql-prd01.corp.acme.com duser=sa_sql externalId= app= reason= cs1Label="Affected User Name" cs1= cs2Label="Safe Name" cs2=Database-Admins cs3Label="Device Type" cs3=Operating System cs4Label="Database" cs4= cs5Label="Other info" cs5= cn1Label="Request Id" cn1= cn2Label="Ticket Id" cn2=ImmediateTask. Failure Description: Error in reconcilepass to user CORP\sa_sql on domain CORP(\\DC01). Reason: The password does not meet the password policy requirements. (winRc=2245).  msg=ImmediateTask. Failure Description: Error in reconcilepass to user CORP\sa_sql on domain CORP(\\DC01). Reason: The password does not meet the password policy requirements. (winRc\=2245).Failure:
+```
+
+### Example 3: PSM Privileged SSH Session & Keystroke Auditing (RFC 3164 Syslog CEF)
+*Scenario: An administrative operator initiates an SSH session to a Linux production server and executes privileged sudo commands.*
+```text
+##$SyslogTime-0d0h22m45s$## PSM-GW-01 CEF:0|Cyber-Ark|Vault|12.6.0010|361|Keystroke logging|5|act=Keystroke logging suser=asmith@corp.acme.com fname=Root\LIN-rhel-prod-app01-root dvc= shost=10.100.12.88 dhost=rhel-prod-app01.corp.acme.com duser=root externalId=a81f3e82-624a-4b67-8812-32a4e9b9c1d1 app=SSH reason=sudo cat /etc/shadow  cs1Label=Affected User Name cs1= cs2Label=Safe Name cs2=Linux-Infrastructure-Prod cs3Label=Device Type cs3=Operating System cs4Label=Database cs4= cs5Label=Other info cs5= cn1Label=Request Id cn1= cn2Label=Ticket Id cn2= msg=
+```
+
+### Example 4: Vault User Authentication Failure / Unauthorized Station (RFC 5424 Syslog CEF)
+*Scenario: A user attempts to authenticate to the Digital Vault from an unauthorized IP subnet.*
+```text
+<7>1 ##$TimeStamp-0d0h1m30s$## PROD-VAULT-01 CEF:0|Cyber-Ark|Vault|14.2.0001|5|Failure: Unauthorized Station|7|act=Unauthorized Station suser=malicious_actor fname= dvc=192.168.99.200 shost=192.168.99.200 dhost= duser= externalId= app= reason= cs1Label="Affected User Name" cs1= cs2Label="Safe Name" cs2= cs3Label="Device Type" cs3= cs4Label="Database" cs4= cs5Label="Other info" cs5=192.168.99.200 cn1Label="Request Id" cn1= cn2Label="Ticket Id" cn2=  msg=Failure:
+```
+
+### Example 5: Endpoint Privilege Manager (EPM) Privilege Elevation (JSON)
+*Scenario: A developer attempts to run an elevated administrative tool on an endpoint managed by EPM.*
+```json
+{"ApplicationType":"Executable","EventName":"powershell.exe","EventType":"ElevationRequest","FileQualifier":4598271039845124000,"Hash":"SHA1##A4B923CDE910543210ABCDEF1234567890ABCDEF","IsMalware":false,"LastEventComputer":"WKSTN-DEV-044","LastEventDate":"##$TimeStamp-0d0h12m00s$##","LastEventID":789123450,"LastEventPackageName":"Windows PowerShell (powershell.exe)","LastEventPreHistorySourceName":"explorer.exe","LastEventPreHistorySourceType":"Windows","LastEventSourceName":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","LastEventSourceType":"LocalDisk","LastEventUserName":"CORP\\ddeveloper","PolicyName":"Dev-Elevate-PowerShell-Signed","Publisher":"Microsoft Corporation","TotalEvents":1}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Critical Formatting Rules
+1. **CEF Pipe Structure**: There must be exactly **7 pipe separators** dividing the 8 header sections (`CEF:0` through `Severity`). Truncating or adding pipes corrupts SIEM parser field mappings.
+2. **Key-Value Padding for Empty Fields**: CyberArk CEF emits all extension keys even when empty (e.g., `dhost= duser= externalId= `). **Do not omit empty keys**; parsers often rely on fixed regex position matching.
+3. **Escaping Equals in `msg=` and `cn2=`**: Any literal `=` character inside the message body (such as ticketing details or Windows return codes `winRc=2245`) MUST be escaped as `\=` (e.g., `Ticket ID\=CHG001`).
+4. **Custom Extension Pairings**:
+   * `cs1Label` defines the description for `cs1` (Default: `Affected User Name`).
+   * `cs2Label` defines the description for `cs2` (Default: `Safe Name`).
+   * `cs3Label` defines the description for `cs3` (Default: `Device Type`).
+   * `cs4Label` defines the description for `cs4` (Default: `Database`).
+   * `cs5Label` defines the description for `cs5` (Default: `Other info`).
+   * `cn1Label` defines the description for `cn1` (Default: `Request Id`).
+   * `cn2Label` defines the description for `cn2` (Default: `Ticket Id`).
+   * If generating custom label tags, keep them strictly paired with their respective custom field.
+5. **Path Formatting**: Object and file paths in `fname` always start with `Root\` followed by the object name convention: `Root\<DeviceType>-<Safe/Policy>-<TargetAddress>-<AccountName>`.

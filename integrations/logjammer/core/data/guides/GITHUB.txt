@@ -1,0 +1,176 @@
+# GITHUB Log Generation Playbook
+
+## 1. Overview & Log Purpose
+GitHub logs capture security, administrative, access, and operational activities across GitHub Enterprise Cloud (GHEC) and GitHub Enterprise Server (GHES). These logs record audit trail events, Git transport operations (clone, fetch, push), API usage, webhook configurations, authentication events, CI/CD Actions workflows, and appliance-level reverse proxy/daemon telemetry.
+
+### Primary Use Cases for Detection Engineering:
+* **Credential & Token Abuse**: Compromised Personal Access Tokens (PATs), anomalous OAuth scope usage, brute-force authentication failures, or SSH key unauthorized usage.
+* **Supply Chain & Insider Threats**: Unauthorized repository access/cloning, tampering with GitHub Actions workflows/secrets, malicious webhook additions, repository visibility alteration (private to public), and unauthorized organization/team privilege escalation.
+* **Data Exfiltration**: High-volume repository cloning/fetching via automated bots, unauthorized deployment keys, or non-corporate source IP addresses.
+
+---
+
+## 2. Format Specifications
+
+GitHub logs generally appear in one of three primary formats:
+
+### Format A: GitHub Audit Log / Event Stream (JSON)
+* **Structure**: Single-line (NDJSON) or pretty-printed standard JSON document.
+* **Encoding**: UTF-8.
+* **Quoting & Types**: Standard JSON. Keys are enclosed in double quotes. Booleans are `true`/`false`, numbers are unquoted, null values are `null`.
+
+### Format B: GitHub Enterprise Server (GHES) Syslog (RFC 3164 / BSD Syslog)
+* **Structure**: `<PRI>MMM DD HH:MM:SS <hostname> <subsystem>[PID]: <message>`
+* **Subsystems / Tags**:
+  * `github_audit`: JSON audit payload within Syslog.
+  * `github_auth`: Authentication logger format (`D, [YYYY-MM-DDTHH:MM:SS.ffffff #PID] LEVEL -- : key="value"`).
+  * `github_unicorn`: Unicorn Rails application key-value pairs (`key=value` or `key="value"`).
+  * `github_gitauth`: Git access control daemon log (`k=v` format).
+  * `github_access` & `alambic_assets`: NGINX web access log (Combined Log Format variation with response time trailer).
+  * `haproxy`: HAProxy connection log.
+  * `authzd`, `babeld`, `gitrpcd`, `hookshot-go`: Go daemon structured key-value log lines (`ts=... level=... msg="..."`).
+
+### Format C: GitHub Webhooks (JSON)
+* **Structure**: Rich nested JSON payload containing top-level action verbs and nested entity models (`workflow_run`, `repository`, `sender`, `organization`, `enterprise`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### A. GitHub Audit Log (Cloud & GHES JSON)
+
+| Field Name | Type | Description | Example Values |
+| :--- | :--- | :--- | :--- |
+| `action` | String | Dot-notated event verb | `repo.create`, `git.push`, `git.clone`, `pull_request.merge`, `hook.create`, `repo.update_actions_secret`, `api.request`, `user.ldap_sync` |
+| `actor` | String | GitHub username, bot, or token principal performing the action | `octocat`, `deploy_key`, `github-actions[bot]`, `snyk-bot` |
+| `actor_id` | Integer | Numeric GitHub User/App ID | `175735`, `41898282` |
+| `actor_ip` | String | Source IPv4 or IPv6 address | `198.51.100.24`, `1.1.1.1` |
+| `actor_location` | Object | Geolocation object | `{"country_code": "US"}` |
+| `user` | String | Target user affected by action (or actor mirror) | `target_user`, `""` |
+| `user_id` | Integer | Target user ID | `25520579` |
+| `org` | String | Organization short name | `AcmeCorp`, `Security-Testing` |
+| `org_id` | Integer | Numeric Organization ID | `78417136` |
+| `repo` | String | Repository in `Org/Repo` format | `AcmeCorp/payment-gateway` |
+| `repository` | String | Full repository reference | `AcmeCorp/payment-gateway` |
+| `repo_id` | Integer | Numeric Repository ID | `343808048` |
+| `repository_public` / `public_repo` | Boolean | Repository visibility | `true`, `false` |
+| `business` | String | Enterprise business account slug | `acme-enterprise` |
+| `business_id` | Integer | Enterprise account ID | `14100` |
+| `operation_type` | String | CRUD classification | `create`, `access`, `modify`, `restore`, `transfer` |
+| `transport_protocol` | Integer | 1 for HTTP/HTTPS, 2 for SSH | `1`, `2` |
+| `transport_protocol_name` | String | Protocol name | `http`, `ssh` |
+| `hashed_token` | String | Base64-encoded SHA-256 hash of access token | `grHKhWNwExtVPgBNtWqJ7TTVKnlwE+7a+Uc5k/wiK3s` |
+| `token_id` | Integer | ID of PAT or OAuth token | `1182052611`, `0` |
+| `token_scopes` | String | Granted OAuth/PAT scopes (comma-separated) | `repo,read:org,user,workflow` |
+| `programmatic_access_type` | String | Access method | `Personal access token (classic)`, `OAuth access token`, `GitHub App server-to-server token`, `Fine-grained personal access token` |
+| `user_agent` | String | HTTP User Agent string | `git/2.42.0`, `octokit-rest.js/19.0.13`, `python-requests/2.31.0` |
+| `route` | String | API endpoint template | `/graphql`, `/repositories/:repository_id/contents/?*`, `/user` |
+| `status_code` | Integer | HTTP response status code | `200`, `401`, `403`, `404`, `422` |
+| `external_identity_username` | String | SAML/SSO mapped username | `user@company.com` |
+| `external_identity_nameid` | String | SAML NameID attribute | `user@company.com` |
+| `_document_id` | String | Unique audit log entry identifier | `bP-VrP-3siIfVKxZRI9QAA==` |
+| `created_at` | Integer | Epoch timestamp in milliseconds (13 digits) | `1680045376617` |
+| `@timestamp` | Integer | Elasticsearch ingestion timestamp in ms | `1680045376617` |
+| `data` | Object | Event-specific metadata (key-value payload) | See Action Data Types below |
+
+---
+
+### B. Action Verbs & Specific Data Schemas
+
+| Action Group | Common Actions | Key Fields inside root or `data` object |
+| :--- | :--- | :--- |
+| **`git.*`** | `git.clone`, `git.fetch`, `git.push` | `transport_protocol_name`, `hashed_token`, `repository_public` |
+| **`repo.*`** | `repo.create`, `repo.destroy`, `repo.add_member`, `repo.remove_member`, `repo.update_actions_secret` | `key` (secret name), `visibility`, `user` (target added/removed) |
+| **`hook.*`** | `hook.create`, `hook.destroy`, `hook.config_changed` | `config.url`, `config.content_type`, `config.insecure_ssl`, `events` (e.g. `["push", "pull_request"]`), `hook_id` |
+| **`pull_request.*`**| `pull_request.create`, `pull_request.merge`, `pull_request_review.submit` | `pull_request_id`, `pull_request_url`, `pull_request_title` |
+| **`workflows.*`** | `workflows.cancel_workflow_run`, `workflows.prepared_workflow_job` | `workflow_run_id`, `job_name`, `runner_name`, `runner_id`, `is_hosted_runner`, `secrets_passed` |
+| **`org.*` / `team.*`**| `org.invite_member`, `org.remove_member`, `team.add_member`, `team.remove_member` | `data.email`, `data.team`, `user` |
+| **`api.*`** | `api.request` | `request_method`, `route`, `query_string`, `rate_limit_remaining`, `status_code` |
+
+---
+
+### C. GitHub Enterprise Server (GHES) Syslog Subsystems
+
+#### 1. `github_auth`
+* **Format**: Ruby logger format.
+* **Fields**: `now="ISO8601"`, `ip=<IP>`, `request_id=<UUID/Hex>`, `repo=<Org/Repo.git>`, `action=<read|write>`, `protocol=<http|ssh>`, `message="<Auth status message>"`, `at=<success|failure>`, `from=<git|web|api>`, `login=<username>`, `hashed_token="<Base64>"`, `token_type=<oauth_access|password|personal_access_token>`, `failure_reason=<external_auth_token_required|bad_credentials|nil>`.
+
+#### 2. `github_unicorn`
+* **Format**: Key-value pairs.
+* **Fields**: `app=github`, `auth_fingerprint="<type>:<id>:<ip>"`, `controller="<Api::*>"`, `path_info="<URI>"`, `auth=<oauth|token|anon|basic>`, `current_user=<username>`, `oauth_scopes="<scopes>"`, `x_real_ip=<IP>`, `status=<HTTP Status>`, `elapsed=<Float>`, `user_agent="<UA>"`.
+
+#### 3. `github_access`
+* **Format**: `<Host/IP> <user_ident> <auth_user> [<HTTP-Date>] "<METHOD> <URI> <PROTO>" <status> <bytes> "<Referer>" "<User-Agent>" "<Remote_IP>" <resp_time> <backend_time> .`
+
+#### 4. `authzd`
+* **Format**: Structured key-value output.
+* **Fields**: `time="ISO8601"`, `level=INFO`, `msg="authorization request decision"`, `actor.id=<ID>`, `subject.type=Repository`, `repository.owner.type=Organization`, `decision=<ALLOW|DENY>`, `matched_policies=[<policy-name>]`, `duration_ms=<Int>`.
+
+#### 5. `babeld`
+* **Format**: Structured key-value Git transport proxy log.
+* **Fields**: `ts="ISO8601"`, `proto=<http|ssh>`, `ip=<IP>`, `repo=<Org/Repo>`, `cmd=<git-upload-pack|git-receive-pack>`, `msg="<op done|http op done: (status)>"`, `http_status=<Status>`, `fp_sha256="<Key-Fingerprint>"`.
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+GitHub logs utilize three major timestamp variations depending on log emission type:
+
+| Format Type | Syntax Pattern | Template Macro | Example Output |
+| :--- | :--- | :--- | :--- |
+| **Audit Log Epoch (ms)** | 13-digit Unix Milliseconds | `##$Epoch-0d0h0m0s$##000` or `##$Epoch-0d0h10m0s$##235` | `1695387645130` |
+| **Syslog Header** | `MMM DD HH:MM:SS` (RFC 3164) | `##$SyslogTime-0d0h0m0s$##` | `Mar 28 23:16:16` |
+| **ISO 8601 (UTC)** | `YYYY-MM-DDTHH:MM:SSZ` | `##$TimeStamp-0d0h0m0s$##` | `2023-09-27T23:59:02Z` |
+| **ISO 8601 (Sub-second)**| `YYYY-MM-DDTHH:MM:SS.ffffffZ`| `##$TimeStamp-0d0h0m0s$##` | `2023-03-28T23:16:14.751740633Z` |
+| **Nginx / Combined** | `[DD/MMM/YYYY:HH:MM:SS +0000]` | `[##$HTTPDate-0d0h0m0s$##]` | `[09/May/2023:12:34:23 +0000]` |
+
+### Rules for Synthetic Generation:
+1. When generating JSON audit logs, set both `"created_at"` and `"@timestamp"` to the same 13-digit millisecond value.
+2. For GHES Syslog streams, the syslog header timestamp must match the internal message timestamp (e.g., `now="..."` or `time="..."`) within a margin of 0–2 seconds.
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Security Audit Log – Malicious Webhook Creation (JSON)
+*Scenario: Attacker creates a webhook to exfiltrate push and pull request events to an external command-and-control server.*
+```json
+{"action":"hook.create","actor_ip":"198.51.100.77","actor":"compromised_admin","oauth_application_id":null,"name":"webhook","config":{"url":"https://c2-collector.attacker-infrastructure.com/payload","content_type":"json","secret":"********","insecure_ssl":"1"},"events":["push","pull_request","release"],"active":true,"public_repo":false,"hook_id":948172635,"repo":"SecOps-Org/core-payment-engine","org":"SecOps-Org","_document_id":"dGVzdC1hdWRpdC1saW5lLTEyMw==","@timestamp":##$Epoch-0d0h15m30s$##412,"created_at":##$Epoch-0d0h15m30s$##412,"operation_type":"create","business":"secops-enterprise","business_id":4102,"actor_location":{"country_code":"RO"}}
+```
+
+### Example 2: Audit Log – Actions Secret Tampering via GitHub App (JSON)
+*Scenario: CI/CD Pipeline token update on a private production infrastructure repository.*
+```json
+{"action":"repo.update_actions_secret","actor_ip":"203.0.113.19","user_agent":"octokit-rest.js/19.0.13 octokit-core.js/4.2.1 Node.js/18.17.0 (linux; x64)","token_id":8192837461,"hashed_token":"YWRtaW5fc2VjcmV0X3Rva2VuX2hhc2hfdmFsdWVfZXhhbXBsZQ==","programmatic_access_type":"GitHub App server-to-server token","actor":"prod-deployer-app[bot]","actor_id":90182412,"key":"AWS_PROD_DEPLOY_KEY","visibility":"selected","repo":"SecOps-Org/infrastructure-terraform","repo_id":718293401,"public_repo":false,"org":"SecOps-Org","org_id":918234,"_document_id":"9mZnX0qLp8K7vNx2Qa0Ow==","@timestamp":##$Epoch-0d1h10m0s$##118,"created_at":##$Epoch-0d1h10m0s$##118,"operation_type":"modify","business":"secops-enterprise","business_id":4102,"actor_location":{"country_code":"US"}}
+```
+
+### Example 3: Audit Log – SSH Git Clone / Bulk Exfiltration (JSON)
+*Scenario: Suspicious deploy key used to clone an internal infrastructure repo over SSH.*
+```json
+{"action":"git.clone","_document_id":"rK8vN3xL1qPoI0mZa4Rt8Q==","actor_location":{"country_code":"DE"},"transport_protocol":2,"transport_protocol_name":"ssh","actor_ip":"192.0.2.45","repository":"SecOps-Org/kubernetes-fleet-manifests","repo":"SecOps-Org/kubernetes-fleet-manifests","repository_public":false,"actor":"deploy_key","org":"SecOps-Org","business":"secops-enterprise","business_id":4102,"user":"","hashed_token":"qVv8bK9rTy1Np4QmZa7Rt9L0pK1vN2xL3qPoI4mZa5U=","token_id":0,"@timestamp":##$Epoch-0d0h45m10s$##890,"created_at":##$Epoch-0d0h45m10s$##890,"operation_type":"access"}
+```
+
+### Example 4: GHES Syslog – Authentication Failure via Token (`github_auth`)
+*Scenario: Attacker attempting Git clone using an expired or invalid external SSO token against GHES.*
+```syslog
+<14>##$SyslogTime-0d0h05m12s$## ghes-primary-node github_auth: D, [##$TimeStamp-0d0h05m12s$##.195078 #41289] DEBUG -- : now="##$TimeStamp-0d0h05m12s$##" ip=198.51.100.104 request_id=4ac9707553b9ddcecd40b1cfa62a3c8f repo=SecOps-Org/auth-service.git action=read protocol=http message="Authentication failure" method="GitHub::Authentication::Attempt.log" at=failure from=git login=johndoe raw_login=johndoe user_id=1582 failure_type=nil failure_reason="external_auth_token_required" two_factor_type=nil sign_in_verification_method=nil hashed_token="EzVeboKV1y0G3BDnLw0ppMi9egqH7B5kUEBhcwSp33w=" token_type=personal_access_token
+```
+
+### Example 5: GHES Syslog – Privileged Authorization Policy Decision (`authzd`)
+*Scenario: Administrator accessing repository settings evaluated by internal GHES auth engine.*
+```syslog
+<14>##$SyslogTime-0d0h22m40s$## ghes-primary-node authzd[4012]: time=##$TimeStamp-0d0h22m40s$##.419281024Z level=INFO msg="authorization request decision" env=production sha=dfbb3a7 host=ghes-primary-node request_id=86ecba66-5eef-4d2e-6598-18a5ffa5a9d4 user_agent=github-enterprise action="[manage_settings_wiki manage_settings_deploy_keys manage_webhooks]" version=2 subject.type=Repository subject.id=11149 repository.public=false repository.owner.id=918234 subject.repository.id=11149 subject.repository.public=false subject.repository.internal=true subject.owner.id=918234 subject.business.id=4102 subject.repository.owner.id=918234 subject.owning_organization.id=918234 repository.owner.type=Organization subject.repository.writable=true considers_site_admin=false actor.type=User actor.id=4188 github.email_verification.enabled=true user.id=4188 user.site_admin=true actor.spammy=false actor.suspended=false user.staff_unlock=false digest=8a0e80c0cdbe11ed9c5a13bbc36a7b1d matched_policies=[manage-repo-settings-v2] decision=ALLOW reason= duration_ms=6
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Parser & Field Alignment
+1. **Timestamp Consistency**: JSON logs emitted by GitHub Enterprise Audit Stream require `created_at` and `@timestamp` as 13-digit Unix Epoch milliseconds. Emitting 10-digit Epoch seconds causes index failure in ELK/Splunk/OpenSearch GitHub ingest pipelines.
+2. **Mandatory Action Syntax**: `action` must follow the format `<category>.<event>` (e.g. `repo.create`, `git.clone`, `workflows.cancel_workflow_run`). If generating webhook actions, root `action` may be a single verb (e.g. `completed`, `created`), but the nested context object must exist.
+3. **Quoting and Escaping**:
+   * For GraphQL or GraphQL JSON fields in `query_string`, all interior quotes must be properly JSON-escaped (`\"`).
+   * In GHES Syslog lines (`github_unicorn`, `authzd`), values containing spaces or commas MUST be wrapped in double quotes (e.g., `user_agent="git/2.30.2"`, `matched_policies=[policy1]`).
+4. **Token Obfuscation**: Never output raw plaintext tokens in `hashed_token`. It must always appear as a 44-character Base64 string ending with `=`.
+5. **Syslog Facility/Severity Prefixes**: GHES Syslogs include RFC 3164 PRI headers such as `<14>` (User.Info), `<11>` (User.Error), `<85>` (Auth.Notice), `<142>` (Local1.Info), or `<190>` (Local7.Info). Ensure valid `<PRI>` tags are prefixed when generating GHES appliance logs.

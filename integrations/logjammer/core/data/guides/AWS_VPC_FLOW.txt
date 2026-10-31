@@ -1,0 +1,205 @@
+# AI Generation Playbook: AWS VPC Flow Logs (`AWS_VPC_FLOW`)
+
+## 1. Overview & Log Purpose
+AWS Virtual Private Cloud (VPC) Flow Logs capture detailed telemetry on IP traffic traversing network interfaces (ENIs), Subnets, VPCs, and Transit Gateways across an AWS infrastructure. 
+
+### Activities & Telemetry Recorded
+* **Traffic Disposition**: Traffic allowed or denied by VPC Security Groups and Network Access Control Lists (NACLs).
+* **Layer 3 & 4 Metadata**: Source/destination IPv4/IPv6 addresses, source/destination layer 4 ports, IANA protocol numbers, TCP control flags, and packet/byte volumes.
+* **AWS Topology & Routing Context**: Source/destination VPCs, subnets, Availability Zones (AZs), AWS Regions, AWS service endpoints (e.g., S3, EC2), flow direction (`ingress`/`egress`), and routing paths (`IGW`, `NatGateway`, `VpcPeering`, `TransitGateway`).
+* **Container Context (v7/ECS)**: ECS Task IDs, Task ARNs, Container Instance IDs, and Cluster ARNs.
+* **OCSF / Security Lake Objects**: Standardized cybersecurity schema mappings (v1.1.0+) for centralized data lakes.
+
+---
+
+## 2. Format Specifications
+
+AWS VPC Flow Logs can be delivered to **Amazon CloudWatch Logs**, **Amazon S3**, or **Kinesis Data Firehose** in multiple layout structures:
+
+| Format Variation | Classification | Framing / Structure | Delimiter & Quoting |
+| :--- | :--- | :--- | :--- |
+| **Default Format (v2)** | Space-delimited Plaintext | Single-line ASCII | Single space (` `). Hyphen (`-`) for missing values. No quotes. |
+| **Custom Format (v3–v5)** | Space-delimited / CSV | Single-line ASCII | Single space (` `) or comma (`,`). Missing values as `-`. |
+| **Transit Gateway (v6)** | Space-delimited Plaintext | Single-line ASCII | Single space (` `). Prefixed with `6 TransitGateway`. |
+| **ECS Extended (v7)** | JSON Object | Single-line JSON | Standard JSON formatting; strings double-quoted, numbers unquoted, nulls as `null` or `"-"`. |
+| **OCSF v1.1.0** | Nested JSON Object | Single-line JSON | AWS Security Lake standardized OCSF Network Activity (Class `4001`). |
+| **Syslog Wrapped** | Syslog RFC 3164 / 5424 | `<PRI>TIMESTAMP HOSTNAME vpc_log` | Syslog header followed by space-delimited text flow payload. |
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Standard & Extended Space-Delimited Fields (v2 – v5)
+
+| Field Name | Type | Allowed / Expected Values | Description |
+| :--- | :--- | :--- | :--- |
+| `version` | Integer | `2`, `3`, `4`, `5`, `6`, `7` | The VPC Flow Log version. |
+| `account-id` | String | `[0-9]{12}` or `unknown` | 12-digit AWS Account ID. |
+| `interface-id` | String | `eni-[0-9a-f]{8,17}` | Elastic Network Interface ID. |
+| `srcaddr` | String | IPv4 / IPv6 (e.g., `10.0.1.25`, `198.51.100.4`) | Source IP address. Set to `-` if `NODATA`. |
+| `dstaddr` | String | IPv4 / IPv6 (e.g., `10.0.2.80`, `203.0.113.195`) | Destination IP address. Set to `-` if `NODATA`. |
+| `srcport` | Integer | `0`–`65535` | Source port (Layer 4). Set to `-` if protocol is ICMP or `NODATA`. |
+| `dstport` | Integer | `0`–`65535` | Destination port (Layer 4). Set to `-` if protocol is ICMP or `NODATA`. |
+| `protocol` | Integer | `6` (TCP), `17` (UDP), `1` (ICMP), `58` (ICMPv6) | IANA protocol number. |
+| `packets` | Integer | Positive integer (e.g., `1`, `45`, `1024`) | Total packets transferred in the capture window. |
+| `bytes` | Integer | Positive integer (e.g., `40`, `5016`, `1048576`) | Total bytes transferred in the capture window. |
+| `start` | Integer | Unix Epoch timestamp (seconds) | Start of the capture window. |
+| `end` | Integer | Unix Epoch timestamp (seconds) | End of the capture window (`end >= start`). |
+| `action` | String | `ACCEPT`, `REJECT`, `-` | Security group / NACL verdict (`-` during `NODATA`/`SKIPDATA`). |
+| `log-status` | String | `OK`, `NODATA`, `SKIPDATA` | Record status. `NODATA` = no traffic in window; `SKIPDATA` = internal capacity skip. |
+| `vpc-id` | String | `vpc-[0-9a-f]{8,17}` or `-` | The VPC ID where the interface resides. |
+| `subnet-id` | String | `subnet-[0-9a-f]{8,17}` or `-` | The Subnet ID where the interface resides. |
+| `instance-id` | String | `i-[0-9a-f]{8,17}` or `-` | The EC2 instance ID (if ENI is attached to an instance). |
+| `tcp-flags` | Integer | Bitmask integer: `0`, `2` (SYN), `3` (SYN+FIN), `18` (SYN+ACK), `19` (SYN+ACK+FIN), `4` (RST), `16` (ACK), `24` (PSH+ACK) | Cumulative bitmask of TCP flags seen during aggregation. |
+| `type` | String | `IPv4`, `IPv6`, `-` | Layer 3 IP type. |
+| `pkt-srcaddr` | String | IPv4 / IPv6 or `-` | Original source IP of packet (distinguishes NAT/Proxy). |
+| `pkt-dstaddr` | String | IPv4 / IPv6 or `-` | Final destination IP of packet. |
+| `region` | String | `us-east-1`, `eu-west-1`, `ap-northeast-1`, etc. | AWS Region containing the ENI. |
+| `az-id` | String | `use1-az1`, `euw1-az2`, `apse1-az3`, etc. | Availability Zone ID. |
+| `sublocation-type` | String | `wavelength`, `outpost`, `localzone`, `-` | Sublocation category. |
+| `sublocation-id` | String | String identifier or `-` | Sublocation ID. |
+| `pkt-src-aws-service`| String | `S3`, `EC2`, `AMAZON`, `DYNAMODB`, `-` | AWS service generating the packet. |
+| `pkt-dst-aws-service`| String | `S3`, `EC2`, `AMAZON`, `DYNAMODB`, `-` | AWS service receiving the packet. |
+| `flow-direction` | String | `ingress`, `egress`, `-` | Traffic direction relative to the ENI. |
+| `traffic-path` | Integer | `1` (IGW), `2` (VGW), `3` (Direct Connect), `4` (Peering), `5` (VPC Endpoint), `6` (NAT Gateway), `7` (Transit GW), `8` (Local GW), `-` | Egress/ingress routing path index. |
+
+---
+
+### 3.2 Transit Gateway Fields (Version 6 Space-Delimited)
+
+For Transit Gateway flow records, the header prefix is `6 TransitGateway`, followed by:
+`account-id`, `tgw-id`, `tgw-attachment-id`, `tgw-src-vpc-account-id`, `tgw-dst-vpc-account-id`, `tgw-src-vpc-id`, `tgw-dst-vpc-id`, `tgw-src-subnet-id`, `tgw-dst-subnet-id`, `tgw-src-eni`, `tgw-dst-eni`, `tgw-src-az-id`, `tgw-dst-az-id`, `tgw-pair-attachment-id`, `srcaddr`, `dstaddr`, `srcport`, `dstport`, `protocol`, `packets`, `bytes`, `start`, `end`, `log-status`, `type`, `packets-lost-no-route`, `packets-lost-blackhole`, `packets-lost-mtu-exceeded`, `packets-lost-ttl-expired`, `tcp-flags`, `region`, `flow-direction`, `pkt-src-aws-service`, `pkt-dst-aws-service`.
+
+---
+
+### 3.3 Extended JSON Schema (v7 / ECS)
+
+```json
+{
+  "Version": 7,
+  "Account_id": "123456789012",
+  "Interface_id": "eni-0a1b2c3d4e5f67890",
+  "Srcaddr": "10.0.10.15",
+  "Dstaddr": "52.95.110.1",
+  "Srcport": 49152,
+  "Dstport": 443,
+  "Protocol": 6,
+  "Packets": 10,
+  "Bytes": 1500,
+  "Start": 1720000000,
+  "End": 1720000060,
+  "Action": "ACCEPT",
+  "Log_status": "OK",
+  "Vpc_id": "vpc-0123456789abcdef0",
+  "Subnet_id": "subnet-0123456789abcdef0",
+  "Instance_id": "i-0123456789abcdef0",
+  "Tcp_flags": 19,
+  "Type": "IPv4",
+  "Pkt_srcaddr": "10.0.10.15",
+  "Pkt_dstaddr": "52.95.110.1",
+  "Region": "us-east-1",
+  "Az_id": "use1-az1",
+  "Sublocation_type": "-",
+  "Sublocation_id": "-",
+  "Pkt_src_aws_service": "-",
+  "Pkt_dst_aws_service": "S3",
+  "Flow_direction": "egress",
+  "Traffic_path": 5,
+  "Ecs_cluster_arn": "arn:aws:ecs:us-east-1:123456789012:cluster/prod-cluster",
+  "Ecs_cluster_name": "prod-cluster",
+  "Ecs_container_instance_arn": "-",
+  "Ecs_container_instance_id": "-",
+  "Ecs_container_id": "container-prod-app-01",
+  "Ecs_second_container_id": "-",
+  "Ecs_service_name": "prod-app-service",
+  "Ecs_task_definition_arn": "arn:aws:ecs:us-east-1:123456789012:task-definition/prod-task:3",
+  "Ecs_task_arn": "arn:aws:ecs:us-east-1:123456789012:task/prod-cluster/4e2d2f389a0b4e888494b2f153a8027a",
+  "Ecs_task_id": "4e2d2f389a0b4e888494b2f153a8027a"
+}
+```
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+AWS VPC Flow Logs rely on **Unix Epoch timestamps** for capture aggregation windows. When generating synthetic data, all timestamps must be generated using dynamic macro templating.
+
+### Supported Dynamic Time Macros:
+* `##$Epoch-0d0h5m0s$##` -> Produces 10-digit Unix Epoch timestamp in seconds (e.g., `1738000000`).
+* `##$EpochMs-0d0h5m0s$##` -> Produces 13-digit Unix Epoch timestamp in milliseconds (e.g., `1738000000000`).
+* `##$SyslogTime-0d0h5m0s$##` -> Produces BSD Syslog format timestamp (e.g., `Jan 27 14:32:10`).
+* `##$TimeStamp-0d0h5m0s$##` -> Produces ISO 8601 UTC timestamp (e.g., `2026-01-27T14:32:10Z`).
+
+### Capture Window Delta Rules:
+* Flow logs aggregate across capture intervals (standard aggregation window is 1 minute to 10 minutes).
+* For a log window: `end` must be equal to or greater than `start`.
+  * `Start`: `##$Epoch-0d0h5m0s$##`
+  * `End`: `##$Epoch-0d0h4m0s$##` (60-second window)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Default Format v2 - Inbound HTTPS Traffic (Allowed)
+*Scenario: Standard public traffic arriving at a public-facing Application Load Balancer ENI on port 443.*
+```text
+2 123456789012 eni-03907e7875d0f5482 198.51.100.45 10.0.1.50 51234 443 6 12 5420 ##$Epoch-0d0h10m0s$## ##$Epoch-0d0h9m0s$## ACCEPT OK
+```
+
+### Example 2: Default Format v2 - Inbound SSH Reconnaissance / Bruteforce (Rejected)
+*Scenario: External IP scanning TCP port 22 blocked by Security Group rules.*
+```text
+2 123456789012 eni-03907e7875d0f5482 203.0.113.111 10.0.1.50 43120 22 6 1 40 ##$Epoch-0d0h8m30s$## ##$Epoch-0d0h8m30s$## REJECT OK
+```
+
+### Example 3: Default Format v2 - Periodic No Traffic Interval (NODATA)
+*Scenario: Capture window expired with zero network packets crossing the interface.*
+```text
+2 123456789012 eni-01cb4c7bbefd7e078 - - - - - - - ##$Epoch-0d0h15m0s$## ##$Epoch-0d0h14m0s$## - NODATA
+```
+
+### Example 4: Version 5 Custom Space-Delimited - Lateral Movement & Egress
+*Schema Format: `version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status vpc-id subnet-id instance-id tcp-flags type pkt-srcaddr pkt-dstaddr region az-id sublocation-type sublocation-id pkt-src-aws-service pkt-dst-aws-service flow-direction traffic-path`*
+```text
+5 123456789012 eni-0fcd7cd73505e6955 10.0.1.15 10.0.2.200 49158 445 6 34 18204 ##$Epoch-0d0h4m0s$## ##$Epoch-0d0h3m0s$## ACCEPT OK vpc-0b9e13fd3e146cf26 subnet-0486bc546e60baf85 i-0a7925240a9590a3c 24 IPv4 10.0.1.15 10.0.2.200 us-east-1 use1-az1 - - - - egress 1
+```
+
+### Example 5: Version 6 Transit Gateway Flow Log (Cross-VPC Communication)
+```text
+6 TransitGateway 123456789012 tgw-0189cd14e10f61a81 tgw-attach-0e5beb8a754cee062 987654321098 123456789012 vpc-06c3b73e952316ca6 vpc-0a57152818ce311cc subnet-0553146d6737f2f00 subnet-01f6c5ff0f37c2e3c eni-0829f2d822b1f6be8 eni-0ad3ab90e20e74a5c euw1-az1 euw1-az1 tgw-attach-0e359b9b5c3b7a3b4 10.100.4.12 10.200.8.45 52086 443 6 15 4083 ##$Epoch-0d0h2m0s$## ##$Epoch-0d0h1m0s$## OK IPv4 0 0 0 0 31 eu-west-1 ingress - -
+```
+
+### Example 6: Version 7 JSON - ECS Fargate Service Outbound Exfiltration / C2
+```json
+{"Version":7,"Account_id":"123456789012","Interface_id":"eni-0f96d6014f2599f82","Srcaddr":"172.29.162.109","Dstaddr":"198.51.100.88","Srcport":44984,"Dstport":8443,"Protocol":6,"Packets":812,"Bytes":42265,"Start":##$Epoch-0d0h5m0s$##,"End":##$Epoch-0d0h4m0s$##,"Action":"ACCEPT","Log_status":"OK","Vpc_id":"vpc-026ddb1dc52fc3b25","Subnet_id":"subnet-04510850091339fb2","Instance_id":"-","Tcp_flags":24,"Type":"IPv4","Pkt_srcaddr":"172.29.162.109","Pkt_dstaddr":"198.51.100.88","Region":"ap-northeast-1","Az_id":"apne1-az2","Sublocation_type":"-","Sublocation_id":"-","Pkt_src_aws_service":"-","Pkt_dst_aws_service":"-","Flow_direction":"egress","Traffic_path":1,"Ecs_cluster_arn":"arn:aws:ecs:ap-northeast-1:123456789012:cluster/prod-microservices","Ecs_cluster_name":"prod-microservices","Ecs_container_instance_arn":"-","Ecs_container_instance_id":"-","Ecs_container_id":"9cf3e218b0824b22b10a","Ecs_second_container_id":"-","Ecs_service_name":"auth-api","Ecs_task_definition_arn":"arn:aws:ecs:ap-northeast-1:123456789012:task-definition/auth-api:14","Ecs_task_arn":"arn:aws:ecs:ap-northeast-1:123456789012:task/prod-microservices/88b812da77cc4eb19239e1","Ecs_task_id":"88b812da77cc4eb19239e1"}
+```
+
+### Example 7: OCSF v1.1.0 JSON (AWS Security Lake format)
+```json
+{"metadata":{"product":{"version":"5","name":"Amazon VPC","feature":{"name":"Flowlogs"},"vendor_name":"AWS"},"profiles":["cloud","security_control","datetime"],"version":"1.1.0"},"cloud":{"account":{"uid":"123456789012"},"region":"eu-west-1","zone":"euw1-az1","provider":"AWS"},"src_endpoint":{"port":6379,"svc_name":"-","ip":"10.0.1.10","intermediate_ips":null,"interface_uid":"eni-02174cfb427986755","vpc_uid":"vpc-f504e990","instance_uid":"i-041a065eb552aedd6","subnet_uid":"subnet-cc1ae2a9"},"dst_endpoint":{"port":59884,"svc_name":"-","ip":"10.0.2.20","intermediate_ips":null,"interface_uid":null,"vpc_uid":null,"instance_uid":null,"subnet_uid":null},"connection_info":{"protocol_num":6,"tcp_flags":19,"protocol_ver":"IPv4","boundary_id":4,"boundary":"Same VPC","direction_id":2,"direction":"Outbound"},"traffic":{"packets":5,"bytes":277},"time":##$EpochMs-0d0h2m0s$##,"time_dt":##$EpochMs-0d0h2m0s$##,"start_time_dt":##$EpochMs-0d0h2m0s$##,"end_time_dt":##$EpochMs-0d0h1m0s$##,"status_code":"OK","severity_id":1,"severity":"Informational","class_name":"Network Activity","class_uid":4001,"category_name":"Network Activity","category_uid":4,"activity_name":"Traffic","activity_id":6,"action":"Allowed","action_id":1,"disposition":"Allowed","type_uid":400106,"type_name":"Network Activity: Traffic","accountid":null,"region":null,"asl_version":null,"unmapped":{"sublocation_id":"-","sublocation_type":"-"},"observables":[{"name":"dst_endpoint.ip","value":"10.0.2.20","type":"IP Address","type_id":2},{"name":"src_endpoint.ip","value":"10.0.1.10","type":"IP Address","type_id":2}]}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Strict Field Alignment & Ordering**:
+   * In space-delimited text versions, columns are parsed by exact position. Never insert extra spaces or remove delimiter columns unless matching a defined custom format string.
+   * If a custom format specifies a layout (e.g., `account-id action az-id bytes ...`), the generated output must precisely mirror that sequence.
+
+2. **Null/Missing Value Representation**:
+   * Space-delimited and CSV formats **must** use a single hyphen (`-`) for missing, empty, or unresolvable fields (e.g., `instance-id` when an ENI is attached to an ALB/NAT Gateway).
+   * JSON schemas utilize either `"-"` (for string identifiers) or `null` (for object/numeric fields) as specified in the schema.
+
+3. **Status Code Dependencies (`NODATA` & `SKIPDATA`)**:
+   * When `log-status` is `NODATA`: `srcaddr`, `dstaddr`, `srcport`, `dstport`, `protocol`, `packets`, `bytes`, and `action` **must** be set to `-` (or `null` in JSON).
+   * When `log-status` is `SKIPDATA`: Traffic was skipped due to internal AWS throttling; standard traffic metrics are also `-`.
+
+4. **Logical Field Consistency**:
+   * **TCP Flags**: Only set non-zero integers (e.g., `2`, `18`, `19`, `24`) when `protocol` is `6` (TCP). For UDP (`17`) or ICMP (`1`), `tcp-flags` should be `0` or `-`.
+   * **ICMP Traffic**: When `protocol` is `1` or `58`, `srcport` and `dstport` represent ICMP Type and Code, or are `-`.
+   * **Timestamps**: Ensure `end >= start`. A standard capture interval is 60 seconds (1 minute aggregation) or 600 seconds (10 minute aggregation).
+
+5. **JSON Key Casing**:
+   * Version 7 (ECS) CloudWatch format uses Pascal/Snake hybrid casing: `Version`, `Account_id`, `Interface_id`, `Srcaddr`, `Dstaddr`, `Tcp_flags`.
+   * OCSF JSON format uses lower-case snake_case: `metadata`, `cloud`, `src_endpoint`, `dst_endpoint`, `connection_info`, `traffic`. Do not mix case styles across formats.

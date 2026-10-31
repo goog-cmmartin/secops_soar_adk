@@ -1,0 +1,181 @@
+# WINDOWS_DNS Log Generation Playbook
+
+This playbook provides an exhaustive technical specification for generating synthetic **Microsoft Windows DNS Server** logs. It covers Windows DNS Analytical (ETW) logs, Windows DNS Audit logs, and DNS Server Debug / Packet log formats as collected by SIEM agents and log shippers (NXLog, Winlogbeat, Syslog collectors).
+
+---
+
+## 1. Overview & Log Purpose
+
+Microsoft Windows DNS Server is the primary name resolution engine in Microsoft Active Directory environments. Logging within Windows DNS operates across three distinct operational layers:
+
+1. **DNS Server Analytical (ETW) Logs (`Microsoft-Windows-DNS-Server/Analytical`)**: High-throughput Event Tracing for Windows (ETW) stream capturing query-by-query transactions, responses, recursion status, and errors without excessive disk I/O.
+2. **DNS Server Audit Logs (`Microsoft-Windows-DNSServer/Audit`)**: Standard Windows Event Log channel recording administrative actions, zone creation/modification/deletion, dynamic update requests, policy changes, and configuration tampering.
+3. **DNS Debug / Packet Logs (`dns.log`)**: File-based diagnostic engine recording raw ingress and egress DNS packet wire-data, transaction IDs, header flags, question types, and protocol flags.
+
+### Key Security Use Cases
+- Detection of DNS-based Command and Control (C2) communication (e.g., Cobalt Strike, DNSCat2, Iodine).
+- Identification of Domain Generation Algorithms (DGA) and Fast-Flux lookups.
+- Tracking of Unauthorized Dynamic DNS record modifications and DNS Hijacking / Zone Transfer attempts (AXFR/IXFR).
+- DNS tunneling, data exfiltration via TXT/NULL queries, and reconnaissance activity.
+
+---
+
+## 2. Format Specification
+
+Windows DNS logs are emitted and shipped in four primary syntaxes:
+
+| Syntax Type | Structure Description | Typical Ingestion Channel / Shipper |
+| :--- | :--- | :--- |
+| **Flat XML (`<Event>`)** | XML elements containing Windows Event schema (`ProviderGuid`, `EventID`, `EventTime`, `Channel`, body tags). | Windows Event Log collector, NXLog `im_etw` / `im_msvistalog`. |
+| **JSON Object** | Serialized key-value pairs representing ETW properties or parsed packet debug entries. | NXLog JSON output, Elastic Filebeat, Splunk HEC. |
+| **Raw Text Debug File** | Space-delimited tabular packet logs with length-encoded domain strings. | File tailing (`im_file`), Syslog wrapper. |
+| **Syslog Encapsulated** | RFC 5424 / RFC 3164 header wrapping raw debug lines or Structured Data (`[NXLOG@14506 ...]`). | Centralized Syslog daemons, SIEM TCP/UDP collectors. |
+
+### Quoting and Delimitation Rules
+- **XML**: Strict XML syntax with opening and closing tags (e.g., `<QNAME>test.example.com.</QNAME>`). Empty values appear as `<AdditionalInfo>.</AdditionalInfo>` or `<PolicyName>NULL</PolicyName>`.
+- **JSON**: Standard RFC 8259 JSON. String fields quoted with standard double quotes (`"`). Multi-line packet dumps inside `Message` must use escaped newlines `\n` and tabs `\t`.
+- **Debug Text**: Whitespace-delimited fields with fixed-width spacing. Domain labels are length-prefixed: `(6)google(3)com(0)`. Flags are enclosed in brackets: `[0001 D NOERROR]`.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### A. Windows DNS Event IDs Reference
+
+| Event ID | Channel / Category | Description | Key Body Fields |
+| :--- | :--- | :--- | :--- |
+| **256** | Analytical / Query | Query received from client | `Source`, `InterfaceIP`, `Port`, `QNAME`, `QTYPE`, `XID`, `TCP` |
+| **257** | Analytical / Response | Query response sent to client | `Destination`, `InterfaceIP`, `Port`, `QNAME`, `QTYPE`, `XID`, `RCODE`, `Zone` |
+| **260** | Analytical / Recurse | Recursive query initiated | `Destination`, `InterfaceIP`, `QNAME`, `QTYPE`, `XID` |
+| **265** | Analytical / Recurse | Recursive query sent to remote DNS | `Source`, `InterfaceIP`, `QNAME`, `XID`, `ZoneScope`, `Zone` |
+| **266** | Analytical / Recurse | Recursive response received | `Source`, `InterfaceIP`, `QNAME`, `XID`, `ZoneScope`, `Zone` |
+| **268** | Analytical / Recurse | Recursive resolution completed | `Destination`, `InterfaceIP`, `QNAME`, `XID`, `RCODE`, `Zone` |
+| **271** | Analytical / Transfer | Zone transfer request/response | `Destination`, `InterfaceIP`, `QNAME`, `XID`, `TCP` (must be 1), `RCODE` |
+| **275** | Analytical / Error | DNS packet processing error / bad request | `Source`, `InterfaceIP`, `BufferSize`, `Flags` |
+| **512** | Audit / `ZONE_OP` | Zone created | `Name`, `Type`, `Lookup`, `ReplicationScope`, `ZoneFile` |
+| **513** | Audit / `ZONE_OP` | Zone deleted | `Zone`, `VirtualizationID` |
+| **514** | Audit / `ZONE_OP` | Zone configuration updated | `Zone`, `PropertyKey`, `NewValue`, `VirtualizationID` |
+| **515** | Audit / `ZONE_OP` | Resource record created | `Type`, `NAME`, `TTL`, `BufferSize`, `RDATA`, `Zone`, `ZoneScope` |
+| **520** | Audit / `DYNAMIC_UPDATE` | Resource record deleted / modified via update | `Type`, `NAME`, `TTL`, `RDATA`, `Zone`, `Source` |
+| **522 / 523** | Audit / `ZONE_OP` | Zone scope created / deleted | `ZoneScope`, `Zone`, `VirtualizationID` |
+| **537** | Audit / `Configuration` | Forwarder list reset | `Forwarders`, `Scope` |
+| **540** | Audit / `Configuration` | Root hints modified | `Message` |
+| **541** | Audit / `Configuration` | Server setting modified | `Setting`, `Scope`, `NewValue` |
+| **551** | Audit / `SERVER_OP` | DNS statistical data cleared | `Message` |
+| **557** | Audit / `SERVER_OP` | Server listening IP address list changed | `ListenAddresses` |
+| **580** | Audit / `POLICY_OP` | Server/zone policy deleted | `Policy`, `ServerName` |
+
+---
+
+### B. Core Field Reference & Value Distributions
+
+#### 1. Header & System Metadata
+- `SourceName`: Fixed to `"Microsoft-Windows-DNSServer"`.
+- `ProviderGuid`: Fixed to `"{EB79061A-A566-4698-9119-3ED2807060E7}"`.
+- `Version`: Integer (`0`).
+- `Channel`: `"Microsoft-Windows-DNSServer/Audit"`, `"Microsoft-Windows-DNS-Server/Analytical"`, or empty depending on collector.
+- `ChannelID`: `16` (Analytical), `17` (Audit).
+- `OpcodeValue` / `Opcode`: `0` / `"Info"`.
+- `EventType` / `Severity`: `"INFO"` (SeverityValue: `2`).
+- `Hostname`: Windows Computer name (e.g., `"DC01"`, `"WIN-TEST-AD"`, `"CORP-DNS-01"`).
+- `Domain`: Active Directory domain or security domain (e.g., `"NT AUTHORITY"`, `"CORP"`, `"CONTOSO"`).
+- `AccountName`: `"SYSTEM"` (for analytical query engine) or administrative username (e.g., `"Administrator"`, `"svc_dnsadmin"`).
+- `UserID`: Windows SID (e.g., `"S-1-5-18"` for Local System, `"S-1-5-21-..."` for Domain Admin).
+- `SourceModuleName`: Name of the shipper pipeline (e.g., `"eventlog"`, `"auditeventlog"`, `"dns_logs"`, `"in_windns"`).
+- `SourceModuleType`: Shipper driver type (`"im_etw"`, `"im_msvistalog"`, `"im_file"`).
+
+#### 2. Query & Network Fields
+- `Source` / `Destination` / `InterfaceIP` / `RemoteIP`:
+  - Internal Clients: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`.
+  - DNS Server IP / Interface IP: Fixed server IP (e.g., `10.10.10.10`, `198.51.100.5`).
+  - External / Root Hints / Forwarders: Public IPs (`8.8.8.8`, `1.1.1.1`, `198.51.100.1`).
+- `Port` / `PortNum`: Client ephemeral ports (`49152`–`65535`), standard server port (`53`).
+- `TCP`: `0` (UDP - ~98% of queries) or `1` (TCP - used for zone transfers or large responses).
+- `XID` / `Xid`: Transaction ID. In ETW/XML, represented as decimal integer (`0` to `65535`). In raw debug logs, represented as 4-character hex (`d827`, `02d1`, `5370`).
+- `QNAME`: FQDN. **Note**: In ETW XML/JSON, always contains a trailing period (e.g., `mail.google.com.`, `dc-01.corp.local.`). In raw debug logs, uses length-prefixed formatting: `(4)mail(6)google(3)com(0)`.
+
+#### 3. DNS Type & Response Code Mapping
+- `QTYPE` / `Question Type` (Numeric / Mnemonic):
+  - `1` / `A`: IPv4 Host Record (~70% distribution)
+  - `28` / `AAAA`: IPv6 Host Record (~15% distribution)
+  - `5` / `CNAME`: Canonical Name (~5% distribution)
+  - `15` / `MX`: Mail Exchanger (~2% distribution)
+  - `16` / `TXT`: Text record (~4% distribution - suspicious when large)
+  - `12` / `PTR`: Pointer/Reverse lookup (~3% distribution)
+  - `6` / `SOA`: Start of Authority (~0.5% distribution)
+  - `33` / `SRV`: Service Locator (~0.5% distribution)
+- `RCODE` / `ResponseCode`:
+  - `0` / `NOERROR`: Successful resolution (~92% distribution)
+  - `2` / `SERVFAIL`: Server failure / upstream resolution failure (~3% distribution)
+  - `3` / `NXDOMAIN`: Name does not exist (~4% distribution)
+  - `5` / `REFUSED`: Query policy rejected / dynamic update denied (~1% distribution)
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Windows DNS log generators must format timestamps according to the specific transport and channel structure. Use the following dynamic macro tags:
+
+| Transport Layer | Timestamp Format | Dynamic Macro Tag |
+| :--- | :--- | :--- |
+| **ETW / JSON Unix Milliseconds** | Epoch in milliseconds (e.g., `1640073312000`) | `##$Epoch-0d0h0m0s$##000` or `##$EpochMs-0d0h0m0s$##` |
+| **NXLog / Syslog RFC 5424** | ISO 8601 with fractional sec & offset (`YYYY-MM-DDThh:mm:ss.ffffff±hh:mm`) | `##$TimeStamp-0d0h0m0s$##` |
+| **Syslog RFC 3164 Header** | `MMM DD HH:MM:SS` (e.g., `Dec 21 01:47:00`) | `##$SyslogTime-0d0h0m0s$##` |
+| **Native Debug File (`dns.log`)** | `M/D/YYYY H:M:S AM/PM` (e.g., `12/21/2021 8:57:50 AM`) | Custom formatted relative timestamp |
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Analytical Query Request (Event ID 256 - Flat XML ETW Format)
+*Scenario: Standard client workstation performing an A record lookup for an internal Active Directory domain controller.*
+
+```xml
+<Event><SourceName>Microsoft-Windows-DNSServer</SourceName><ProviderGuid>{EB79061A-A566-4698-9119-3ED2807060E7}</ProviderGuid><EventID>256</EventID><Version>0</Version><ChannelID>16</ChannelID><OpcodeValue>0</OpcodeValue><TaskValue>1</TaskValue><Keywords>9223372036854775809</Keywords><EventTime>##$Epoch-0d0h5m12s$##000</EventTime><ExecutionProcessID>2184</ExecutionProcessID><ExecutionThreadID>3420</ExecutionThreadID><EventType>INFO</EventType><SeverityValue>2</SeverityValue><Severity>INFO</Severity><Hostname>DC01</Hostname><Domain>NT AUTHORITY</Domain><AccountName>SYSTEM</AccountName><UserID>S-1-5-18</UserID><AccountType>User</AccountType><Flags>256</Flags><TCP>0</TCP><InterfaceIP>10.0.10.5</InterfaceIP><Source>10.0.20.144</Source><RD>1</RD><QNAME>finance-app.corp.internal.</QNAME><QTYPE>1</QTYPE><XID>41289</XID><Port>59312</Port><BufferSize>43</BufferSize><PacketData>REDACTED</PacketData><AdditionalInfo>.</AdditionalInfo><EventReceivedTime>##$Epoch-0d0h5m12s$##001</EventReceivedTime><SourceModuleName>eventlog</SourceModuleName><SourceModuleType>im_etw</SourceModuleType></Event>
+```
+
+### Example 2: Analytical Query Response (Event ID 257 - JSON ETW Format)
+*Scenario: DNS server returning an NXDOMAIN response for a suspicious, randomly generated external DGA domain.*
+
+```json
+{"SourceName":"Microsoft-Windows-DNSServer","ProviderGuid":"{EB79061A-A566-4698-9119-3ED2807060E7}","EventID":257,"Version":0,"ChannelID":16,"OpcodeValue":0,"TaskValue":1,"Keywords":"9223372036854775810","EventTime":##$Epoch-0d0h4m30s$##000,"ExecutionProcessID":2184,"ExecutionThreadID":3420,"EventType":"INFO","SeverityValue":2,"Severity":"INFO","Hostname":"DC01","Domain":"NT AUTHORITY","AccountName":"SYSTEM","UserID":"S-1-5-18","AccountType":"User","Flags":"33152","TCP":"0","InterfaceIP":"10.0.10.5","Destination":"10.0.20.144","AA":"0","AD":"0","QNAME":"xkz89a11bbq98.top.","QTYPE":"1","XID":"41289","DNSSEC":"0","RCODE":"3","Port":"59312","Scope":"Default","Zone":"..Cache","PolicyName":"NULL","BufferSize":"128","PacketData":"REDACTED","AdditionalInfo":"VirtualizationInstance:.","EventReceivedTime":##$Epoch-0d0h4m30s$##001,"SourceModuleName":"eventlog","SourceModuleType":"im_etw"}
+```
+
+### Example 3: Audit Log - Resource Record Added (Event ID 515 - JSON Format)
+*Scenario: Administrator creates a new DNS A record pointing to an internal server.*
+
+```json
+{"EventTime":##$Epoch-0d1h10m00s$##000,"Hostname":"DC01","Keywords":"4611686018428436480","EventType":"INFO","SeverityValue":2,"Severity":"INFO","EventID":515,"SourceName":"Microsoft-Windows-DNSServer","ProviderGuid":"{EB79061A-A566-4698-9119-3ED2807060E7}","Version":0,"TaskValue":5,"OpcodeValue":0,"RecordNumber":1084,"ExecutionProcessID":2184,"ExecutionThreadID":4812,"Channel":"Microsoft-Windows-DNSServer/Audit","Domain":"CORP","AccountName":"Administrator","UserID":"S-1-5-21-2947192831-1029384756-3948572831-500","AccountType":"User","Message":"A resource record of type 1, name staging-web.corp.internal, TTL 3600 and RDATA 0x0A001432 was created in scope Default of zone corp.internal. [virtualization instance: .].","Category":"ZONE_OP","Opcode":"Info","Type":"1","NAME":"staging-web.corp.internal","TTL":"3600","BufferSize":"4","RDATA":"0A001432","Zone":"corp.internal","ZoneScope":"Default","VirtualizationID":".","EventReceivedTime":##$Epoch-0d1h10m00s$##001,"SourceModuleName":"auditeventlog","SourceModuleType":"im_msvistalog"}
+```
+
+### Example 4: Audit Log - Dynamic Update Record Deleted (Event ID 520 - Syslog RFC 5424 Format)
+*Scenario: An endpoint de-registers and deletes its DNS host record via an authenticated Dynamic DNS Update request.*
+
+```syslog
+<14>1 ##$TimeStamp-0d0h15m22s$## DC01.corp.internal Microsoft-Windows-DNSServer 2184 - [NXLOG@14506 Keywords="4611686018460942336" EventType="INFO" EventID="520" ProviderGuid="{EB79061A-A566-4698-9119-3ED2807060E7}" Version="0" TaskValue="3" OpcodeValue="0" RecordNumber="102914" ExecutionThreadID="4812" Channel="Microsoft-Windows-DNSServer/Audit" Domain="NT AUTHORITY" AccountName="SYSTEM" UserID="S-1-5-18" AccountType="User" Category="DYNAMIC_UPDATE" Opcode="Info" Type="1" NAME="WS-FIN-088" TTL="0" BufferSize="4" RDATA="0A001458" Zone="corp.internal" ZoneScope="Default" Source="10.0.20.88" EventReceivedTime="##$TimeStamp-0d0h15m22s$##" SourceModuleName="DNS_Audit" SourceModuleType="im_msvistalog"] A resource record of type 1, name WS-FIN-088 and RDATA 0x0A001458 was deleted from scope Default of zone corp.internal via dynamic update from IP Address 10.0.20.88.
+```
+
+### Example 5: Native Raw Debug Log Line (Plain Text Packet Trace)
+*Scenario: High-frequency diagnostic debug log recording an incoming TXT lookup used for command and control polling.*
+
+```text
+##$SyslogTime-0d0h02m10s$## DC01 DNS: {"EventReceivedTime":"##$TimeStamp-0d0h02m10s$##","SourceModuleName":"DNS_IN","SourceModuleType":"im_file","Message":"10/24/2023 2:14:38 PM 150C PACKET  0000004AB7EA4220 UDP Rcv 10.0.20.105    1a4f   Q [0001   D   NOERROR] TXT    (32)a98f12c499e018a38712bc900fae1201(6)c2pool(3)net(0)","SourceName":"DNS","AccountName":"-","AccountType":"-","Domain":"-","Hostname":"DC01"}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Domain Name Encoding Divergence**:
+   - In **Analytical/Audit logs**, the domain is human-readable and must end with a root dot (e.g., `corp.internal.` or `www.microsoft.com.`).
+   - In **Debug/Packet logs**, domains use Pascal/DNS-wire label length prefixes and must terminate with `(0)` (e.g., `(3)www(9)microsoft(3)com(0)`).
+2. **Transaction ID (XID) Format**:
+   - In ETW XML and JSON payloads, `XID` is a **decimal string/integer** (e.g., `55835`, `41289`).
+   - In Debug/Packet logs, `XID` is a **4-character lowercase hexadecimal string** (e.g., `da1b`, `1a4f`, `d827`).
+3. **RDATA Format in Audit Logs**:
+   - The `RDATA` field for IPv4 `A` records is encoded as hex (e.g., `10.0.20.50` -> `0A001432`). In dynamic updates and record creations, ensure hexadecimal hex consistency with the IP address mentioned in the readable text `Message`.
+4. **Channel and Shipper Metadata**:
+   - When generating `Analytical` logs, ensure `ChannelID` is `16` and `SourceModuleType` is `im_etw`.
+   - When generating `Audit` logs, ensure `ChannelID` is `17` (or explicit `Channel="Microsoft-Windows-DNSServer/Audit"`) and `SourceModuleType` is `im_msvistalog`.
+5. **JSON Escaping**:
+   - If generating detailed multi-line debug messages inside JSON objects (`Message` field), all newlines must be explicitly escaped as `\n` and indentation tabs as `\t`.

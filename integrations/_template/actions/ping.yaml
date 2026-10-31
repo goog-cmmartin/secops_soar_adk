@@ -1,0 +1,7 @@
+name: "Ping"
+description: "Test connectivity to service using configured credentials."
+is_async: false
+parameters: []
+simulation_data:
+  output_message: "Successful Connection"
+  result_value: true

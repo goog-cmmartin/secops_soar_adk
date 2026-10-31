@@ -1,0 +1,180 @@
+# Log Generation Playbook: CHROME_MANAGEMENT
+
+## 1. Overview & Log Purpose
+The `CHROME_MANAGEMENT` log source captures operational, configuration, user access, and threat events from managed Google Chrome browsers (Chrome Browser Cloud Management / CBCM) and ChromeOS enterprise devices. 
+
+Activities recorded include:
+* **Safe Browsing & Threat Detection**: Malicious site visits (`badNavigationEvent`), dangerous file downloads (`dangerousDownloadEvent`, `MALWARE_TRANSFER`), and user bypass actions.
+* **Data Loss Prevention (DLP)**: Data access controls on clipboard, file transfer, and printing (`dataAccessControlEvent`, `contentTransferEvent`).
+* **Extension & Application Telemetry**: Enterprise extension installs, updates, and permission grants (`browserExtensionInstallEvent`).
+* **Device & User Lifecycle**: Affiliated/unaffiliated user logins, logout actions, failed authentications, and account provisioning (`CHROME_OS_LOGIN_EVENT`, `CHROME_OS_ADD_USER`).
+* **Hardware & System Integrity**: Hardware peripheral insertions/removals (USB, cameras, hubs), boot state integrity checks (Verified Mode), and Chrome Remote Desktop (CRD) remote assistance host/client sessions.
+
+---
+
+## 2. Format Specification
+
+Chrome Management logs originate in two standard enterprise representations:
+1. **Flat JSON Format**: Common when emitted directly from Chrome Browser Enterprise Connectors, Google Cloud Pub/Sub push subscriptions, or third-party endpoint log shippers.
+2. **Google Workspace Admin Reports API Format (`admin#reports#activity`)**: Produced when SIEMs pull logs via the Google Workspace Admin SDK Activity Reports API (Application: `chrome`).
+
+Both formats are valid, single-line JSON (`application/json`).
+
+### General Formatting & Delimiter Rules
+* **Format**: Strictly JSON.
+* **Character Encoding**: UTF-8.
+* **Escaping**:
+  * Double quotes (`"`) inside strings must be escaped (`\"`).
+  * Backslashes inside user/domain names must be escaped (`\\`).
+  * URLs often contain unicode-escaped query operators (e.g., `\u0026` for `&`, `\u003d` for `=`).
+* **Empty Values**: Represented as empty strings (`""`) or dashes (`"-"`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Schema A: Flat Telemetry JSON (Enterprise Connectors / Real-Time Reporting)
+
+> [!CAUTION]
+> **CRITICAL CHRONICLE / SECOPS PARSER INVARIANT FOR FLAT TELEMETRY:**
+> 1. **Key Name is `event`, NEVER `event_type`**: The Chronicle parser specifically routes events based on the `"event"` field name. If you use `"event_type"`, Chronicle defaults to `GENERIC_EVENT` and dumps everything into unparsed `extracted.*` fields.
+> 2. **Allowed Event Values**:
+>    - `"badNavigationEvent"` (visiting phishing / malicious URLs -> parses as `NETWORK_HTTP` with threat indicators)
+>    - `"dangerousDownloadEvent"` (malicious / suspicious file downloads -> parses as `FILE_CREATION` / malware)
+>    - `"contentTransferEvent"` (data transfer / file upload DLP)
+>    - `"browserExtensionInstallEvent"` (browser extension installation)
+>    - `"loginEvent"` (user authentication)
+> 3. **Top-Level Attributes Only**: Do not nest fields under objects like `"client": { ... }` or `"navigation_type"`. Use flat keys: `"profile_user"`, `"device_name"`, `"ip"`, `"url"`, `"reason"`, `"result"`.
+
+| Field Name | Type | Description | Allowed / Expected Values |
+| :--- | :--- | :--- | :--- |
+| `event` | String | Event category or type identifier | `badNavigationEvent`, `dangerousDownloadEvent`, `contentTransferEvent`, `dataAccessControlEvent`, `browserExtensionInstallEvent`, `loginEvent`, `interstitialEvent`, `CHROME_OS_REMOVE_USER`, `CHROME_OS_CRD_HOST_STARTED` |
+| `time` | String / Float | Event generation timestamp (Epoch seconds with fractional milliseconds) | e.g. `"1622093983.104"` or `1622093983` |
+| `reason` | String | Specific trigger reason | `MALWARE`, `SOCIAL_ENGINEERING`, `UNWANTED_SOFTWARE`, `SSL_ERROR`, `THREAT_TYPE_UNSPECIFIED`, `DANGEROUS`, `DANGEROUS_HOST`, `UNCOMMON`, `POTENTIALLY_UNWANTED`, `UNKNOWN`, `CHROMEOS_AFFILIATED_USER_REMOVED`, `CHROMEOS_CRD_HOST_STARTED` |
+| `result` | String | Enforcement or warning outcome | `EVENT_RESULT_WARNED`, `EVENT_RESULT_BLOCKED`, `EVENT_RESULT_BYPASSED`, `BLOCKED`, `ALLOWED`, `REPORTED` |
+| `client_type` | String | Device / client software tier | `CHROME_BROWSER`, `CHROME_OS_DEVICE`, `CHROME_BROWSER_PROFILE` |
+| `device_name` | String | Hostname, NetBIOS, or device asset tag | e.g., `CLW455-`, `1S20UYS17B01LT10FLKP`, `device.corp.domain.com` |
+| `device_user` | String | OS-level account logged into the workstation | Domain/Local user (e.g. `CORP\\user`, `user@domain.io`, `-`) |
+| `profile_user` | String | Chrome browser profile email identity | e.g., `user@domain.io`, `dummy@domain.com`, `""` |
+| `device_id` | String | Cloud device registration identifier | UUID format (`c2eac3e8-bb70-48a8-a1e0-a1c392815b98`) or token |
+| `directory_device_id` | String | Workspace Directory Device ID (ChromeOS) | UUID format (`62f508bd-61e9-4ee5-bded-2321c19bbf7d`) |
+| `os_platform` | String | Operating system family | `Windows`, `ChromeOS`, `Linux`, `Mac OS X` |
+| `os_version` | String | Operating system build/version | e.g., `10.0.22621.1265`, `15278.64.0`, `5.18.16-1rodete4-amd64` |
+| `browser_version` | String | Chrome version string | e.g., `110.0.5481.104`, `109.0.5414.120` |
+| `user_agent` | String | Standard HTTP User-Agent string | Complete browser User-Agent |
+| `url` | String | Visited URL or downloaded source URI | Full HTTP/HTTPS or Data URI |
+| `content_name` | String | File or payload name (DLP/Malware) | e.g., `payload.exe`, `confidential.xlsx` |
+| `content_size` | Integer | Size of content in bytes | Integer `> 0` |
+| `content_type` | String | MIME type | e.g., `application/x-msdownload`, `application/zip` |
+| `content_hash` | String | SHA-256 hash of inspected artifact | 64-character uppercase/lowercase hexadecimal |
+| `trigger_type` | String | Vector of execution/transfer | `FILE_DOWNLOAD`, `FILE_UPLOAD`, `PRINTING`, `CLIPBOARD`, `LOCAL_USER_INITIATED` |
+| `extension_id` | String | Chrome Web Store Extension ID | 32-character string matching regex `^[a-p]{32}$` |
+| `extension_name`| String | Plaintext display name of extension | e.g., `JSON Formatter`, `Tampermonkey` |
+
+---
+
+### Schema B: Google Admin Reports API JSON (`admin#reports#activity`)
+
+When queried via Google Workspace Admin API, events are wrapped in standard activity audit envelopes.
+
+#### Root Envelope
+* `kind`: Constantly `"admin#reports#activity"`.
+* `id`:
+  * `time`: ISO 8601 string (`YYYY-MM-DDTHH:MM:SS.sssZ`).
+  * `uniqueQualifier`: 64-bit signed integer string (e.g., `"-4751121808841643274"`).
+  * `applicationName`: Constantly `"chrome"`.
+  * `customerId`: Google Workspace customer string (e.g., `"C03puekhd"`).
+* `etag`: Opaque ETag string.
+* `actor`:
+  * `callerType`: `"USER"`, `"EXTERNAL_USER"`, or `"KEY"`.
+  * `email`: (Optional) User email associated with activity.
+  * `profileId`: (Optional) Numeric Workspace user ID.
+  * `key`: (When callerType is `"KEY"`) e.g., `"System"`.
+* `events`: Array of objects containing `type`, `name`, and an array of `parameters`.
+
+#### Standard Event Types & Names
+* `type`: `MALWARE_TRANSFER_TYPE` | `name`: `MALWARE_TRANSFER`
+* `type`: `BROWSER_EXTENSION_INSTALL_TYPE` | `name`: `BROWSER_EXTENSION_INSTALL`
+* `type`: `CHROME_OS_LOGIN_LOGOUT_TYPE` | `name`: `CHROME_OS_LOGIN_EVENT`, `CHROME_OS_LOGIN_FAILURE_EVENT`, `CHROME_OS_LOGOUT_EVENT`
+* `type`: `CHROME_OS_ADD_REMOVE_USER_TYPE` | `name`: `CHROME_OS_ADD_USER`, `CHROME_OS_REMOVE_USER`
+* `type`: `CHROME_OS_CRD_HOST_STARTED_TYPE` | `name`: `CHROME_OS_CRD_HOST_STARTED`
+* `type`: `CHROME_OS_CRD_HOST_ENDED_TYPE` | `name`: `CHROME_OS_CRD_HOST_ENDED`
+* `type`: `CHROME_OS_CRD_CLIENT_CONNECTED_TYPE` | `name`: `CHROME_OS_CRD_CLIENT_CONNECTED`
+* `type`: `CHROMEOS_LOCK_UNLOCK_TYPE` | `name`: `CHROMEOS_AFFILIATED_LOCK_SUCCESS`, `CHROMEOS_AFFILIATED_UNLOCK_SUCCESS`
+* `type`: `DEVICE_BOOT_STATE_CHANGE_TYPE` | `name`: `DEVICE_BOOT_STATE_CHANGE`
+* `type`: `CHROMEOS_PERIPHERAL_ADDED_TYPE` | `name`: `CHROMEOS_PERIPHERAL_ADDED`
+* `type`: `CHROMEOS_PERIPHERAL_REMOVED_TYPE` | `name`: `CHROMEOS_PERIPHERAL_REMOVED`
+* `type`: `CHROMEOS_PERIPHERAL_STATUS_UPDATED_TYPE` | `name`: `CHROMEOS_PERIPHERAL_STATUS_UPDATED`
+
+#### Nested `parameters` Key-Value Specifications
+Parameters inside `events[].parameters` contain `{ "name": "...", "value": "..." }` or `{ "name": "...", "intValue": "..." }`:
+* `TIMESTAMP`: Epoch seconds (e.g. `{"name": "TIMESTAMP", "intValue": "1677589041"}`).
+* `EVENT_REASON`: Contextual sub-reason (e.g. `MALWARE_TRANSFER_DANGEROUS`, `CHROMEOS_AFFILIATED_LOGIN`, `CHROMEOS_UNAFFILIATED_LOGIN`, `AUTHENTICATION_ERROR`).
+* `EVENT_RESULT`: `REPORTED`, `BYPASSED`, `BLOCKED`.
+* `LOGIN_FAILURE_REASON`: `AUTHENTICATION_ERROR`, `NETWORK_ERROR`.
+* `DEVICE_PLATFORM`: Operating system version string (e.g. `ChromeOS 15278.72.0`).
+* `DIRECTORY_DEVICE_ID`: Device identifier in Google Workspace directory.
+* `CONTENT_HASH`: SHA-256 uppercase hash.
+* `PRODUCT_ID` / `VENDOR_ID`: Hex strings (e.g. `0x707a`, `0x4ca`).
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Synthetic logs must use standard dynamic time macros to guarantee temporal consistency across generation runs:
+
+| Format Name | Target Output Example | Dynamic Syntax Macro |
+| :--- | :--- | :--- |
+| **Epoch Seconds (Admin API parameter)** | `1677589041` | `##$Epoch-0d0h0m0s$##` |
+| **Epoch Fractional String (Flat JSON)** | `1677589041.524` | `##$Epoch-0d0h0m0s$##.524` |
+| **ISO 8601 Milliseconds (Admin API Root)** | `2023-02-28T13:17:21.177Z` | `##$TimeStamp-0d0h0m0s$##` |
+
+### Synchronization Rule
+When generating Schema B (Google Admin Reports API format):
+1. The root timestamp `id.time` MUST use `##$TimeStamp-0d...$##`.
+2. The nested parameter `TIMESTAMP` MUST use `##$Epoch-0d...$##` representing the **exact same** offset.
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Flat JSON — Malicious Download Prevented (DLP / Safe Browsing)
+```json
+{ "event": "dangerousDownloadEvent", "time": "##$Epoch-0d0h12m10s$##.148", "reason": "DANGEROUS", "result": "EVENT_RESULT_BLOCKED", "device_name": "CORP-WKS-8821", "device_user": "GLOBAL\\jsmith", "profile_user": "jsmith@cyberrange.io", "url": "http://malware-distribution.internal-test.site/drops/loader.exe", "content_name": "loader.exe", "content_size": 245760, "content_type": "application/x-msdownload", "content_hash": "2F8321B0B2048CC1E72274C217D7B15798331F9CB32446368BBF5ED54442C81B", "trigger_type": "FILE_DOWNLOAD", "device_id": "8a002e74-5d60-4d43-996c-d42a0964ad22", "os_platform": "Windows", "os_version": "10.0.22621.1265", "browser_version": "118.0.5993.88", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36", "client_type": "CHROME_BROWSER" }
+```
+
+### Example 2: Flat JSON — Malicious Navigation Blocked (Social Engineering)
+```json
+{ "event": "badNavigationEvent", "time": "##$Epoch-0d0h25m04s$##.902", "reason": "SOCIAL_ENGINEERING", "result": "EVENT_RESULT_WARNED", "device_name": "1S20UYS17B01LT10FLKP", "device_user": "analyst@cyberrange.io", "profile_user": "analyst@cyberrange.io", "url": "https://secure-login-portal-verification.phish.test/auth", "device_id": "c2eac3e8-bb70-48a8-a1e0-a1c392815b98", "os_platform": "ChromeOS", "os_version": "15303.0.0", "browser_version": "119.0.6045.158", "user_agent": "Mozilla/5.0 (X11; CrOS x86_64 15303.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36", "client_type": "CHROME_OS_DEVICE", "directory_device_id": "62f508bd-61e9-4ee5-bded-2321c19bbf7d" }
+```
+
+### Example 3: Flat JSON — Third-Party Chrome Extension Installed
+```json
+{ "browser_version": "119.0.6045.105", "client_type": "CHROME_BROWSER", "device_id": "uSkncoMl1BuopuFWkfWdBrCfaIw", "device_name": "dev-box-linux.corp", "device_user": "ddeveloper", "event": "browserExtensionInstallEvent", "extension_description": "Injects custom scripts and CSS into web pages.", "extension_id": "dhdgffkkebhmkfjojejmpbldmpobfkfo", "extension_name": "Tampermonkey", "os_platform": "Linux", "os_version": "6.2.0-39-generic", "profile_user": "ddeveloper@cyberrange.io", "time": "##$Epoch-0d1h02m18s$##.422", "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36" }
+```
+
+### Example 4: Admin Reports API — Repeated Login Failure Event (Brute-Force Indicator)
+```json
+{ "kind": "admin#reports#activity", "id": { "time": "##$TimeStamp-0d0h05m12s$##", "uniqueQualifier": "-4074274939800364753", "applicationName": "chrome", "customerId": "C03puekhd" }, "etag": "\"g0ZI99P-wiJZvVD25oJ8D3NuWof53S8EFWSgI9V1II0/fr35xH1odw2VXNekF7924PRCw7Q\"", "actor": { "callerType": "USER", "profileId": "105250506097979753968" }, "events": [ { "type": "CHROME_OS_LOGIN_LOGOUT_TYPE", "name": "CHROME_OS_LOGIN_FAILURE_EVENT", "parameters": [ { "name": "TIMESTAMP", "intValue": "##$Epoch-0d0h05m12s$##" }, { "name": "EVENT_REASON", "value": "CHROMEOS_AFFILIATED_LOGIN" }, { "name": "DEVICE_NAME", "value": "1S20UYS17B01LT10FLKP" }, { "name": "DEVICE_USER", "value": "victim@cyberrange.io" }, { "name": "CLIENT_TYPE", "value": "CHROME_OS_DEVICE" }, { "name": "DEVICE_PLATFORM", "value": "ChromeOS 15278.72.0" }, { "name": "DIRECTORY_DEVICE_ID", "value": "62f508bd-61e9-4ee5-bded-2321c19bbf7d" }, { "name": "LOGIN_FAILURE_REASON", "value": "AUTHENTICATION_ERROR" } ] } ] }
+```
+
+### Example 5: Admin Reports API — Dangerous File Download Bypassed by User
+```json
+{ "kind": "admin#reports#activity", "id": { "time": "##$TimeStamp-0d0h42m19s$##", "uniqueQualifier": "8487979820885200426", "applicationName": "chrome", "customerId": "C03puekhd" }, "etag": "\"g0ZI99P-wiJZvVD25oJ8D3NuWof53S8EFWSgI9V1II0/1qVBNRqxj4PzZJM1KVYZfBLwMYg\"", "actor": { "callerType": "USER", "email": "insider@cyberrange.io", "profileId": "113316239944706535444" }, "events": [ { "type": "MALWARE_TRANSFER_TYPE", "name": "MALWARE_TRANSFER", "parameters": [ { "name": "TIMESTAMP", "intValue": "##$Epoch-0d0h42m19s$##" }, { "name": "EVENT_REASON", "value": "MALWARE_TRANSFER_DANGEROUS" }, { "name": "BROWSER_VERSION", "value": "118.0.5993.88" }, { "name": "CLIENT_TYPE", "value": "CHROME_OS_DEVICE" }, { "name": "CONTENT_HASH", "value": "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90" }, { "name": "CONTENT_NAME", "value": "trojan_archive.zip" }, { "name": "CONTENT_SIZE", "intValue": "45210" }, { "name": "CONTENT_TYPE", "value": "application/zip" }, { "name": "DEVICE_ID", "value": "c2eac3e8-bb70-48a8-a1e0-a1c392815b98" }, { "name": "DEVICE_NAME", "value": "CHROMEBOOK-FLKP" }, { "name": "DEVICE_PLATFORM", "value": "ChromeOS 15278.72.0" }, { "name": "DEVICE_USER", "value": "insider@cyberrange.io" }, { "name": "DIRECTORY_DEVICE_ID", "value": "62f508bd-61e9-4ee5-bded-2321c19bbf7d" }, { "name": "EVENT_RESULT", "value": "BYPASSED" }, { "name": "PROFILE_USER_NAME", "value": "insider@cyberrange.io" }, { "name": "TRIGGER_TYPE", "value": "FILE_DOWNLOAD" }, { "name": "TRIGGER_USER", "value": "insider@cyberrange.io" }, { "name": "URL", "value": "https://untrusted-distribution-point.test/trojan_archive.zip" }, { "name": "USER_AGENT", "value": "Mozilla/5.0 (X11; CrOS x86_64 15278.72.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36" } ] } ] }
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **`event` Discriminator Required (Never `event_type`)**: In Flat JSON (Schema A), the key must be `"event"` (e.g. `"event": "badNavigationEvent"`). Never use `"event_type"`, and never nest user/device attributes inside a `"client"` dictionary.
+2. **Schema Consistency**: Never combine Schema A (flat keys) with Schema B (Admin SDK Reports structure) inside the same log line. An ingestion pipeline expects either standard flat CBCM format or the nested `admin#reports#activity` array structure.
+2. **Chrome Extension ID Validation**: When generating `extension_id` or `APP_ID`, the value **must strictly be 32 lowercase alphabetical characters** between `a` and `p` (e.g., `lmjegmlicamnimmfhcmpkclmigmmcbeh`). Do not generate hex, numbers, or uppercase characters for this field.
+3. **Hex Hash Formatting**: Chrome Management reports SHA-256 hashes in **uppercase hexadecimal** format (64 hex chars). Generating lowercase or non-SHA-256 hashes will invalidate signature and IOC lookups.
+4. **Parameter Types in Admin Reports API**:
+   * Numeric values (`TIMESTAMP`, `CONTENT_SIZE`) in Admin SDK parameters use `"intValue"` keys with stringified integers (e.g., `{"name": "CONTENT_SIZE", "intValue": "9975"}`).
+   * Categorical and textual fields use `"value"` keys (e.g., `{"name": "EVENT_RESULT", "value": "BYPASSED"}`).
+5. **Backslash Escaping in Domain Names**: In flat logs, Windows usernames must be properly escaped (`"CORP\\username"` -> `"CORP\\\\username"` in raw JSON strings if double-escaped, but standard single escape is `"device_user": "DOMAIN\\user"`). Ensure the JSON parser does not fail on unescaped control characters such as `\t` in `\test_user`.
+6. **Operating System and Client Type Concordance**:
+   * If `client_type` is `CHROME_OS_DEVICE`, `os_platform` must be `ChromeOS`, and `directory_device_id` must be populated.
+   * If `client_type` is `CHROME_BROWSER`, `os_platform` can be `Windows`, `Linux`, or `Mac OS X`.

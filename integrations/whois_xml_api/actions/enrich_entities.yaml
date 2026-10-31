@@ -1,0 +1,7 @@
+name: "Enrich Entities"
+description: "Enriches alert hostname and URL entities with WHOIS registration and registrar details."
+is_async: false
+parameters: []
+simulation_data:
+  output_message: "Successfully enriched 1 entities:\n - example.com"
+  result_value: true

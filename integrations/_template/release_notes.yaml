@@ -1,0 +1,5 @@
+- version: "1.0.0"
+  date: "2026-10-26"
+  notes:
+    - "Initial release of Template Integration."
+    - "Includes Ping action and ClientManager."

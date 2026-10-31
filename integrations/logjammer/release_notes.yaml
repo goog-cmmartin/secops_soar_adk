@@ -1,0 +1,90 @@
+- description: "Added Base Timestamp action parameter, automatic SOAR Alert timestamp backdating (WindowStartTime / StartTime / security_events), per-event offset log_entry_time resolution for SecOps ingestion, and structured SOAR alert context extraction."
+  version: 2.8
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-31"
+- description: "Exposed scenario ingestion labels and click-to-copy SecOps UDM Search query (metadata.ingestion_labels.value = \"<scenario_id>\") in Generate Attack Scenario Logs JSON result, action output message, and HTML widget."
+  version: 2.7
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-30"
+- description: "Added multi-rule comma-separated Rule Identifier support, bundled custom tenant rule catalog, graceful fallback for custom/external rule IDs, Scenario Name parameter across Action and Job, and Rule Outcome parameter on Scheduled Scenario Generator Job."
+  version: 2.6
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-29"
+- description: "Updated LogJammer PNG icon (image.png) to match the custom LogJammer vector logo (logo.svg)."
+  version: 2.5
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-29"
+- description: "Resolved LogJammer Scenario Simulation widget empty data rendering: added array unwrapping for Siemplify [{stepInstanceName}.JsonResult] array literals, added raw-data fallback DOM element, and filtered theme background postMessages from triggering renderView."
+  version: 2.4
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Integrated dynamic Google SecOps SOAR theme synchronization bridge into LogJammer Scenario Simulation widget: added postMessage listeners for evt.data.background, real-time luminance calculation, dynamic --soar-* CSS custom property application, and system prefers-color-scheme fallback."
+  version: 2.3
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Fixed boolean action parameter default_value extraction: updated Ingest to SecOps and Enrich with Google TI to pass string default_values (\"true\"/\"false\") to comply with Siemplify extract_action_param runtime type validation."
+  version: 2.2
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Resolved action parameter typing: fixed default_value string types for Event Count and Limit across action wrappers to match Content Hub string schema."
+  version: 2.1
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Major update: added automatic log type inference when log_types is omitted, target count configuration across all scenarios, full traceback and diagnostic logging, and enhanced SecOps v1alpha ingestion token handling."
+  version: 2.0
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"
+- description: "Initial release of LogJammer integration for Google SecOps SOAR. Includes AI-powered scenario generation, 37 bundled schema playbooks, 5,719 Google curated detection rules catalog, GTI threat intelligence enrichment, HTML scenario visualization widget, and scheduled scenario generator job."
+  version: 1.0
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: true
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-10-28"

@@ -1,0 +1,216 @@
+# AUDITD Log Generation Playbook
+
+---
+
+## 1. Overview & Log Purpose
+The Linux Audit daemon (`auditd`) and its real-time dispatcher (`audispd`) interface directly with the Linux Kernel Audit subsystem (`kauditd`). The subsystem captures security-relevant system operations at the kernel and PAM user-space levels according to configured rules (`audit.rules`).
+
+### Primary Recorded Activities
+* **System Call Monitoring (`SYSCALL`, `EXECVE`, `CWD`, `PATH`)**: Process execution, file modification, permission changes (`chmod`, `chown`), network socket creation, memory allocation violations.
+* **Authentication & Authorization (`USER_AUTH`, `USER_ACCT`, `USER_CMD`, `CRED_ACQ`, `CRED_DISP`, `CRED_REFR`)**: PAM authentication results, sudo/su execution, credential caching/destruction.
+* **Session Lifecycle (`USER_LOGIN`, `USER_LOGOUT`, `USER_START`, `USER_END`, `LOGIN`)**: TTY, SSH, and Cron session initialization and termination.
+* **System Service & Configuration (`SERVICE_START`, `SERVICE_STOP`, `CONFIG_CHANGE`, `DAEMON_END`)**: Systemd unit transitions, changes to audit rules, and daemon status changes.
+* **Security Subsystems (`SECCOMP`, `ANOM_ABEND`, `CRYPTO_KEY_USER`, `CRYPTO_SESSION`)**: Cryptographic handshakes, Seccomp policy violations, and abnormal process crashes (e.g., SIGSEGV).
+
+---
+
+## 2. Format Specification
+
+Audit logs exist primarily in three transport profiles:
+1. **Raw File Output** (`/var/log/audit/audit.log`): Direct key-value format.
+2. **Syslog-Encapsulated (RFC 3164 / RFC 5424)**: Emitted via `audispd` / `rsyslog` / `syslog-ng`.
+3. **Cloud Ingest JSON Envelopes**: Structured wrappers (e.g., GCP Cloud Logging) where `textPayload` contains the native Auditd string.
+
+### Delimiters & Syntax Rules
+* **Record Separator**: Standard newline `\n` (or multi-record concatenation delimited by single spaces in forwarder streams).
+* **Key-Value Syntax**: `key=value` or `key="value"`.
+* **Quoting & Escaping**:
+  * Unquoted strings: Alphanumeric and integer values (e.g., `arch=c000003e`, `syscall=59`, `success=yes`, `pid=1234`).
+  * Double quotes (`"..."`): Strings containing standard paths or characters (e.g., `exe="/usr/bin/cat"`, `comm="cat"`).
+  * Single quotes with nested escaping (`'op=... acct=\"user\"'`): Used in PAM and user messages (`msg='...'`).
+  * Hex Encoding: Arguments containing spaces, non-printable characters, quotes, or binary characters are hex-encoded as raw hex strings without prefix (e.g., `cmd=73797374...` or `proctitle=726D002F...`).
+  * Unset / Null Values: Indicated as `?`, `(null)`, `(none)`, `unset`, or `4294967295` (unsigned 32-bit `-1` for UIDs/sessions).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### A. Envelope Structures
+
+#### Native / Syslog RFC 3164 Prefix
+```text
+<PRI>MMM DD HH:MM:SS <hostname> <process>[<PID>]: [node=<node>] type=<TYPE> msg=audit(<EPOCH_SECONDS>.<MILLISECONDS>:<EVENT_SERIAL_ID>): <BODY>
+```
+* `<PRI>`: Syslog Priority indicator (e.g., `<134>` = `local0.info`, `<14>` = `user.info`, `<166>` = `local4.info`).
+* `<process>`: Typically `audispd`, `auditd`, or `fwdAure`.
+* `node`: Hostname of the audit node (present when configured in `auditd.conf` / multi-system collectors).
+
+#### GCP Cloud Logging JSON Envelope
+```json
+{
+  "insertId": "cieh3dd7gix2x7zhi",
+  "labels": { "compute.googleapis.com/resource_name": "host.domain.com" },
+  "logName": "projects/example-project/logs/audit_log",
+  "receiveTimestamp": "2023-11-14T10:00:05.123456789Z",
+  "resource": {
+    "labels": { "instance_id": "1431088027234416733", "project_id": "example-project", "zone": "us-central1-a" },
+    "type": "gce_instance"
+  },
+  "textPayload": "type=USER_AUTH msg=audit(1700000000.123:4567): ...",
+  "timestamp": "2023-11-14T10:00:00.123456789Z"
+}
+```
+
+---
+
+### B. Core Body Fields by Event Type
+
+#### 1. `SYSCALL` (System Call Execution)
+Triggers when a kernel audit rule matches a system call.
+
+| Field | Type | Description / Sample Values |
+| :--- | :--- | :--- |
+| `arch` | Hex | CPU Architecture (`c000003e` for x86_64, `40000003` for x86) |
+| `syscall` | Integer | System call ID (`59` = execve, `2` = open, `257` = openat, `268` = chmodat, `82` = rename, `263` = unlinkat) |
+| `success` | String | `yes` or `no` |
+| `exit` | Integer | Syscall return code (`0` for success, `-13` = `EACCES`, `-1` = `EPERM`, `-2` = `ENOENT`) |
+| `a0` - `a3` | Hex | Syscall low-level register arguments (e.g., `a0=7fffd19c5592`) |
+| `items` | Integer | Number of `PATH` records associated with this event (e.g., `1`, `2`, `5`) |
+| `ppid` | Integer | Parent Process ID |
+| `pid` | Integer | Current Process ID |
+| `auid` | Integer/String | Audit UID (login UID). `4294967295` or `unset` indicates daemon/unauthenticated |
+| `uid`, `gid` | Integer | Real User ID and Group ID |
+| `euid`, `egid` | Integer | Effective User ID and Group ID |
+| `suid`, `sgid` | Integer | Saved User ID and Group ID |
+| `fsuid`, `fsgid`| Integer | File System User ID and Group ID |
+| `tty` | String | Controlling terminal (`(none)`, `pts0`, `tty1`) |
+| `ses` | Integer | Audit session ID (`4294967295` = unset/daemon; integer for interactive logins) |
+| `comm` | String (Quoted)| Executable basename (`"cat"`, `"sudo"`, `"bash"`, `"rm"`) |
+| `exe` | String (Quoted)| Absolute path of binary (`"/usr/bin/cat"`, `"/usr/bin/sudo"`) |
+| `subj` | String | SELinux/AppArmor context (`unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023`, `system_u:system_r:sshd_t:s0`) |
+| `key` | String (Quoted)| Custom audit rule key tag (`"sshd_config"`, `"cmdlineExecution"`, `"delete"`) |
+
+#### 2. `EXECVE` (Execution Arguments)
+Follows `SYSCALL` with `syscall=59` (execve).
+* `argc`: Total argument count.
+* `a0`, `a1`, `a2`...: Command arguments. Plain string if no spaces/special chars (`a0="rm"`), or Hex-encoded ASCII (`a2=2F6F70742F74...`).
+
+#### 3. `CWD` & `PATH` (Current Working Directory & File Reference)
+* `CWD`: `cwd="/absolute/path"` (or hex-encoded if special chars present).
+* `PATH`:
+  * `item`: 0-based index of referenced path.
+  * `name`: Target file or directory (`"/etc/shadow"`, `"/bin/sed"` or `(null)`).
+  * `inode`: Inode number (e.g., `263662`).
+  * `dev`: Device identifier (e.g., `fd:00`, `00:30`).
+  * `mode`: Octal file mode with type (e.g., `0100755` = regular file `rwxr-xr-x`, `040755` = directory).
+  * `ouid` / `ogid`: Owner UID and Owner GID.
+  * `nametype` / `objtype`: `NORMAL`, `PARENT`, `CREATE`, `DELETE`.
+  * `cap_fp`, `cap_fi`, `cap_fe`, `cap_fver`: File capability bitmasks (e.g., `0000000000000000`).
+
+#### 4. `USER_AUTH`, `USER_ACCT`, `USER_START`, `USER_END`, `CRED_ACQ`, `CRED_DISP` (PAM / Authentication)
+* `pid`: PAM-calling process PID.
+* `uid`: Calling user UID.
+* `auid`: Login UID.
+* `ses`: Login session ID.
+* `msg`: Inner string in single quotes containing:
+  * `op`: Sub-operation (e.g., `PAM:authentication`, `PAM:accounting`, `PAM:session_open`, `PAM:session_close`, `PAM:setcred`, `login`).
+  * `grantors`: Comma-separated PAM modules (`pam_unix,pam_env,pam_permit,pam_limits`).
+  * `acct`: Target account name (escaped quotes `\"root\"` or raw string `"root"` depending on layer).
+  * `exe`: Invoking binary (e.g., `"/usr/sbin/sshd"`, `"/usr/bin/sudo"`).
+  * `hostname`: Source host or `?`.
+  * `addr`: Source IP address or `?`.
+  * `terminal`: Terminal device (`ssh`, `cron`, `pts/0`, `?`).
+  * `res`: `success` or `failed`.
+
+#### 5. `USER_CMD` (Sudo / Privilege Command Execution)
+* `cwd`: Working directory where command was issued.
+* `cmd`: Hex-encoded command line string.
+* `terminal`: Calling terminal.
+* `res`: `success` or `failed`.
+
+#### 6. `CRYPTO_SESSION` & `CRYPTO_KEY_USER` (SSH / TLS Handshakes)
+* `op`: `start`, `destroy`, `unsupported-cipher`.
+* `direction`: `from-client`, `from-server`, `both`, `?`.
+* `cipher`: Cipher name (`chacha20-poly1305@openssh.com`, `aes256-gcm`).
+* `ksize`: Key size in bits (`256`, `512`).
+* `pfs`: Key exchange algorithm (`curve25519-sha256`, `ecdh-sha2-nistp256`).
+* `rport`: Remote client port (e.g., `47136`).
+* `laddr`: Local listening IP.
+* `lport`: Local listening port (`22`).
+* `fp`: Public key fingerprint (`SHA256:...`).
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Audit logs use two primary time representations:
+1. **Audit Kernel Event ID Time**: `msg=audit(SECONDS.MILLIS:SEQUENCE)` inside the payload.
+2. **Syslog / Transport Wrapper Header**: BSD Syslog (`MMM DD HH:MM:SS`) or ISO 8601 UTC.
+
+### Dynamic Generation Instructions
+* The Unix Epoch seconds in `msg=audit(SECONDS.MILLIS:SEQUENCE)` **must match** the enclosing Syslog or JSON envelope timestamp within a sub-second delta.
+* For multi-record events (e.g., `SYSCALL` + `EXECVE` + `PATH`), the `SECONDS.MILLIS:SEQUENCE` identifier **must be identical** across all grouped records.
+
+### Templating Tags
+* Syslog Header Format (`MMM DD HH:MM:SS`): `##$SyslogTime-0d0h0m0s$##`
+* Standard ISO 8601 (`YYYY-MM-DDTHH:MM:SS.mmmmmmZ`): `##$TimeStamp-0d0h0m0s$##`
+* Audit Epoch Seconds (`ssssssssss`): `##$Epoch-0d0h0m0s$##`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Multi-Record Process Execution via Sudo (`SYSCALL` + `EXECVE` + `CWD` + `PATH` + `PROCTITLE` + `EOE`)
+```text
+<166>##$SyslogTime-0d0h15m00s$## web-prod-01 fwdAure: node=web-prod-01 type=SYSCALL msg=audit(##$Epoch-0d0h15m00s$##.145:982341): arch=c000003e syscall=59 success=yes exit=0 a0=1a45b10 a1=1a48c20 a2=1a45c60 a3=20 items=2 ppid=14201 pid=14205 auid=1001 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=42 comm="cat" exe="/usr/bin/cat" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key="cmdlineExecution" node=web-prod-01 type=EXECVE msg=audit(##$Epoch-0d0h15m00s$##.145:982341): argc=2 a0="cat" a1="/etc/shadow" node=web-prod-01 type=CWD msg=audit(##$Epoch-0d0h15m00s$##.145:982341): cwd="/root" node=web-prod-01 type=PATH msg=audit(##$Epoch-0d0h15m00s$##.145:982341): item=0 name="/usr/bin/cat" inode=524312 dev=fd:00 mode=0100755 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:bin_t:s0 nametype=NORMAL node=web-prod-01 type=PATH msg=audit(##$Epoch-0d0h15m00s$##.145:982341): item=1 name="/etc/shadow" inode=1054231 dev=fd:00 mode=0100000 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:shadow_t:s0 nametype=NORMAL node=web-prod-01 type=PROCTITLE msg=audit(##$Epoch-0d0h15m00s$##.145:982341): proctitle=636174002F6574632F736861646F77 node=web-prod-01 type=EOE msg=audit(##$Epoch-0d0h15m00s$##.145:982341):
+```
+
+### Example 2: SSH Authentication Failure (Syslog / `USER_AUTH`)
+```text
+<134>##$SyslogTime-0d0h10m12s$## bastion-host audispd[4102]: type=USER_AUTH msg=audit(##$Epoch-0d0h10m12s$##.845:512891): pid=29841 uid=0 auid=4294967295 ses=4294967295 subj=system_u:system_r:sshd_t:s0-s0:c0.c1023 msg='op=PAM:authentication grantors=? acct="admin" exe="/usr/sbin/sshd" hostname=198.51.100.24 addr=198.51.100.24 terminal=ssh res=failed' UID="root" AUID="unset"
+```
+
+### Example 3: File Access Permission Denied (`SYSCALL` / Raw Audit Format)
+```text
+type=SYSCALL msg=audit(##$Epoch-0d0h05m30s$##.512:124801): arch=c000003e syscall=257 success=no exit=-13 a0=ffffff9c a1=7ffd94a123e0 a2=0 a3=0 items=1 ppid=8420 pid=8951 auid=1004 uid=1004 gid=1004 euid=1004 suid=1004 fsuid=1004 egid=1004 sgid=1004 fsgid=1004 tty=pts1 ses=128 comm="cat" exe="/usr/bin/cat" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key="unauthorized-read"
+```
+
+### Example 4: Sudo Command Execution Recorded in GCP Cloud Logging (`USER_CMD` / JSON Format)
+```json
+{
+  "insertId": "c098df23kjsd87fha",
+  "labels": { "compute.googleapis.com/resource_name": "app-server-prod-04" },
+  "logName": "projects/enterprise-core/logs/audit_log",
+  "receiveTimestamp": "##$TimeStamp-0d0h02m00s$##",
+  "resource": {
+    "labels": {
+      "instance_id": "8937402194827104921",
+      "project_id": "enterprise-core",
+      "zone": "us-east1-b"
+    },
+    "type": "gce_instance"
+  },
+  "textPayload": "type=USER_CMD msg=audit(##$Epoch-0d0h02m01s$##.340:719821): pid=18942 uid=1002 auid=1002 ses=15 subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 msg='cwd=\"/home/jdoe\" cmd=73797374656D63746C2072657374617274206E67696E78 terminal=pts/0 res=success'",
+  "timestamp": "##$TimeStamp-0d0h02m01s$##"
+}
+```
+
+### Example 5: Anomalous Process Termination / Crash (`ANOM_ABEND` / Syslog Format)
+```text
+<14>##$SyslogTime-0d0h01m10s$## db-node-02 audispd: node=db-node-02 type=ANOM_ABEND msg=audit(##$Epoch-0d0h01m10s$##.920:30198): auid=1001 uid=1001 gid=1001 ses=4 pid=31405 comm="custom_service" reason="memory violation" sig=11
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Correlation Integrity**: Multi-record events (`SYSCALL`, `EXECVE`, `CWD`, `PATH`, `PROCTITLE`, `EOE`) **must share the exact same timestamp and event sequence number** (e.g., `audit(1700000000.145:982341)`). If these differ across grouped records, SIEM parsers will fail to correlate command arguments to system calls.
+2. **Hex Encoding Realism**:
+   * Command lines containing spaces or path separators in `USER_CMD` or `PROCTITLE` are hex-encoded.
+   * Hex strings must represent valid ASCII strings (e.g., `systemctl restart nginx` = `73797374656D63746C2072657374617274206E67696E78`).
+   * `proctitle` uses null bytes (`00`) between arguments in hex (e.g., `cat /etc/shadow` = `636174002F6574632F736861646F77`).
+3. **Identifier Consistency**:
+   * If `uid=0`, `comm="sudo"`, and `auid=1001`, the process ran as root via privilege escalation from user `1001`.
+   * Unauthenticated or system daemon actions must retain `auid=4294967295` (or `auid=unset`) and `ses=4294967295`.
+4. **PAM Escaped Quotes**: Inner PAM fields inside `msg='...'` must escape internal double quotes when wrapped in single quotes (e.g., `acct=\"root\"` or `exe=\"/usr/sbin/sshd\"`).
+5. **Octal File Modes**: `mode` in `PATH` records must be 6 or 7 characters long, starting with file type octal (`0100` for regular file, `040` for directory) + permissions (e.g., `0100644`, `0100755`, `040755`).

@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LogJammer Scenario Simulation - SecOps SOAR Widget</title>
+  <style>
+    /* ==========================================================================
+       Google SecOps SOAR Theme Variables (Self-contained, no CDN dependencies)
+       ========================================================================== */
+    :root,
+    [data-theme="light"],
+    body.light {
+      --soar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Rubik", Helvetica, Arial, sans-serif;
+      --soar-font-mono: ui-monospace, SFMono-Regular, "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+      --soar-bg-page: #ffffff;
+      --soar-bg-card: #ffffff;
+      --soar-bg-subtle: rgba(0, 0, 0, 0.04);
+      --soar-border: #e5e7eb;
+      --soar-border-strong: #d1d5db;
+      --soar-text-primary: #111827;
+      --soar-text-secondary: #4b5563;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #2563eb;
+      --soar-accent-hover: #1d4ed8;
+      --soar-accent-subtle: rgba(37, 99, 235, 0.1);
+
+      /* Status & Verdicts */
+      --verdict-malicious-bg: #fee2e2;
+      --verdict-malicious-text: #dc2626;
+      --verdict-malicious-border: #fca5a5;
+
+      --verdict-benign-bg: #ecfdf5;
+      --verdict-benign-text: #059669;
+      --verdict-benign-border: #a7f3d0;
+
+      --sev-critical-bg: #fef2f2;
+      --sev-critical-text: #dc2626;
+      --sev-critical-border: #fca5a5;
+      --sev-high-bg: #fff7ed;
+      --sev-high-text: #ea580c;
+      --sev-high-border: #fdba74;
+      --sev-medium-bg: #fffbeb;
+      --sev-medium-text: #d97706;
+      --sev-medium-border: #fde68a;
+      --sev-low-bg: #f3f4f6;
+      --sev-low-text: #6b7280;
+      --sev-low-border: #d1d5db;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --soar-bg-page: #161626;
+        --soar-bg-card: #161626;
+        --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+        --soar-border: #293140;
+        --soar-border-strong: #384357;
+        --soar-text-primary: #f3f4f6;
+        --soar-text-secondary: #9ca3af;
+        --soar-text-muted: #6b7280;
+        --soar-accent: #3b82f6;
+        --soar-accent-hover: #60a5fa;
+        --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+        --verdict-malicious-bg: #3b191d;
+        --verdict-malicious-text: #ff8589;
+        --verdict-malicious-border: #8c1d28;
+
+        --verdict-benign-bg: #132d21;
+        --verdict-benign-text: #6ee7b7;
+        --verdict-benign-border: #065f46;
+
+        --sev-critical-bg: #450a0a;
+        --sev-critical-text: #f87171;
+        --sev-critical-border: #7f1d1d;
+        --sev-high-bg: #431407;
+        --sev-high-text: #fb923c;
+        --sev-high-border: #9a3412;
+        --sev-medium-bg: #451a03;
+        --sev-medium-text: #fbbf24;
+        --sev-medium-border: #78350f;
+        --sev-low-bg: #1f2937;
+        --sev-low-text: #9ca3af;
+        --sev-low-border: #374151;
+      }
+    }
+
+    [data-theme="dark"],
+    body.dark {
+      --soar-bg-page: #161626;
+      --soar-bg-card: #161626;
+      --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+      --soar-border: #293140;
+      --soar-border-strong: #384357;
+      --soar-text-primary: #f3f4f6;
+      --soar-text-secondary: #9ca3af;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #3b82f6;
+      --soar-accent-hover: #60a5fa;
+      --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+      --verdict-malicious-bg: #3b191d;
+      --verdict-malicious-text: #ff8589;
+      --verdict-malicious-border: #8c1d28;
+
+      --verdict-benign-bg: #132d21;
+      --verdict-benign-text: #6ee7b7;
+      --verdict-benign-border: #065f46;
+
+      --sev-critical-bg: #450a0a;
+      --sev-critical-text: #f87171;
+      --sev-critical-border: #7f1d1d;
+      --sev-high-bg: #431407;
+      --sev-high-text: #fb923c;
+      --sev-high-border: #9a3412;
+      --sev-medium-bg: #451a03;
+      --sev-medium-text: #fbbf24;
+      --sev-medium-border: #78350f;
+      --sev-low-bg: #1f2937;
+      --sev-low-text: #9ca3af;
+      --sev-low-border: #374151;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--soar-font);
+      background-color: var(--soar-bg-page);
+      color: var(--soar-text-primary);
+      padding: 1rem;
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    /* Header Card */
+    .header-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .header-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #ea4335 0%, #9c27b0 50%, #4285f4 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      flex-shrink: 0;
+    }
+
+    .header-icon svg {
+      width: 22px;
+      height: 22px;
+    }
+
+    .header-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--soar-text-primary);
+    }
+
+    .header-subtitle {
+      font-size: 0.8rem;
+      color: var(--soar-text-muted);
+    }
+
+    .header-badges {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+
+    .badge-success {
+      background-color: var(--verdict-benign-bg);
+      color: var(--verdict-benign-text);
+      border-color: var(--verdict-benign-border);
+    }
+
+    .badge-danger {
+      background-color: var(--verdict-malicious-bg);
+      color: var(--verdict-malicious-text);
+      border-color: var(--verdict-malicious-border);
+    }
+
+    .badge-warning {
+      background-color: var(--sev-high-bg);
+      color: var(--sev-high-text);
+      border-color: var(--sev-high-border);
+    }
+
+    .badge-subtle {
+      background-color: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border-color: var(--soar-border);
+    }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .metric-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .metric-label {
+      font-size: 0.75rem;
+      color: var(--soar-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .metric-value {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: var(--soar-text-primary);
+    }
+
+    /* Info Cards */
+    .info-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .info-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--soar-text-primary);
+      border-bottom: 1px solid var(--soar-border);
+      padding-bottom: 0.5rem;
+    }
+
+    .info-card-body {
+      color: var(--soar-text-secondary);
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    /* Tabs & Log Viewer */
+    .tabs-container {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tabs-header {
+      display: flex;
+      align-items: center;
+      background: var(--soar-bg-subtle);
+      border-bottom: 1px solid var(--soar-border);
+      overflow-x: auto;
+      padding: 0 0.5rem;
+    }
+
+    .tab-btn {
+      padding: 0.65rem 1rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--soar-text-secondary);
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      color: var(--soar-text-primary);
+    }
+
+    .tab-btn.active {
+      color: var(--soar-accent);
+      border-bottom-color: var(--soar-accent);
+      font-weight: 600;
+    }
+
+    .tab-toolbar {
+      margin-left: auto;
+      padding: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-action {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      color: var(--soar-text-secondary);
+      padding: 0.3rem 0.65rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn-action:hover {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-primary);
+      border-color: var(--soar-border-strong);
+    }
+
+    .log-viewport {
+      padding: 1rem;
+      background: var(--soar-bg-subtle);
+      font-family: var(--soar-font-mono);
+      font-size: 0.78rem;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+    }
+
+    .log-line {
+      display: block;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      transition: background 0.15s ease;
+    }
+
+    .log-line:hover {
+      background: rgba(125, 125, 125, 0.1);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--soar-text-muted);
+    }
+
+    /* UDM Search Bar */
+    .udm-search-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.85rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .udm-search-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .udm-search-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--soar-text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .udm-search-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .udm-query-box {
+      flex: 1;
+      min-width: 240px;
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      font-family: var(--soar-font-mono);
+      font-size: 0.8rem;
+      color: var(--soar-accent);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      transition: all 0.15s ease;
+      user-select: all;
+    }
+
+    .udm-query-box:hover {
+      border-color: var(--soar-accent);
+      background: var(--soar-accent-subtle);
+    }
+
+    .udm-labels-row {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .label-chip {
+      font-family: var(--soar-font-mono);
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      color: var(--soar-text-secondary);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container" id="app">
+    <div class="empty-state" id="loading-state">
+      <p>Awaiting LogJammer simulation results...</p>
+    </div>
+  </div>
+
+  <!-- Raw context holder -->
+  <div id="raw-data" style="display:none;">[{stepInstanceName}.JsonResult]</div>
+
+  <script>
+    function extractPayload(input) {
+      if (!input) return null;
+      let data = input;
+      if (typeof data === "string") {
+        let trimmed = data.trim();
+        if (trimmed.startsWith("[") && trimmed.includes(".JsonResult")) return null;
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+          try { data = JSON.parse(trimmed); } catch (e) {}
+        }
+      }
+      // Unwrap array if wrapped in array literal e.g. [{ ... }]
+      while (Array.isArray(data) && data.length > 0) {
+        data = data[0];
+      }
+      if (typeof data === "string") {
+        let trimmed = data.trim();
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+          try { data = JSON.parse(trimmed); } catch (e) {}
+        }
+      }
+      if (Array.isArray(data) && data.length > 0) {
+        data = data[0];
+      }
+      return data;
+    }
+
+    let activeTab = "";
+    let cachedLogs = {};
+    let currentUdmQuery = "";
+
+    function copyTextToClipboard(text, btnId, copiedLabel) {
+      if (!text) return;
+      const doFeedback = () => {
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        const orig = btn.innerHTML;
+        btn.innerHTML = `<span>${copiedLabel || 'Copied!'}</span>`;
+        setTimeout(() => { btn.innerHTML = orig; }, 1800);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(doFeedback).catch(() => {
+          fallbackCopy(text);
+          doFeedback();
+        });
+      } else {
+        fallbackCopy(text);
+        doFeedback();
+      }
+    }
+
+    function fallbackCopy(text) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
+    function copyUdmQuery() {
+      copyTextToClipboard(currentUdmQuery, "copy-udm-btn", "&#10003; Copied UDM Query!");
+    }
+
+    function copyActiveLogs() {
+      if (!activeTab || !cachedLogs[activeTab]) return;
+      const text = cachedLogs[activeTab].join("\n");
+      copyTextToClipboard(text, "copy-btn", "Copied!");
+    }
+
+    function switchTab(logType) {
+      activeTab = logType;
+      document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tab === logType);
+      });
+      const viewport = document.getElementById("log-content");
+      if (viewport && cachedLogs[logType]) {
+        viewport.innerHTML = cachedLogs[logType].map((line, idx) => 
+          `<span class="log-line"><span style="color: var(--soar-text-muted); user-select: none; margin-right: 0.5rem;">${idx + 1}.</span>${escapeHtml(line)}</span>`
+        ).join("");
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.innerText = text;
+      return div.innerHTML;
+    }
+
+    function renderView(payloadOverride) {
+      let data = payloadOverride;
+      if (!data) {
+        let raw = "";
+        try {
+          raw = [{stepInstanceName}.JsonResult];
+        } catch (e) {
+          raw = "";
+        }
+        data = extractPayload(raw);
+        if (!data) {
+          const rawEl = document.getElementById('raw-data');
+          const rawText = rawEl ? rawEl.textContent : "";
+          data = extractPayload(rawText);
+        }
+      } else {
+        data = extractPayload(data);
+      }
+
+      const app = document.getElementById("app");
+      if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
+        app.innerHTML = `<div class="empty-state"><p>Awaiting simulation telemetry...</p></div>`;
+        return;
+      }
+
+      cachedLogs = data.logs || {};
+      const logTypes = Object.keys(cachedLogs);
+      if (logTypes.length > 0 && !activeTab) {
+        activeTab = logTypes[0];
+      }
+
+      const totalEvents = data.total_events || 0;
+      const secopsIng = data.secops_ingestion || {};
+      const secopsStatus = secopsIng.status || "SKIPPED";
+      const ingestedCount = secopsIng.ingested_count || 0;
+      const duration = data.duration_seconds || 0;
+      const model = data.model || "Gemini";
+      const rule = data.rule;
+      const gtiEnriched = data.gti_enriched;
+
+      const rawScenarioId = data.scenario_id || secopsIng.scenario_id || "";
+      const shortScenarioId = data.scenario_id_label || secopsIng.scenario_id_label || (rawScenarioId ? String(rawScenarioId).substring(0, 8) : "");
+      const scenarioTag = data.scenario_tag || secopsIng.scenario_tag || (shortScenarioId ? `logjammer-${shortScenarioId}` : "");
+      currentUdmQuery = data.udm_query || secopsIng.udm_query || (shortScenarioId ? `metadata.ingestion_labels.value = "${shortScenarioId}"` : "");
+
+      let secopsBadge = `<span class="badge badge-subtle">Ingestion Skipped</span>`;
+      if (secopsStatus === "SUCCESS") {
+        secopsBadge = `<span class="badge badge-success">&#10003; Ingested to SecOps (${ingestedCount} events)</span>`;
+      } else if (secopsStatus === "ERROR") {
+        secopsBadge = `<span class="badge badge-danger">&#9888; Ingestion Failed</span>`;
+      }
+
+      let html = `
+        <!-- Header -->
+        <div class="header-card">
+          <div class="header-left">
+            <div class="header-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+              </svg>
+            </div>
+            <div>
+              <div class="header-title">${escapeHtml(data.title || "LogJammer Scenario Simulation")}</div>
+              <div class="header-subtitle">Model: ${escapeHtml(model)} &bull; Duration: ${duration}s${shortScenarioId ? ` &bull; Scenario ID: ${escapeHtml(shortScenarioId)}` : ''}</div>
+            </div>
+          </div>
+          <div class="header-badges">
+            ${secopsBadge}
+            ${gtiEnriched ? `<span class="badge badge-warning">GTI Enriched</span>` : ''}
+            ${rule ? `<span class="badge badge-subtle">Curated Rule: ${escapeHtml(rule.display_name)}</span>` : ''}
+          </div>
+        </div>
+
+        <!-- UDM Search Filter Bar -->
+        ${currentUdmQuery ? `
+          <div class="udm-search-card">
+            <div class="udm-search-header">
+              <div class="udm-search-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <span>SecOps UDM Search Filter (Click to Copy)</span>
+              </div>
+              <div class="udm-labels-row">
+                <span class="label-chip">SOURCE: LOGJAMMER</span>
+                ${shortScenarioId ? `<span class="label-chip">SCENARIO_ID: ${escapeHtml(shortScenarioId)}</span>` : ''}
+                ${scenarioTag ? `<span class="label-chip">SCENARIO_TAG: ${escapeHtml(scenarioTag)}</span>` : ''}
+              </div>
+            </div>
+            <div class="udm-search-row">
+              <div class="udm-query-box" onclick="copyUdmQuery()" title="Click to copy UDM query to clipboard">
+                <span>${escapeHtml(currentUdmQuery)}</span>
+              </div>
+              <button class="btn-action" id="copy-udm-btn" onclick="copyUdmQuery()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy UDM Search</span>
+              </button>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- Metrics Grid -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Events Generated</span>
+            <span class="metric-value">${totalEvents}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Log Sources</span>
+            <span class="metric-value">${logTypes.length}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">SecOps Ingested</span>
+            <span class="metric-value" style="color: ${secopsStatus === 'SUCCESS' ? 'var(--verdict-benign-text)' : 'var(--soar-text-muted)'}">${ingestedCount}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Duration</span>
+            <span class="metric-value">${duration}s</span>
+          </div>
+        </div>
+
+        <!-- Scenario Summary -->
+        <div class="info-card">
+          <div class="info-card-header">
+            <span>Scenario Attack Narrative</span>
+            ${rule ? `<span style="font-weight: 500; font-size: 0.75rem; color: var(--soar-text-muted);">Target Rule ID: ${escapeHtml(rule.rule_id)}</span>` : ''}
+          </div>
+          <div class="info-card-body">
+            <p>${escapeHtml(data.summary || "Synthetic telemetry generated for attack chain testing.")}</p>
+            ${rule && rule.techniques && rule.techniques.length > 0 ? `
+              <div style="margin-top: 0.5rem; display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                ${rule.techniques.map(t => `<span class="badge badge-subtle" style="font-size: 0.7rem;">MITRE ${escapeHtml(t)}</span>`).join('')}
+              </div>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Multi-Source Log Viewer -->
+        ${logTypes.length > 0 ? `
+          <div class="tabs-container">
+            <div class="tabs-header">
+              ${logTypes.map(lt => `
+                <button class="tab-btn ${lt === activeTab ? 'active' : ''}" data-tab="${escapeHtml(lt)}" onclick="switchTab('${escapeHtml(lt)}')">
+                  ${escapeHtml(lt)} (${(cachedLogs[lt] || []).length})
+                </button>
+              `).join('')}
+              <div class="tab-toolbar">
+                <button class="btn-action" id="copy-btn" onclick="copyActiveLogs()">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  <span>Copy Logs</span>
+                </button>
+              </div>
+            </div>
+            <div class="log-viewport" id="log-content">
+              ${(cachedLogs[activeTab] || []).map((line, idx) => `
+                <span class="log-line"><span style="color: var(--soar-text-muted); user-select: none; margin-right: 0.5rem;">${idx + 1}.</span>${escapeHtml(line)}</span>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+      `;
+
+      app.innerHTML = html;
+    }
+
+    // =========================================================================
+    // Google SecOps SOAR Theme Synchronization Bridge
+    // =========================================================================
+    const SOAR_PALETTES = {
+      dark: {
+        theme: 'dark',
+        '--soar-bg-page': '#161626',
+        '--soar-bg-card': '#161626',
+        '--soar-bg-subtle': 'rgba(255, 255, 255, 0.06)',
+        '--soar-border': '#293140',
+        '--soar-border-strong': '#384357',
+        '--soar-text-primary': '#f3f4f6',
+        '--soar-text-secondary': '#9ca3af',
+        '--soar-text-muted': '#6b7280'
+      },
+      light: {
+        theme: 'light',
+        '--soar-bg-page': '#ffffff',
+        '--soar-bg-card': '#ffffff',
+        '--soar-bg-subtle': 'rgba(0, 0, 0, 0.04)',
+        '--soar-border': '#e5e7eb',
+        '--soar-border-strong': '#d1d5db',
+        '--soar-text-primary': '#111827',
+        '--soar-text-secondary': '#4b5563',
+        '--soar-text-muted': '#6b7280'
+      }
+    };
+
+    function isColorDark(color) {
+      if (!color) return false;
+      let r = 255, g = 255, b = 255;
+      color = String(color).trim();
+      if (color.startsWith('#')) {
+        let hex = color.replace('#', '');
+        if (hex.length === 3) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        if (hex.length >= 6) {
+          r = parseInt(hex.substring(0, 2), 16);
+          g = parseInt(hex.substring(2, 4), 16);
+          b = parseInt(hex.substring(4, 6), 16);
+        }
+      } else if (color.startsWith('rgb')) {
+        const parts = color.match(/\d+/g);
+        if (parts && parts.length >= 3) {
+          r = parseInt(parts[0], 10);
+          g = parseInt(parts[1], 10);
+          b = parseInt(parts[2], 10);
+        }
+      }
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+      return luminance < 140;
+    }
+
+    function applySoarTheme(themeKeyOrObj) {
+      const mode = typeof themeKeyOrObj === 'string' ? themeKeyOrObj : (themeKeyOrObj.theme || 'light');
+      document.documentElement.setAttribute('data-theme', mode);
+      document.body.className = mode;
+
+      const palette = typeof themeKeyOrObj === 'object' ? themeKeyOrObj : (SOAR_PALETTES[mode] || SOAR_PALETTES.light);
+      for (const [key, value] of Object.entries(palette)) {
+        if (key.startsWith('--')) {
+          document.documentElement.style.setProperty(key, value);
+          document.body.style.setProperty(key, value);
+        }
+      }
+      document.body.style.backgroundColor = palette['--soar-bg-page'] || (mode === 'dark' ? '#161626' : '#ffffff');
+    }
+
+    // Google SecOps SOAR message listeners
+    window.addEventListener('message', (evt) => {
+      if (evt && evt.data) {
+        if (evt.data.background) {
+          const isDark = isColorDark(evt.data.background);
+          applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+        }
+        const actionPayload = evt.data.actionResult || evt.data.JsonResult || (evt.data.title || evt.data.scenario_id || evt.data.logs ? evt.data : null);
+        if (actionPayload) {
+          renderView(actionPayload);
+        }
+      }
+    });
+
+    onmessage = (evt) => {
+      if (evt && evt.data && evt.data.background) {
+        const isDark = isColorDark(evt.data.background);
+        applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+      }
+    };
+
+    // Initial mount fallback
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      applySoarTheme(SOAR_PALETTES.dark);
+    } else {
+      applySoarTheme(SOAR_PALETTES.light);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => renderView());
+  </script>
+</body>
+</html>

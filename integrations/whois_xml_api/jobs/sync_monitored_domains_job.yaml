@@ -1,0 +1,19 @@
+name: "Sync Monitored Domains"
+description: "Periodically synchronizes WHOIS registration records for tracked domain indicators on a schedule."
+parameters:
+  - name: "API Key"
+    description: "Authentication API Key for WhoisXMLAPI."
+    type: string
+    is_mandatory: true
+    is_password: true
+    default_value: ""
+  - name: "Verify SSL"
+    description: "Verify SSL certificates."
+    type: boolean
+    is_mandatory: false
+    default_value: true
+  - name: "Domains to Monitor"
+    description: "Comma-separated list of domains to refresh (e.g. google.com, example.com)."
+    type: string
+    is_mandatory: false
+    default_value: ""

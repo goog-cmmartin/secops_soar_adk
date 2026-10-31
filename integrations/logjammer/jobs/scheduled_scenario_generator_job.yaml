@@ -1,0 +1,45 @@
+creator: Admin
+description: Periodically generates synthetic security telemetry and ingests into Google SecOps to test detection rules on a schedule.
+integration: LogJammer
+name: Scheduled Scenario Generator Job
+parameters:
+  - default_value: Simulate unauthorized credential dumping and staging activity on workstation oscar.wild.desktop
+    description: Simulation attack description or narrative.
+    is_mandatory: false
+    name: Scenario Prompt
+    type: string
+  - default_value: ''
+    description: Optional curated or custom rule ID(s) (comma-separated, e.g. ur_1,ur_2) or display name to target.
+    is_mandatory: false
+    name: Rule Identifier
+    type: string
+  - default_value: 'fire'
+    description: Simulation outcome for rule-based generation (fire, evade, or full-chain).
+    is_mandatory: false
+    name: Rule Outcome
+    type: string
+  - default_value: ''
+    description: Optional custom scenario name or tag applied to Google SecOps ingestion labels (SCENARIO_TAG).
+    is_mandatory: false
+    name: Scenario Name
+    type: string
+  - default_value: ''
+    description: Optional comma-separated list of log types (e.g. CLOUDFLARE,PAN_CORTEX_XDR_EVENTS).
+    is_mandatory: false
+    name: Log Types
+    type: string
+  - default_value: '5'
+    description: Number of synthetic events to generate per run.
+    is_mandatory: false
+    name: Event Count
+    type: string
+  - default_value: true
+    description: Whether to ingest generated logs directly into Google SecOps Chronicle.
+    is_mandatory: false
+    name: Ingest to SecOps
+    type: boolean
+  - default_value: false
+    description: Enrich simulation with live Google Threat Intelligence indicators.
+    is_mandatory: false
+    name: Enrich with Google TI
+    type: boolean

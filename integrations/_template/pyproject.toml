@@ -1,0 +1,21 @@
+[project]
+name = "template-integration"
+version = "1.0.0"
+description = "Template Integration for Google SecOps SOAR"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+    ".",
+    "../../mock_sdk",
+]

@@ -1,0 +1,174 @@
+# CISCO ASA FIREWALL Log Generation Playbook
+
+## 1. Overview & Log Purpose
+Cisco Adaptive Security Appliance (ASA) and Firewall Services Module (FWSM) devices generate real-time event notifications via Syslog. These logs document connection establishment and teardown, access list (ACL) permit/deny decisions, AAA (Authentication, Authorization, Accounting) operations, VPN tunnel lifecycle (IPsec/AnyConnect/WebVPN), NAT translation events, dynamic routing changes, failover events, and administrative command audit trails.
+
+Security Information and Event Management (SIEM) systems and Security Operations Center (SOC) detection rules rely heavily on Cisco ASA logs for network traffic analysis, lateral movement detection, brute-force identification, unauthorized administrative access alerts, and VPN telemetry.
+
+---
+
+## 2. Format Specification
+
+### Classification
+- **Primary Format**: Syslog over UDP/TCP conforming to RFC 3164 (BSD syslog) or RFC 5424 (with ISO 8601 timestamps), containing proprietary Cisco event tagging.
+- **Envelope / Delimiters**: Space-delimited syslog header followed by colon-delimited and structured free-text message bodies. Key-value indicators within bodies use equals signs (`=`), colons (`:`), or XML-like angle brackets (`<value>`).
+
+### Standard Message Structure
+```text
+<PRI>[TIMESTAMP] [HOSTNAME] : %ASA-<SEVERITY>-<MSG_ID>: <MESSAGE_BODY>
+```
+*Note: Depending on ASA software version and configuration (`logging device-id`, `logging timestamp`), whitespace and colon placement vary slightly (e.g., `<PRI>TIMESTAMP HOSTNAME %ASA-...` or `<PRI>TIMESTAMP: %ASA-...`).*
+
+### PRI Calculation
+`PRI = (Facility * 8) + Severity`
+- **Default Facility**: Typically `local4` (20) or `local0` (16) to `local7` (23).
+- **Severity Levels**:
+  - `0` = Emergency (System unusable)
+  - `1` = Alert (`%ASA-1-105002`)
+  - `2` = Critical (`%ASA-2-106017`)
+  - `3` = Error (`%ASA-3-710003`, `%ASA-3-212011`)
+  - `4` = Warning (`%ASA-4-106023`, `%ASA-4-400010`)
+  - `5` = Notification (`%ASA-5-111010`, `%ASA-5-713041`)
+  - `6` = Informational (`%ASA-6-302013`, `%ASA-6-106001`, `%ASA-6-113015`)
+  - `7` = Debugging (`%ASA-7-710005`)
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Header Fields
+| Field | Type | Description | Example Values |
+|---|---|---|---|
+| `PRI` | Integer | RFC Syslog Priority code enclosed in `<>` | `<165>`, `<166>`, `<180>`, `<134>`, `<188>` |
+| `TIMESTAMP` | String | Local appliance time (RFC 3164 BSD or ISO 8601) | `Nov 26 2021 06:28:05`, `2025-10-10T00:41:27Z` |
+| `HOSTNAME` | String | Configured firewall name, FQDN, or interface IP | `ciscoasa3`, `dev01`, `TX-Colo-ASA5505`, `198.51.100.18` |
+| `TAG` | String | Cisco ASA message identifier format: `%ASA-[module-]<sev>-<msg_id>:` | `%ASA-6-302013:`, `%ASA-4-106023:`, `%ASA-session-6-302014:` |
+
+---
+
+### 3.2 Common Cisco ASA Event Categories & Grammar Patterns
+
+#### A. Connection Built / Teardown (Traffic Auditing)
+- **Message IDs**: `302013` (Built TCP), `302014` (Teardown TCP), `302015` (Built UDP), `302016` (Teardown UDP), `302020`/`302021` (Built/Teardown ICMP).
+- **Syntax (Built)**:
+  ```text
+  Built {inbound|outbound} {TCP|UDP} connection <CONN_ID> for <IFACE_IN>:<SRC_IP>/<SRC_PORT> [(<XLATE_SRC_IP>/<XLATE_SRC_PORT>)] to <IFACE_OUT>:<DST_IP>/<DST_PORT> [(<XLATE_DST_IP>/<XLATE_DST_PORT>)] [([DOMAIN\]<USER>)]
+  ```
+- **Syntax (Teardown)**:
+  ```text
+  Teardown {TCP|UDP} connection <CONN_ID> for <IFACE_IN>:<SRC_IP>/<SRC_PORT> to <IFACE_OUT>:<DST_IP>/<DST_PORT> duration <H:M:S> bytes <BYTES_SENT> [TCP FINs|SYN Timeout|Conn-timeout|Reset-I|Reset-O] [([DOMAIN\]<USER>)]
+  ```
+
+#### B. Access-List & Policy Drop Events (Firewall Defenses)
+- **Message IDs**: `106001` (Inbound TCP deny), `106006` (Inbound UDP deny), `106015` (TCP no connection), `106023` (Access-group deny), `106100`/`106102`/`106103` (Access-list permit/deny with hit count).
+- **Syntax (`106023`)**:
+  ```text
+  Deny {tcp|udp|icmp} src <SRC_IFACE>:<SRC_IP>/<SRC_PORT> dst <DST_IFACE>:<DST_IP>/<DST_PORT> [type <TYPE>, code <CODE>] by access-group "<ACL_NAME>" [<HEX_HASH1>, <HEX_HASH2>]
+  ```
+- **Syntax (`106103`)**:
+  ```text
+  access-list <ACL_NAME> denied <PROTOCOL> for user '<USER>' <SRC_IFACE>/<SRC_IP>(<SRC_PORT>) -> <DST_IFACE>/<DST_IP>(<DST_PORT>) hit-cnt <HIT_COUNT> {first hit|periodic hit} [<HEX_HASH1>, <HEX_HASH2>]
+  ```
+
+#### C. AAA, WebVPN, & Remote Access AnyConnect Telemetry
+- **Message IDs**: `113004` (AAA Accounting), `113005`/`113015` (AAA Reject), `605004`/`605005` (Admin Login Permitted/Denied), `611101` (Auth Succeeded), `716038`/`716039` (WebVPN Auth), `722051` (VPN IP Assignment), `109201`/`109210` (UAUTH Entry Add/Remove).
+- **Syntax Examples**:
+  - `AAA user authentication Rejected : reason = <REASON> : [server = <IP> | local database] : user = <USER> : user IP = <IP>`
+  - `Group <<GROUP_POLICY>> User <<USER>> IP <<CLIENT_IP>> Authentication: {successful|rejected}, Session Type: WebVPN.`
+  - `Group <<GROUP_POLICY>> User <<USER>> IP <<PUBLIC_IP>> IPv4 Address <<ASSIGNED_IP>> IPv6 address <<IPV6_ADDR>> assigned to session`
+  - `Login {permitted|denied} from <SRC_IP>/<SRC_PORT> to <IFACE>:<DST_IP>/<SERVICE> for user "<USER>"`
+
+#### D. Administrative Command Auditing
+- **Message ID**: `111010`
+- **Syntax**:
+  ```text
+  User '<USER>', running '<APP>' from IP <SRC_IP>, executed '<COMMAND_LINE>'
+  ```
+
+---
+
+### 3.3 Value Distributions & Formatting Rules
+
+| Field / Component | Valid Real-World Formats / Regular Expressions |
+|---|---|
+| **Interface Names** | `inside`, `outside`, `dmz`, `management`, `WAN`, `identity`, `ot-comm-dmz`, `EXTERNAL-SW2`, `V8:ThirdParty_VPN`, `Port-channel31`, `GigabitEthernet0/0` |
+| **IP Addresses** | IPv4 standard quad-dotted (`192.168.1.1`), IPv6 standard or compressed (`2001:4860:4860::8888`, `::`) |
+| **Port Numbers** | Dynamic client ports (`1024-65535`), Static service ports (`22`, `23`, `53`, `80`, `123`, `389`, `443`, `445`, `500`, `514`, `1812`, `3389`, `8000`, `8080`) or service names (`https`, `ssh`, `domain`) |
+| **Session / Conn IDs** | Dec integers up to 10 digits (`13193`, `219120448`, `3442554566`), Hex tokens (`0x24fe6000`, `0a04c7c90a46a0006809d1ec`) |
+| **Duration Formats** | `H:MM:SS` or `HH:MM:SS` (e.g. `0:00:30`, `0:34:00`, `1:00:04`) |
+| **TCP Flags** | `SYN`, `ACK`, `FIN`, `RST`, `FIN ACK`, `SYN ACK`, `PSH ACK` |
+| **Rejection Reasons** | `User was not found`, `AAA failure`, `Invalid password`, `Server Failure`, `User locked out` |
+| **Masked Usernames** | Replaced with `*****` when configured for privacy on authentication rejections |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Cisco ASA logs commonly support two primary timestamp formats:
+1. **RFC 3164 / BSD Format**: `MMM DD YYYY HH:MM:SS` (or without year: `MMM DD HH:MM:SS`). Single-digit days are padded with a leading zero or space (e.g., `Nov 05 2024 09:12:01` or `Nov  5 09:12:01`).
+2. **ISO 8601 (RFC 5424) Format**: `YYYY-MM-DDTHH:MM:SSZ` or with offset `YYYY-MM-DDTHH:MM:SS+00:00`.
+
+### Dynamic Time Replacement Tags
+When authoring scenarios for synthetic generation, use the following relative template macros:
+
+| Tag Template | Expected Replacement Output (Example) |
+|---|---|
+| `##$SyslogTime-0d2h15m0s$##` | `Nov 26 2024 04:15:30` |
+| `##$SyslogTimeNoYear-0d0h30m0s$##` | `Nov 26 06:00:30` |
+| `##$TimeStamp-0d1h0m0s$##` | `2024-11-26T05:30:30Z` |
+| `##$TimeStampIsoOffset-0d0h0m0s$##`| `2024-11-26T06:30:30+00:00` |
+| `##$Epoch-0d0h5m0s$##` | `1732602630` |
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: Normal Inbound HTTPS Traffic (Build & Teardown)
+```text
+<166>##$SyslogTime-0d0h10m0s$## fw-edge-01 : %ASA-6-302013: Built inbound TCP connection 894320145 for outside:198.51.100.45/52104 (198.51.100.45/52104) to inside:10.0.10.50/443 (198.51.100.10/443)
+<166>##$SyslogTime-0d0h08m30s$## fw-edge-01 : %ASA-6-302014: Teardown TCP connection 894320145 for outside:198.51.100.45/52104 to inside:10.0.10.50/443 duration 0:01:30 bytes 14852 TCP FINs
+```
+
+### Scenario 2: External Port Scan / Unauthorized Access Denied by ACL
+```text
+<164>##$SyslogTime-0d1h15m00s$## cisco-asa-core : %ASA-4-106023: Deny tcp src outside:203.0.113.195/48920 dst inside:10.100.4.15/445 by access-group "OUTSIDE_INLINE_ACL" [0xd4e9081a, 0x0]
+<164>##$SyslogTime-0d1h14m59s$## cisco-asa-core : %ASA-4-106023: Deny tcp src outside:203.0.113.195/48921 dst inside:10.100.4.16/3389 by access-group "OUTSIDE_INLINE_ACL" [0xd4e9081a, 0x0]
+```
+
+### Scenario 3: Remote Access VPN (AnyConnect) Successful Authentication & IP Assignment
+```text
+<166>##$TimeStamp-0d2h30m00s$## vpn-gw01 : %ASA-6-716038: Group <Corporate-VPN-Users> User <j.smith@company.com> IP <198.51.100.77> Authentication: successful, Session Type: WebVPN.
+<164>##$TimeStamp-0d2h29m58s$## vpn-gw01 : %ASA-4-722051: Group <Corporate-VPN-Users> User <j.smith@company.com> IP <198.51.100.77> IPv4 Address <10.240.12.105> IPv6 address <::> assigned to session
+<166>##$TimeStamp-0d2h29m55s$## vpn-gw01 : %ASA-6-722022: Group <Corporate-VPN-Users> User <j.smith@company.com> IP <198.51.100.77> UDP SVC connection established without compression
+```
+
+### Scenario 4: Unauthorized User VPN Authentication Failure (Brute-Force / Credential Stuffing)
+```text
+<166>##$SyslogTime-0d0h05m10s$## ciscoasa-dmz : %ASA-6-113015: AAA user authentication Rejected : reason = User was not found : local database : user = ***** : user IP = 192.0.2.140
+<166>##$SyslogTime-0d0h05m08s$## ciscoasa-dmz : %ASA-6-716039: Group <DfltGrpPolicy> User <admin_backup> IP <192.0.2.140> Authentication: rejected, Session Type: WebVPN.
+```
+
+### Scenario 5: Administrator Interactive CLI Command Audit
+```text
+<166>##$SyslogTime-0d3h00m00s$## fw-core-pri : %ASA-6-605005: Login permitted from 10.0.50.22/58120 to management:10.0.50.1/ssh for user "secops_admin"
+<165>##$SyslogTime-0d2h58m20s$## fw-core-pri : %ASA-5-111010: User 'secops_admin', running 'CLI' from IP 10.0.50.22, executed 'access-list OUTSIDE_INLINE_ACL permit tcp host 198.51.100.22 any eq 443'
+<165>##$SyslogTime-0d2h57m10s$## fw-core-pri : %ASA-5-111010: User 'secops_admin', running 'CLI' from IP 10.0.50.22, executed 'write memory'
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Tag Rigidity (`%ASA-<SEV>-<ID>:`)**:
+   Parsers like Splunk `TA-cisco-asa` and Logstash GROK patterns specifically capture `%ASA-` (or `%FWSM-`), the severity digit, and the exact 6-digit message ID. If the format does not follow `%ASA-<sev>-<msg_id>:`, SIEM normalization will fail.
+2. **Interface and Colon Notation**:
+   Traffic flows always bind interfaces to IPs via a colon (`inside:10.0.0.1/80`) or a slash (`inside/10.0.0.1(80)` in hit-count logs). Avoid placing arbitrary spaces between the interface name and the IP address.
+3. **NAT Parenthetical Representation**:
+   When NAT/PAT is active, connection messages contain parenthetical mapped addresses immediately following the real address:
+   `for outside:192.0.2.1/5000 (192.0.2.1/5000) to inside:10.0.0.2/80 (198.51.100.2/80)`. Generating parentheticals with unmatched brackets or missing ports breaks NAT field extractions.
+4. **ACL Hit-Count Hash Arrays**:
+   ACL logs (`106023`, `106100`, `106102`, `106103`) end with bracketed hex hashes representing configuration offsets: `[0x3665073d, 0x0]`. Both elements must be valid hexadecimal tokens.
+5. **Masked Credentials**:
+   When generating authentication failure logs (`113015`), the `user = ` parameter can either contain the targeted username or five asterisks (`*****`) if the firewall's username-hiding policy is active.
+6. **Spacing around Hostname Colons**:
+   Standard Cisco ASA syslog places a space before and after the colon following the hostname (`hostname : %ASA-...`) or directly appends a colon after the timestamp (`TIMESTAMP: %ASA-...`). Ensure consistency across generated batches.

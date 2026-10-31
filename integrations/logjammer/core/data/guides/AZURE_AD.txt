@@ -1,0 +1,192 @@
+# AZURE_AD (Microsoft Entra ID) Log Generation Playbook
+
+## 1. Overview & Log Purpose
+Azure Active Directory (now Microsoft Entra ID) diagnostic logs record identity, authentication, and management operations within an Azure AD / Microsoft 365 tenant. These logs are streamed through Azure Event Hubs, Azure Monitor / Log Analytics workspaces, or exported to Azure Blob Storage for SIEM ingestion.
+
+The logs fall into two primary categories:
+*   **SignInLogs**: Authentication events, including interactive user logons, non-interactive client logins, service principal authentications, Multi-Factor Authentication (MFA) challenges, Conditional Access policy evaluations, and Identity Protection risk detections.
+*   **AuditLogs**: Control plane operations, including user/group lifecycle management, administrative role assignments, application provisioning, directory synchronization (Entra Connect / Cloud Sync), device registrations, and tenant-wide policy updates.
+
+---
+
+## 2. Format Specification
+*   **Format**: Pure JSON (RFC 8259). Each log entry represents a single-line JSON object emitted via Azure diagnostic streaming.
+*   **Delimiters & Quoting**: Standard JSON notation. Double quotes `"` are used for keys and string values.
+*   **Nested String Escaping**: Properties representing serialized objects (e.g., `modifiedProperties` values or `SignInBondData` subfields) frequently contain double-escaped JSON strings (e.g., `"\"value\""` or `"[{\"ReferenceObjectId\": ...}]"`).
+*   **Case Conventions**: 
+    *   Root envelope fields use mixed camelCase and PascalCase (e.g., `resourceId`, `operationName`, `tenantId`, `Level`/`level`).
+    *   SIEM wrapper fields appended during ingestion include `am_tenantId` (uppercase GUID) and `am_category` (uppercase category name).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Common Root Envelope Fields (All Categories)
+
+| Field | Type | Description | Realistic Values / Formats |
+| :--- | :--- | :--- | :--- |
+| `time` | String | Event timestamp (UTC) | ISO 8601: `YYYY-MM-DDTHH:MM:SS.fffffffZ` |
+| `resourceId` | String | Azure ARM resource identifier | `/tenants/<tenantId>/providers/Microsoft.aadiam` |
+| `operationName` | String | High-level operation descriptor | `"Sign-in activity"`, `"Add member to group"`, `"Update user"`, `"Synchronization rule action"`, `"Change user license"` |
+| `operationVersion` | String | Schema version | `"1.0"` |
+| `category` | String | Top-level Azure AD log category | `"SignInLogs"`, `"AuditLogs"`, `"NonInteractiveUserSignInLogs"`, `"ServicePrincipalSignInLogs"` |
+| `tenantId` | String | Entra Tenant GUID | Lowercase UUID: `fabb61b8-3afe-4e75-b934-a47f782b8cd7` |
+| `resultSignature`| String | Result signature category | `"None"`, `"Validated"`, `"Invalid"` |
+| `durationMs` | Integer | Operation execution duration in ms | `0` to `5000` (often `0`) |
+| `correlationId` | String | Cross-service operation correlation ID | Lowercase UUID |
+| `identity` | String | Initiating actor or target identity | Display Name (`"Smith, John"`), Service Principal name (`"Microsoft Teams Services"`), or System agent |
+| `Level` / `level`| Int/Str | Log severity level | `4` (Informational for SignInLogs) or `"Informational"` / `"Warning"` / `"Error"` (AuditLogs) |
+| `properties` | Object | Category-specific nested payload | Object containing detailed activity context |
+| `am_tenantId` | String | Tenant ID wrapper for SIEM indexers | Uppercase UUID: `FABB61B8-3AFE-4E75-B934-A47F782B8CD7` |
+| `am_category` | String | Category wrapper for SIEM indexers | Uppercase string: `"SIGNINLOGS"`, `"AUDITLOGS"` |
+
+---
+
+### 3.2 Category-Specific Schema: `SignInLogs`
+
+#### Root Fields Specific to `SignInLogs`
+*   `resultType`: String representation of error code (e.g., `"0"` for success, `"53003"`, `"50126"`).
+*   `resultDescription`: Human-readable status string (e.g., `"Access has been blocked due to conditional access policies."`).
+*   `callerIpAddress`: Source IP address string (IPv4 or IPv6).
+*   `location`: Two-letter ISO country code (e.g., `"US"`, `"GB"`, `"DE"`).
+
+#### `properties` Object Fields for `SignInLogs`
+*   `id`: Unique sign-in event ID (GUID).
+*   `createdDateTime`: ISO 8601 timestamp with offset (`YYYY-MM-DDTHH:MM:SS.fffffff+00:00`).
+*   `userDisplayName`: Full name of user (`"Jane Doe"`).
+*   `userPrincipalName`: User logon email (`"jdoe@company.com"`).
+*   `userId`: Entra User Object GUID.
+*   `appId`: Target application Client ID (GUID).
+*   `appDisplayName`: Target application display name.
+*   `ipAddress`: IPv4/IPv6 source IP address.
+*   `status`: Object containing:
+    *   `errorCode`: Integer status code (`0` = Success).
+    *   `failureReason`: Optional failure description.
+    *   `additionalDetails`: Optional string details.
+*   `clientAppUsed`: Client protocol/application type (`"Browser"`, `"Mobile Apps and Desktop clients"`, `"Exchange ActiveSync"`, `"Other clients; Older Office clients"`).
+*   `deviceDetail`: Object containing `deviceId` (GUID string), `operatingSystem` (`"Windows 10"`, `"iOS"`, `"MacOs"`), and `browser` (`"Edge 114.0"`, `"Chrome 112.0"`, `"Mobile Safari"`).
+*   `location`: Object containing `city`, `state`, `countryOrRegion`, and `geoCoordinates` (`latitude`, `longitude`).
+*   `conditionalAccessStatus`: Overall CA status (`"success"`, `"failure"`, `"notApplied"`, `"unknownFutureValue"`).
+*   `appliedConditionalAccessPolicies`: Array of evaluated policies:
+    *   `id`: Policy GUID.
+    *   `displayName`: Policy name string.
+    *   `enforcedGrantControls`: Array of required grant controls (`["Mfa"]`, `["Block"]`, `["RequireCompliantDevice"]`).
+    *   `enforcedSessionControls`: Array of session controls (e.g., `["AppEnforcedRestrictions"]`).
+    *   `result`: Evaluation outcome (`"success"`, `"failure"`, `"notApplied"`, `"notEnabled"`).
+*   `isInteractive`: Boolean (`true` for user UI login, `false` for background/token refresh).
+*   `riskDetail`, `riskLevelAggregated`, `riskLevelDuringSignIn`, `riskState`: Risk strings (`"none"`, `"low"`, `"medium"`, `"high"`, `"hidden"`).
+*   `riskEventTypes`: Array of detected risk strings (`["unlikelyTravel"]`, `["maliciousIPAddress"]`, `["anonymizedIPAddress"]`, `["passwordSpray"]`).
+*   `authenticationDetails`: Array of authentication step objects:
+    *   `authenticationStepDateTime`: ISO 8601 timestamp.
+    *   `authenticationMethod`: Auth type used (`"Password"`, `"Mobile app notification"`, `"FIDO2"`, `"OATH verification code"`).
+    *   `succeeded`: Boolean.
+    *   `authenticationStepRequirement`: `"Primary Authentication"`, `"Multi-factor authentication"`.
+
+---
+
+### 3.3 Category-Specific Schema: `AuditLogs`
+
+#### `properties` Object Fields for `AuditLogs`
+*   `id`: Audit transaction ID (e.g., `"Directory_UNQQY_97307514"`).
+*   `category`: Audit domain (`"UserManagement"`, `"GroupManagement"`, `"ApplicationManagement"`, `"RoleManagement"`, `"Policy"`, `"Device"`).
+*   `result`: Operation status (`"success"`, `"failure"`).
+*   `resultReason`: Status details or empty string.
+*   `activityDisplayName`: Action description matching `operationName` (`"Add member to group"`, `"Update user"`, `"Add service principal credentials"`).
+*   `activityDateTime`: ISO 8601 timestamp with offset (`YYYY-MM-DDTHH:MM:SS.fffffff+00:00`).
+*   `loggedByService`: Service component (`"Core Directory"`, `"Terms Of Use"`, `"Account Provisioning"`, `"PIM"`).
+*   `operationType`: CRUD operation verb (`"Add"`, `"Update"`, `"Delete"`, `"Assign"`).
+*   `initiatedBy`: Actor details (either `user` or `app`):
+    *   `user`: Object containing `id` (GUID/SID), `displayName`, `userPrincipalName`, `ipAddress`.
+    *   `app`: Object containing `appId`, `displayName`, `servicePrincipalId`, `servicePrincipalName`.
+*   `targetResources`: Array of affected entities:
+    *   `id`: Target object GUID.
+    *   `displayName`: Resource display name.
+    *   `type`: Target object type (`"User"`, `"Group"`, `"Policy"`, `"ServicePrincipal"`, `"Device"`, `"Role"`).
+    *   `userPrincipalName`: Target UPN (if type is `User`).
+    *   `modifiedProperties`: Array of changed attributes:
+        *   `displayName`: Attribute name (e.g., `"Role.DisplayName"`, `"AccountEnabled"`, `"LicenseAssignmentDetail"`).
+        *   `oldValue`: Previous value (frequently escaped JSON or stringified value).
+        *   `newValue`: Updated value (frequently escaped JSON or stringified value).
+*   `additionalDetails`: Array of key-value diagnostic pairs (`[{"key": "User-Agent", "value": "..."}]`).
+
+---
+
+### 3.4 Realistic Distributions & Value Tables
+
+#### Common Microsoft First-Party Application IDs (`appId` / `appDisplayName`)
+*   `00000002-0000-0ff1-ce00-000000000000`: Office 365 Exchange Online
+*   `00000003-0000-0000-c000-000000000000`: Microsoft Graph
+*   `c44b32c1-35da-4460-b61d-0cc9b0b403c3`: Azure Portal
+*   `1fec8e78-bce4-4aaf-abb1-a8453115061f`: Microsoft Teams
+*   `00000003-0000-0ff1-ce00-000000000000`: Office 365 SharePoint Online
+*   `89bee630-d373-422a-9744-8de808ac6330`: OfficeHome (Microsoft 365 Web Portal)
+
+#### Common Sign-in Error Codes (`status.errorCode` / `resultType`)
+*   `0`: Success
+*   `50053`: Account is locked because user tried to sign in too many times with an incorrect password
+*   `50074`: Strong Authentication (MFA) is required
+*   `50076`: Due to a configuration change made by your administrator, you must enroll in MFA
+*   `50126`: Invalid username or password, or invalid on-premises username or password
+*   `53003`: Access has been blocked due to conditional access policies
+*   `70044`: The session has expired or is invalid due to conditional access policies
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Azure AD logs use standard ISO 8601 formatting. Two distinct variations exist depending on the field location:
+
+1.  **Root Envelope `time`**: UTC formatted with trailing `Z` and sub-second precision.
+    *   Format: `YYYY-MM-DDTHH:MM:SS.fffffffZ`
+    *   Template Tag: `##$TimeStamp-0d0h0m0s$##` (Format as ISO UTC `YYYY-MM-DDTHH:MM:SS.fffffffZ`)
+2.  **Nested Timestamps (`createdDateTime`, `activityDateTime`, `authenticationStepDateTime`)**: UTC formatted with explicit `+00:00` offset.
+    *   Format: `YYYY-MM-DDTHH:MM:SS.fffffff+00:00`
+    *   Template Tag: `##$TimeStamp-0d0h0m0s$##` (Format as ISO Offset `YYYY-MM-DDTHH:MM:SS.fffffff+00:00`)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Successful Interactive User Sign-In with MFA
+```json
+{"time":"##$TimeStamp-0d0h5m0s$##Z","resourceId":"/tenants/3f1b4d8a-9e12-4c6e-82a1-123456789abc/providers/Microsoft.aadiam","operationName":"Sign-in activity","operationVersion":"1.0","category":"SignInLogs","tenantId":"3f1b4d8a-9e12-4c6e-82a1-123456789abc","resultType":"0","resultSignature":"None","durationMs":0,"callerIpAddress":"198.51.100.42","correlationId":"7b89e3a1-2d4f-4a88-91c2-5e6f7a8b9c0d","identity":"Smith, Alice","Level":4,"location":"US","properties":{"id":"8f91a2b3-c4d5-4e6f-a7b8-c9d0e1f2a3b4","createdDateTime":"##$TimeStamp-0d0h5m0s$##+00:00","userDisplayName":"Smith, Alice","userPrincipalName":"asmith@contoso.com","userId":"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d","appId":"c44b32c1-35da-4460-b61d-0cc9b0b403c3","appDisplayName":"Azure Portal","ipAddress":"198.51.100.42","status":{"errorCode":0},"clientAppUsed":"Browser","deviceDetail":{"deviceId":"d1e2f3a4-b5c6-7d8e-9f0a-1b2c3d4e5f6a","operatingSystem":"Windows 11","browser":"Edge 118.0"},"location":{"city":"Seattle","state":"Washington","countryOrRegion":"US","geoCoordinates":{"latitude":47.6062,"longitude":-122.3321}},"correlationId":"7b89e3a1-2d4f-4a88-91c2-5e6f7a8b9c0d","conditionalAccessStatus":"success","appliedConditionalAccessPolicies":[{"id":"a1a1a1a1-b2b2-c3c3-d4d4-e5e5e5e5e5e5","displayName":"Require MFA for Azure Management","enforcedGrantControls":["Mfa"],"enforcedSessionControls":[],"result":"success"}],"originalRequestId":"8f91a2b3-c4d5-4e6f-a7b8-c9d0e1f2a3b4","isInteractive":true,"tokenIssuerName":"","tokenIssuerType":"AzureAD","authenticationProcessingDetails":[],"networkLocationDetails":[],"processingTimeInMilliseconds":145,"riskDetail":"none","riskLevelAggregated":"none","riskLevelDuringSignIn":"none","riskState":"none","riskEventTypes":[],"authenticationDetails":[{"authenticationStepDateTime":"##$TimeStamp-0d0h5m0s$##+00:00","authenticationMethod":"Password","authenticationMethodDetail":"","succeeded":true,"authenticationStepRequirement":"Primary Authentication"},{"authenticationStepDateTime":"##$TimeStamp-0d0h5m0s$##+00:00","authenticationMethod":"Mobile app notification","authenticationMethodDetail":"Microsoft Authenticator","succeeded":true,"authenticationStepRequirement":"Multi-factor authentication"}],"authenticationRequirementPolicies":[]},"am_tenantId":"3F1B4D8A-9E12-4C6E-82A1-123456789ABC","am_category":"SIGNINLOGS"}
+```
+
+### Example 2: Failed Sign-in Blocked by Conditional Access (Policy Violation)
+```json
+{"time":"##$TimeStamp-0d0h12m0s$##Z","resourceId":"/tenants/3f1b4d8a-9e12-4c6e-82a1-123456789abc/providers/Microsoft.aadiam","operationName":"Sign-in activity","operationVersion":"1.0","category":"SignInLogs","tenantId":"3f1b4d8a-9e12-4c6e-82a1-123456789abc","resultType":"53003","resultSignature":"None","resultDescription":"Access has been blocked due to conditional access policies.","durationMs":0,"callerIpAddress":"203.0.113.195","correlationId":"3a4b5c6d-7e8f-9a0b-1c2d-3e4f5a6b7c8d","identity":"Doe, John","Level":4,"location":"RU","properties":{"id":"11223344-5566-7788-99aa-bbccddeeff00","createdDateTime":"##$TimeStamp-0d0h12m0s$##+00:00","userDisplayName":"Doe, John","userPrincipalName":"jdoe@contoso.com","userId":"b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e","appId":"00000002-0000-0ff1-ce00-000000000000","appDisplayName":"Office 365 Exchange Online","ipAddress":"203.0.113.195","status":{"errorCode":53003,"failureReason":"Access has been blocked due to conditional access policies."},"clientAppUsed":"Other clients; Older Office clients","deviceDetail":{"deviceId":"","operatingSystem":"Windows 7","browser":""},"location":{"city":"Moscow","state":"Moscow","countryOrRegion":"RU","geoCoordinates":{"latitude":55.7558,"longitude":37.6173}},"correlationId":"3a4b5c6d-7e8f-9a0b-1c2d-3e4f5a6b7c8d","conditionalAccessStatus":"failure","appliedConditionalAccessPolicies":[{"id":"f0e1d2c3-b4a5-9687-8574-635241302918","displayName":"Block Untrusted Countries and Legacy Auth","enforcedGrantControls":["Block"],"enforcedSessionControls":[],"result":"failure"}],"originalRequestId":"11223344-5566-7788-99aa-bbccddeeff00","isInteractive":false,"tokenIssuerName":"","tokenIssuerType":"AzureAD","authenticationProcessingDetails":[],"networkLocationDetails":[],"processingTimeInMilliseconds":189,"riskDetail":"none","riskLevelAggregated":"medium","riskLevelDuringSignIn":"medium","riskState":"none","riskEventTypes":[],"authenticationDetails":[],"authenticationRequirementPolicies":[]},"am_tenantId":"3F1B4D8A-9E12-4C6E-82A1-123456789ABC","am_category":"SIGNINLOGS"}
+```
+
+### Example 3: Audit Log - User Added to Privileged Group
+```json
+{"time":"##$TimeStamp-0d1h15m0s$##Z","resourceId":"/tenants/3f1b4d8a-9e12-4c6e-82a1-123456789abc/providers/Microsoft.aadiam","operationName":"Add member to group","operationVersion":"1.0","category":"AuditLogs","tenantId":"3f1b4d8a-9e12-4c6e-82a1-123456789abc","resultSignature":"None","durationMs":0,"correlationId":"9f8e7d6c-5b4a-3210-fedc-ba9876543210","identity":"Admin, Super","level":"Informational","properties":{"id":"Directory_GRP_991827364","category":"GroupManagement","correlationId":"9f8e7d6c-5b4a-3210-fedc-ba9876543210","result":"success","resultReason":"","activityDisplayName":"Add member to group","activityDateTime":"##$TimeStamp-0d1h15m0s$##+00:00","loggedByService":"Core Directory","operationType":"Assign","initiatedBy":{"user":{"id":"e0f1d2c3-b4a5-6789-0123-456789abcdef","displayName":"Admin, Super","userPrincipalName":"admin@contoso.com","ipAddress":"198.51.100.10"}},"targetResources":[{"id":"c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f","displayName":"Global Administrators Group","type":"Group","groupType":"unified","modifiedProperties":[{"displayName":"Group.ObjectID","oldValue":null,"newValue":"\"c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f\""},{"displayName":"Group.DisplayName","oldValue":null,"newValue":"\"Global Administrators Group\""}]},{"id":"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d","displayName":"Smith, Alice","type":"User","userPrincipalName":"asmith@contoso.com","modifiedProperties":[]}],"additionalDetails":[]},"am_tenantId":"3F1B4D8A-9E12-4C6E-82A1-123456789ABC","am_category":"AUDITLOGS"}
+```
+
+### Example 4: Audit Log - User Account Provisioning via Cloud Sync
+```json
+{"time":"##$TimeStamp-0d2h30m0s$##Z","resourceId":"/tenants/3f1b4d8a-9e12-4c6e-82a1-123456789abc/providers/Microsoft.aadiam","operationName":"Synchronization rule action","operationVersion":"1.0","category":"AuditLogs","tenantId":"3f1b4d8a-9e12-4c6e-82a1-123456789abc","resultSignature":"None","resultDescription":"User created successfully in target directory.","durationMs":0,"correlationId":"1a2b3c4d-5e6f-7a8b-9c0d-ef0123456789","identity":"Azure AD Cloud Sync","level":"Informational","properties":{"id":"Sync_OBJ_88291032","category":"ApplicationManagement","correlationId":"1a2b3c4d-5e6f-7a8b-9c0d-ef0123456789","result":"success","resultReason":"User created successfully in target directory.","activityDisplayName":"Synchronization rule action","activityDateTime":"##$TimeStamp-0d2h30m0s$##+00:00","loggedByService":"Account Provisioning","operationType":"Add","initiatedBy":{"app":{"appId":null,"displayName":"Azure AD Cloud Sync","servicePrincipalId":"55667788-99aa-bbcc-ddee-ff0011223344","servicePrincipalName":null}},"targetResources":[{"id":"e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b","displayName":"Marketing User Sync","type":"ServicePrincipal","modifiedProperties":[{"displayName":"accountEnabled","oldValue":null,"newValue":"\"True\""},{"displayName":"displayName","oldValue":null,"newValue":"\"Taylor, Jordan\""},{"displayName":"mail","oldValue":null,"newValue":"\"jtaylor@contoso.com\""},{"displayName":"userPrincipalName","oldValue":null,"newValue":"\"jtaylor@contoso.com\""},{"displayName":"department","oldValue":null,"newValue":"\"Marketing\""}]},{"id":null,"displayName":"jtaylor@contoso.com","type":"User","modifiedProperties":[]}],"additionalDetails":[{"key":"Details","value":"EntrySynchronizationAdd: Successfully provisioned target object."},{"key":"SourceAnchor","value":"e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b"}]},"am_tenantId":"3F1B4D8A-9E12-4C6E-82A1-123456789ABC","am_category":"AUDITLOGS"}
+```
+
+### Example 5: High Risk Sign-In (Credential Stuffing / Password Spray)
+```json
+{"time":"##$TimeStamp-0d0h2m0s$##Z","resourceId":"/tenants/3f1b4d8a-9e12-4c6e-82a1-123456789abc/providers/Microsoft.aadiam","operationName":"Sign-in activity","operationVersion":"1.0","category":"SignInLogs","tenantId":"3f1b4d8a-9e12-4c6e-82a1-123456789abc","resultType":"50126","resultSignature":"None","resultDescription":"Invalid username or password or Invalid on-premises username or password.","durationMs":0,"callerIpAddress":"185.220.101.5","correlationId":"d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a","identity":"Taylor, Jordan","Level":4,"location":"DE","properties":{"id":"cc998877-6655-4433-2211-00ffeeddccbb","createdDateTime":"##$TimeStamp-0d0h2m0s$##+00:00","userDisplayName":"Taylor, Jordan","userPrincipalName":"jtaylor@contoso.com","userId":"e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b","appId":"89bee630-d373-422a-9744-8de808ac6330","appDisplayName":"OfficeHome","ipAddress":"185.220.101.5","status":{"errorCode":50126,"failureReason":"Invalid username or password or Invalid on-premises username or password."},"clientAppUsed":"Browser","deviceDetail":{"deviceId":"","operatingSystem":"Linux","browser":"Tor Browser"},"location":{"city":"Frankfurt am Main","state":"Hesse","countryOrRegion":"DE","geoCoordinates":{"latitude":50.1109,"longitude":8.6821}},"correlationId":"d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a","conditionalAccessStatus":"notApplied","appliedConditionalAccessPolicies":[],"originalRequestId":"cc998877-6655-4433-2211-00ffeeddccbb","isInteractive":true,"tokenIssuerName":"","tokenIssuerType":"AzureAD","authenticationProcessingDetails":[],"networkLocationDetails":[],"processingTimeInMilliseconds":82,"riskDetail":"anonymizedIPAddress","riskLevelAggregated":"high","riskLevelDuringSignIn":"high","riskState":"atRisk","riskEventTypes":["anonymizedIPAddress","maliciousIPAddress"],"authenticationDetails":[{"authenticationStepDateTime":"##$TimeStamp-0d0h2m0s$##+00:00","authenticationMethod":"Password","authenticationMethodDetail":"","succeeded":false,"authenticationStepRequirement":"Primary Authentication"}],"authenticationRequirementPolicies":[]},"am_tenantId":"3F1B4D8A-9E12-4C6E-82A1-123456789ABC","am_category":"SIGNINLOGS"}
+```
+
+---
+
+## 6. Key Constraints & Generation Pitfalls
+
+1.  **Strict Type Consistency between Root and Properties**:
+    *   `resultType` at the root must be a **string** (`"0"`, `"53003"`), whereas `properties.status.errorCode` must be an **integer** (`0`, `53003`).
+    *   `correlationId` must match exactly between the root envelope and inside `properties`.
+    *   `tenantId` at the root must match `properties.SignInBondData` (if present) and the lowercase form of `am_tenantId`.
+2.  **Double-Escaping within `modifiedProperties`**:
+    *   When populating `modifiedProperties[].oldValue` and `modifiedProperties[].newValue`, string scalars must be wrapped in JSON quotes and escaped (e.g., `"newValue":"\"True\""` instead of `"newValue":"True"`).
+    *   Serialized arrays or JSON payloads inside these fields must be JSON-escaped string blocks (e.g., `"newValue":"[{\"SkuId\":\"...\"}]"`).
+3.  **Severity Field Casing Discrepancy**:
+    *   `SignInLogs` use the capitalized key `"Level": 4` (numeric integer).
+    *   `AuditLogs` use lowercase `"level": "Informational"` (string name).
+4.  **InitiatedBy Object Structure**:
+    *   Must contain either a `user` or an `app` object. If triggered by an automated internal daemon without an identity, empty objects `{}` may appear, but never mix `user` and `app` keys in the same actor context.
+5.  **TargetResources Multiplicity**:
+    *   Group management operations (like adding a member) always populate **two** entries in `targetResources`: the `Group` object and the affected `User` object. SIEM detection rules looking for privilege escalation correlate these two entities in the same log record.

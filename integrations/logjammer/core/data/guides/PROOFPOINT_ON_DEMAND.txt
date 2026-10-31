@@ -1,0 +1,316 @@
+# Proofpoint on Demand (POD) / PPS Message Event Log Generation Guide
+
+This guide provides the complete specification, schema layout, field distributions, and templating rules necessary to generate synthetic **Proofpoint on Demand (POD)** and **Proofpoint Protection Server (PPS)** message tracking/filtering event logs.
+
+---
+
+## 1. Overview & Log Purpose
+
+Proofpoint on Demand (POD) and Proofpoint Protection Server (PPS) process all inbound, outbound, and internal corporate email traffic. Each log line records the end-to-end telemetry and security evaluation of a single SMTP transaction. 
+
+### Activities Recorded
+- **Inbound/Outbound Message Filtering**: SMTP connection metadata, envelope addresses, and RFC 5322 header metadata.
+- **Threat Engine Telemetry**: Antivirus (`av`), Spam & Bulk analysis (`spam`), Zero-Hour protection (`zerohour`), and Proofpoint Dynamic Reputation (`pdr`).
+- **Email Authentication Checks**: SPF verification (`spf`), DKIM signature checks (`dkimv`), and DMARC enforcement and alignment (`dmarc`).
+- **URL Defense & Attachment Analysis**: Detection, classification, and URL rewriting (`urldefense`), along with MIME part inspection, hashing (MD5/SHA256), and file type detection (`msgParts`).
+- **Policy Enforcement & Routing**: Disposition decisions (`continue`, `discard`, `quarantine`, `accept`, `reject`), policy rule matches, header manipulation, and quarantining.
+
+---
+
+## 2. Format Specification
+
+| Attribute | Specification |
+| :--- | :--- |
+| **Format Classification** | Structured **JSON** (JSON Lines / Single-line JSON per message event). |
+| **Character Encoding** | UTF-8 (Header values may contain encoded-word strings like `=?UTF-8?B?...?=`). |
+| **Delimiters & Quotes** | Standard JSON syntax. All strings double-quoted, numbers and booleans unquoted. |
+| **Line Ending** | `\n` (LF) or `\r\n` (CRLF) for syslog streaming/file ingestion. |
+
+---
+
+## 3. Schema Breakdown & Fields
+
+The log is a single root JSON object containing nested blocks: `ts`, `guid`, `pps`, `connection`, `envelope`, `msg`, `filter`, `msgParts`, and `metadata`.
+
+```
+Root
+├── ts (String: ISO-8601 Timestamp)
+├── guid (String: Unique message GUID)
+├── pps (Object: Cluster and agent info)
+├── connection (Object: Inbound SMTP connection details)
+├── envelope (Object: SMTP envelope sender/recipients)
+├── msg (Object: Extracted & normalized RFC 5322 headers)
+├── filter (Object: Routing, actions, scoring, and module results)
+├── msgParts (Array of Objects: MIME body/attachment telemetry)
+└── metadata (Object: Origin and cluster metadata)
+```
+
+---
+
+### 3.1. Top-Level Fields
+
+| Field Name | Type | Description | Realistic Examples |
+| :--- | :--- | :--- | :--- |
+| `ts` | String | ISO 8601 timestamp with fractional seconds and timezone offset. | `"2023-11-15T14:22:18.469140-0500"` |
+| `guid` | String | Unique Proofpoint Message ID (alphanumeric, hyphens, underscores). | `"JklGK_bpAzWWL8z3EsfU71d9Bk3RxTMI"`, `"UsjFMYOP3Rw1cY9zr9nkKYVTjyfXG-QG"` |
+| `pps` | Object | Proofpoint node info. Contains `cid`, `version`, `agent`. | `{"cid": "acme_hosted", "version": "8.18.6.12", "agent": "m0081515.ppops.net"}` |
+| `metadata` | Object | Origin information wrapper matching `pps`. | `{"origin": {"data": {"cid": "acme_hosted", "version": "8.18.6.12", "agent": "m0081515.ppops.net"}}}` |
+
+---
+
+### 3.2. `connection` Object
+
+Details the connecting client and inbound TLS configuration:
+
+| Field Name | Type | Description | Realistic Values |
+| :--- | :--- | :--- | :--- |
+| `ip` | String | Remote connecting IP address. | IPv4 (`"198.51.100.25"`) or IPv6 (`"2001:db8::1"`) |
+| `host` | String | Reverse DNS hostname of the connecting IP. | `"mail-out.sender.com"`, `"fakehost.com"`, `"localhost"` |
+| `helo` | String | SMTP HELO/EHLO parameter supplied by sender. | `"mx1.senderdomain.com"`, `"o3.cloudmail.wageworks.com"` |
+| `sid` | String | SMTP session ID. | `"31uurabsbm"`, `"313u2wr2nk"` |
+| `country` | String | Two-letter ISO country code of connecting IP. | `"us"`, `"eu"`, `"gb"`, `"de"`, `"**"` (internal/unknown) |
+| `protocol` | String | Connection protocol. | `"smtp:smtp"`, `"smtp:esmtp"` |
+| `resolveStatus` | String | DNS reverse lookup status. | `"ok"`, `"failed"`, `"nxdomain"` |
+| `tls.inbound` | Object | Inbound TLS parameters (`version`, `cipher`, `cipherBits`). | `{"version": "TLSv1.2", "cipher": "ECDHE-RSA-AES256-GCM-SHA384", "cipherBits": 256}` |
+
+---
+
+### 3.3. `envelope` Object
+
+The SMTP envelope (`MAIL FROM` and `RCPT TO`):
+
+| Field Name | Type | Description | Realistic Values |
+| :--- | :--- | :--- | :--- |
+| `from` | String | Envelope sender address (`MAIL FROM`). | `"sender@external.com"`, `"bounces+123@marketing.com"`, `""` |
+| `fromHashed` | String | Anonymized sender (`<md5(local_part)>@domain`). | `"b4b88d0c51946283a3706ed659096935@external.com"` |
+| `rcpts` | Array[Str] | Array of envelope recipient addresses. | `["alice@company.com"]`, `["bob@company.com", "carol@company.com"]` |
+| `rcptsHashed` | Array[Str] | Array of anonymized recipient addresses. | `["61bab701546e8f1cfafff3eeb25f8b3b@company.com"]` |
+
+---
+
+### 3.4. `msg` Object
+
+Message structure and RFC 5322 header information:
+
+- **`sizeBytes`** *(Integer)*: Total payload size in bytes (e.g., `4124`, `63280`).
+- **`lang`** *(String)*: Detected language (e.g., `"en"`, `"pt"`, `"es"`, `"und"`).
+- **`header`**: Raw extracted email headers (all fields are arrays of strings).
+  - `message-id`: `["<1593128107394103160@mail.domain.com>"]`
+  - `from`: `["\"Display Name\" <sender@domain.com>"]`
+  - `to`: `["recipient@company.com"]`
+  - `reply-to`: `["reply@domain.com"]`
+  - `cc`: `["colleague@company.com"]`
+  - `subject`: `["Inquiry Regarding Invoice #48102"]`
+  - `x-mailer`: `["Outlook 16.0"]`, `["CALLEO V1.0"]`
+  - `x-originating-ip`: `["[10.201.38.240]"]`
+  - `fromHashed`, `toHashed`, `ccHashed`, `reply-toHashed`: MD5 hashed local-part arrays.
+- **`normalizedHeader`**: Header values stripped of enclosing angle brackets (`<...>`) and display quotes.
+- **`parsedAddresses`**: Structured dictionary containing normalized email addresses and MD5-hashed equivalents for `from`, `to`, and `cc`.
+
+---
+
+### 3.5. `filter` Object
+
+Core policy, disposition, module analysis, and routing results:
+
+#### Filter Status & Metadata
+- **`qid`** *(String)*: Proofpoint sendmail queue ID (e.g., `"05PNWjCV024472"`, `"313u2wr2nk-1"`).
+- **`startTime`** *(String)*: ISO 8601 filter start timestamp matching root `ts`.
+- **`durationSecs`** *(Float)*: Processing time in seconds (e.g., `0.103299`, `0.842105`).
+- **`routeDirection`** *(String)*: `"inbound"`, `"outbound"`, or `"internal"`.
+- **`routes`** *(Array[String])*: Matched route profiles:
+  - `default_inbound`, `default_outbound`, `allow_relay`, `firewallsafe`, `fruat`, `pp_spoofsafe`, `internalnet`, `nt_spoofsafe`.
+- **`disposition`** *(String)*: Final disposition of the message:
+  - `"continue"`: Allowed / passed through to recipient (may include modified headers).
+  - `"discard"`: Dropped/quarantined with no delivery.
+  - `"quarantine"`: Moved to quarantine folder.
+  - `"reject"`: SMTP 5xx reject during session.
+  - `"accept"`: Explicit internal system accept/relay.
+- **`isMsgEncrypted`** *(Boolean)*: `true` if message body is encrypted/S-MIME, else `false`.
+- **`isMsgReinjected`** *(Boolean)*: `true` if reinjected via policy routing, else `false`.
+- **`quarantine`** *(Object)*: Quarantine routing details:
+  - `folder`: `""`, `"Bulk"`, `"Spam"`, `"prerewrite_format"`, `"Phish"`.
+  - `rule`: `""`, `"defaultinbound_bulk"`, `"capture_prerewrite"`, `"phish_quarantine"`.
+- **`verified`** *(Object)*: `{"rcpts": ["user@company.com"], "rcptsHashed": ["<md5>@company.com"]}`.
+- **`suborgs`** *(Object)*: Sub-organization mapping (e.g., `{"sender": "0", "rcpts": ["0"]}`).
+
+---
+
+#### Filter Actions Array (`filter.actions`)
+Ordered execution array of policy decisions applied during evaluation. Each action object contains:
+- `module`: `"access"`, `"pdr"`, `"spf"`, `"dkim"`, `"dmarc"`, `"av"`, `"spam"`, `"urldefense"`.
+- `action`: `"continue"`, `"add-header"`, `"set-header"`, `"annotate-text"`, `"quarantine"`, `"discard"`, `"accept"`, `"set-spam-classifier"`, `"audit"`.
+- `rule`: Rule identifier (e.g., `"pass"`, `"clean"`, `"xsourceip_header"`, `"EXTTagBody"`, `"defaultinbound_notspam"`, `"defaultinbound_bulk"`, `"system"`).
+- `isFinal` *(Optional Boolean)*: `true` if this action terminated the message pipeline.
+
+---
+
+#### Filter Modules Object (`filter.modules`)
+Detailed sub-engine evaluations:
+
+##### 1. `spam` (Spam & ML Classifier Engine)
+```json
+"spam": {
+  "version": {
+    "engine": "8.12.0-2004280000",
+    "definitions": "main-2311150137"
+  },
+  "triggeredClassifier": "bulk",  // Optional: present if classified as bulk, spam, phish, malware
+  "langs": ["en", "es"],
+  "scores": {
+    "engine": 0,
+    "overall": 0,
+    "classifiers": {
+      "spam": 0,        // 0 - 100
+      "phish": 0,       // 0 - 100
+      "malware": 0,     // 0 - 100
+      "bulk": 100,      // 0 - 100
+      "adult": 0,       // 0 - 100
+      "impostor": 0,    // 0 - 100 (BEC score)
+      "lowpriority": 0, // 0 - 100
+      "suspect": 2,     // 0 - 100
+      "mlx": 0,         // Machine learning overall score
+      "mlxlog": 999,    // ML log score
+      "cot": -2147483648 // Chain of Trust score (-2147483648 is default unset)
+    }
+  }
+}
+```
+
+##### 2. `av` (Antivirus Engine)
+- Present when scanned. Evaluates virus definitions. Actions map to `rule: "clean"` or `rule: "virus"`.
+
+##### 3. `spf` (Sender Policy Framework)
+- `domain`: Sender SPF domain (e.g., `"cloudmail.wageworks.com"`).
+- `result`: `"pass"`, `"neutral"`, `"softfail"`, `"fail"`, `"none"`, `"permerror"`.
+
+##### 4. `dkimv` (DKIM Verification Array)
+- Array of objects: `[{"selector": "s1", "domain": "domain.com", "result": "pass"}]`.
+
+##### 5. `dmarc` (DMARC Policy & Alignment)
+- `srvid`: Protected domain (e.g., `"company.com"`).
+- `filterdResult`: `"pass"`, `"fail"`, `"none"`, `"reject"`, `"quarantine"`.
+- `authResults`: SPF and DKIM authentication traces.
+- `alignment`: SPF and DKIM identity alignment results (`"strict"`, `"relaxed"`, `"fail"`).
+
+##### 6. `urldefense` (Targeted Attack Protection / URL Defense)
+- `version`: `{"engine": "15"}`
+- `counts`: `{"total": 3, "unique": 3, "rewritten": 3, "noRewriteIsEmail": 0}`
+
+##### 7. `zerohour` (Zero-Day Outbreak Detection)
+- `score`: `"unknown"`, `"safe"`, `"suspicious"`.
+
+##### 8. `pdr` (Proofpoint Dynamic Reputation)
+- `v2`: `{"response": "pass"}` or `{"response": "reject"}`.
+
+---
+
+### 3.6. `msgParts` Array
+
+Contains an object for every MIME body part and file attachment:
+
+| Field Name | Type | Description | Examples |
+| :--- | :--- | :--- | :--- |
+| `structureId` | String | MIME hierarchical structure index. | `"0"`, `"1"`, `"1.1"` |
+| `disposition` | String | Content disposition. | `"inline"`, `"attachment"` |
+| `labeledName` | String | Filename as stated in MIME header. | `"text.html"`, `"invoice_Nov.pdf"`, `"payload.iso"` |
+| `detectedName` | String | Filename detected by parser. | `"text.html"`, `"invoice_Nov.pdf"`, `"payload.iso"` |
+| `labeledExt` | String | File extension from header. | `"html"`, `"pdf"`, `"xlsx"`, `"exe"`, `"txt"` |
+| `detectedExt` | String | True detected file extension. | `"HTML"`, `"PDF"`, `"XLSX"`, `"EXE"`, `"TXT"` |
+| `labeledMime` | String | Declared MIME type. | `"text/html"`, `"application/pdf"` |
+| `detectedMime` | String | True detected MIME type. | `"text/html"`, `"application/pdf"` |
+| `labeledCharset` | String | Charset declared. | `"UTF-8"`, `"ISO-8859-1"`, `"us-ascii"` |
+| `detectedCharset` | String | Detected charset. | `"UTF-8"`, `"ISO-8859-1"`, `"us-ascii"` |
+| `sizeDecodedBytes`| Integer | Decoded byte size. | `7322`, `451200` |
+| `detectedSizeBytes`| Integer | Detected byte size. | `7322`, `451200` |
+| `md5` | String | 32-character hex MD5 hash. | `"e736d3a19b1fadd8e9464eeaa8fba17b"` |
+| `sha256` | String | 64-character hex SHA-256 hash. | `"d09491093ae43bad058933d37357d609829c064c89b829445f12c92d597a6810"` |
+| `dataBase64` | String | Base64-encoded scalar ref pointer. | `"U0NBTEFSKDB4N2YyNzRkYjU0Y2E4KQ=="` |
+| `textExtracted` | String | Base64-encoded scalar ref pointer. | `"U0NBTEFSKDB4N2YyNjU5MDMyZDk4KQ=="` |
+| `isArchive` | Boolean | True if zip, tar, 7z, iso, gz. | `false`, `true` |
+| `isProtected` | Boolean | True if password-protected. | `false`, `true` |
+| `isCorrupted` | Boolean | True if file structure is damaged. | `false`, `true` |
+| `isDeleted` | Boolean | True if part stripped by AV. | `false`, `true` |
+| `isVirtual` | Boolean | Internal Proofpoint part representation. | `false`, `true` |
+| `isTimedOut` | Boolean | True if sandbox analysis timed out. | `false`, `true` |
+| `urls` | Array[Obj] | URLs extracted from this MIME part. | See structure below. |
+| `metadata` | Object | HTML/Document meta tags. | `{"title": "Invoice", "generator": "MS Word"}` |
+
+#### URL Defense Sub-Object (`msgParts[].urls[]`)
+```json
+{
+  "url": "https://urldefense.com/v3/__http://phishing-site.com__;!!M9Lb!...",
+  "src": ["urldefense"],
+  "isRewritten": true,
+  "notRewrittenReason": "isEmail"  // Present only when isRewritten is false (e.g., mailto links)
+}
+```
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Proofpoint event logs use ISO 8601 formatting with 6 decimal subsecond digits and a non-colon numeric timezone offset:
+`YYYY-MM-DDTHH:MM:SS.ffffff±HHMM` (e.g., `2023-10-24T08:14:02.124589-0400`).
+
+Both `ts` (root) and `filter.startTime` **must** match identically.
+
+### Relative Time Template Tags
+When generating dynamic scenarios, replace static timestamps with relative time tags:
+- `##$TimeStamp-0d0h0m0s$##` -> Current event time (e.g., `2023-11-15T18:35:09.469140-0500`)
+- `##$TimeStamp-0d1h15m0s$##` -> 1 hour, 15 minutes prior to scenario execution.
+- `##$TimeStamp-0d0h0m30s$##` -> 30 seconds prior.
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: Clean Inbound Corporate Email (Passed / Continue)
+*An external business partner sends a clean corporate email with strict SPF, DKIM, and DMARC passes.*
+
+```json
+{"ts":"##$TimeStamp-0d0h12m10s$##","guid":"9KjFm1Lp0zQA8x9ZrTnk1YVTjyfXG-AA","pps":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0081515.ppops.net"},"connection":{"ip":"205.220.106.24","host":"mail-out.partnercorp.com","helo":"mx1.partnercorp.com","sid":"31uurabsb1","country":"us","protocol":"smtp:smtp","resolveStatus":"ok","tls":{"inbound":{"version":"TLSv1.2","cipher":"ECDHE-RSA-AES256-GCM-SHA384","cipherBits":256}}},"envelope":{"from":"accounting@partnercorp.com","fromHashed":"4f5399586118d09819fb25ef38e5e6e3@partnercorp.com","rcpts":["john.doe@company.com"],"rcptsHashed":["85a196b9ef7e0fcb9dff5cb1b4edf376@company.com"]},"msg":{"lang":"en","sizeBytes":4820,"header":{"from":["\"Accounting\" <accounting@partnercorp.com>"],"fromHashed":["4f5399586118d09819fb25ef38e5e6e3@partnercorp.com"],"to":["john.doe@company.com"],"toHashed":["85a196b9ef7e0fcb9dff5cb1b4edf376@company.com"],"subject":["Updated Q3 Vendor Statement"],"message-id":["<9182374.1593128100866@partnercorp.com>"]},"normalizedHeader":{"from":["accounting@partnercorp.com"],"fromHashed":["4f5399586118d09819fb25ef38e5e6e3@partnercorp.com"],"to":["john.doe@company.com"],"toHashed":["85a196b9ef7e0fcb9dff5cb1b4edf376@company.com"],"subject":["Updated Q3 Vendor Statement"],"message-id":["9182374.1593128100866@partnercorp.com"]},"parsedAddresses":{"from":["accounting@partnercorp.com"],"fromHashed":["4f5399586118d09819fb25ef38e5e6e3@partnercorp.com"],"to":["john.doe@company.com"],"toHashed":["85a196b9ef7e0fcb9dff5cb1b4edf376@company.com"]}},"filter":{"qid":"05PNWjCV024472","startTime":"##$TimeStamp-0d0h12m10s$##","durationSecs":0.115201,"routeDirection":"inbound","routes":["default_inbound","firewallsafe","pp_spoofsafe"],"disposition":"continue","isMsgEncrypted":false,"isMsgReinjected":false,"quarantine":{"rule":"","folder":""},"suborgs":{"sender":"0","rcpts":["0"]},"msgSizeBytes":4820,"verified":{"rcpts":["john.doe@company.com"],"rcptsHashed":["85a196b9ef7e0fcb9dff5cb1b4edf376@company.com"]},"actions":[{"module":"pdr","action":"continue","rule":"pass","isFinal":true},{"module":"access","action":"add-header","rule":"xsourceip_header"},{"module":"spf","action":"add-header","rule":"pass"},{"module":"spf","action":"continue","rule":"pass"},{"module":"av","action":"add-header","rule":"clean"},{"module":"av","action":"continue","rule":"clean"},{"module":"dmarc","action":"continue","rule":"dmarcmonitor_pass"},{"module":"spam","action":"add-header","rule":"defaultinbound_notspam"},{"module":"spam","action":"continue","rule":"defaultinbound_notspam"}],"modules":{"pdr":{"v2":{"response":"pass"}},"spf":{"domain":"partnercorp.com","result":"pass"},"dkimv":[{"selector":"s2021","domain":"partnercorp.com","result":"pass"}],"dmarc":{"srvid":"company.com","filterdResult":"pass","authResults":[{"method":"spf","result":"pass","reason":"","emailIdentities":{"smtp.mailfrom":"accounting@partnercorp.com","smtp.mailfromHashed":"4f5399586118d09819fb25ef38e5e6e3@partnercorp.com"}},{"method":"dkim","result":"pass","reason":"","propspec":{"header.d":"partnercorp.com","header.s":"s2021"}},{"method":"dmarc","result":"pass","reason":""}],"alignment":[{"fromDomain":"partnercorp.com","results":[{"identity":"partnercorp.com","identityOrg":"partnercorp.com","method":"spf","result":"strict"},{"identity":"partnercorp.com","identityOrg":"partnercorp.com","method":"dkim","result":"strict"}]}]},"spam":{"langs":["en"],"scores":{"overall":0,"engine":0,"classifiers":{"spam":0,"phish":0,"malware":0,"bulk":0,"adult":0,"impostor":0,"lowpriority":0,"suspect":1,"mlx":0,"mlxlog":999,"cot":-2147483648}},"version":{"engine":"8.12.0-2004280000","definitions":"main-2311150137"}},"zerohour":{"score":"unknown"}},"metadata":{"origin":{"data":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0081515.ppops.net"}}}},"msgParts":[{"structureId":"0","disposition":"inline","labeledName":"text.html","detectedName":"text.html","labeledExt":"html","detectedExt":"HTML","labeledMime":"text/html","detectedMime":"text/html","labeledCharset":"UTF-8","detectedCharset":"UTF-8","sizeDecodedBytes":3210,"detectedSizeBytes":3210,"md5":"39b1a03f4460f7895bc26120b08a8a4f","sha256":"61483321528ca9489d8f3ca05f4262846bd8eef2f53dcfb87b7a147d337f7690","dataBase64":"U0NBTEFSKDB4N2YyNzNlZDFlY2E4KQ==","textExtracted":"U0NBTEFSKDB4N2YyNzExMzc2MGMwKQ==","isArchive":false,"isProtected":false,"isCorrupted":false,"isDeleted":false,"isVirtual":false,"isTimedOut":false,"urls":[],"metadata":{"title":"Statement"}}]}
+```
+
+---
+
+### Scenario 2: Inbound Credential Phishing Attempt (Quarantined & Discarded)
+*A high-confidence phishing email attempting credential harvesting with Proofpoint URL Defense rewriting and a phish score of 100.*
+
+```json
+{"ts":"##$TimeStamp-0d0h05m22s$##","guid":"Ph1sh_Gk1AzWWL8z3EsfU71d9Bk3RxT88","pps":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0081514.ppops.net"},"connection":{"ip":"193.106.191.45","host":"vps-host-45.net","helo":"vps45.login-portal-auth.com","sid":"31uurabsp9","country":"ru","protocol":"smtp:smtp","resolveStatus":"ok","tls":{"inbound":{"version":"TLSv1.2","cipher":"ECDHE-RSA-AES256-GCM-SHA384","cipherBits":256}}},"envelope":{"from":"service-security@login-portal-auth.com","fromHashed":"d41d8cd98f00b204e9800998ecf8427e@login-portal-auth.com","rcpts":["jane.smith@company.com"],"rcptsHashed":["92d366d1a403b56826f2f877a0a2044f@company.com"]},"msg":{"lang":"en","sizeBytes":14520,"header":{"from":["\"IT Support Portal\" <service-security@login-portal-auth.com>"],"fromHashed":["d41d8cd98f00b204e9800998ecf8427e@login-portal-auth.com"],"to":["jane.smith@company.com"],"toHashed":["92d366d1a403b56826f2f877a0a2044f@company.com"],"subject":["[URGENT] Password Expiration Notice for SSO Session"],"message-id":["<20231115.190284@login-portal-auth.com>"]},"normalizedHeader":{"from":["service-security@login-portal-auth.com"],"fromHashed":["d41d8cd98f00b204e9800998ecf8427e@login-portal-auth.com"],"to":["jane.smith@company.com"],"toHashed":["92d366d1a403b56826f2f877a0a2044f@company.com"],"subject":["[EXT] [URGENT] Password Expiration Notice for SSO Session"],"message-id":["20231115.190284@login-portal-auth.com"]},"parsedAddresses":{"from":["service-security@login-portal-auth.com"],"fromHashed":["d41d8cd98f00b204e9800998ecf8427e@login-portal-auth.com"],"to":["jane.smith@company.com"],"toHashed":["92d366d1a403b56826f2f877a0a2044f@company.com"]}},"filter":{"qid":"05QEj97Z027999","startTime":"##$TimeStamp-0d0h05m22s$##","durationSecs":0.482914,"routeDirection":"inbound","routes":["default_inbound","pp_spoofsafe"],"disposition":"discard","isMsgEncrypted":false,"isMsgReinjected":false,"quarantine":{"rule":"phish_quarantine","folder":"Phish"},"suborgs":{"sender":"0","rcpts":["0"]},"msgSizeBytes":14520,"verified":{"rcpts":["jane.smith@company.com"],"rcptsHashed":["92d366d1a403b56826f2f877a0a2044f@company.com"]},"actions":[{"module":"pdr","action":"continue","rule":"pass"},{"module":"access","action":"set-header","rule":"pp_external_tag"},{"module":"access","action":"continue","rule":"pp_external_tag"},{"module":"spf","action":"add-header","rule":"pass"},{"module":"spf","action":"continue","rule":"pass"},{"module":"av","action":"add-header","rule":"clean"},{"module":"av","action":"continue","rule":"clean"},{"module":"spam","action":"add-header","rule":"phish_quarantine"},{"module":"spam","action":"quarantine","rule":"phish_quarantine"},{"module":"spam","action":"discard","rule":"phish_quarantine","isFinal":true}],"modules":{"pdr":{"v2":{"response":"pass"}},"spf":{"domain":"login-portal-auth.com","result":"pass"},"dkimv":[],"dmarc":{"srvid":"company.com","filterdResult":"none","authResults":[{"method":"spf","result":"pass","reason":"","emailIdentities":{"smtp.mailfrom":"service-security@login-portal-auth.com","smtp.mailfromHashed":"d41d8cd98f00b204e9800998ecf8427e@login-portal-auth.com"}},{"method":"dmarc","result":"none","reason":""}]},"urldefense":{"version":{"engine":"15"},"counts":{"total":1,"unique":1,"rewritten":1,"noRewriteIsEmail":0}},"spam":{"langs":["en"],"triggeredClassifier":"phish","scores":{"overall":100,"engine":100,"classifiers":{"phish":100,"spam":80,"malware":0,"bulk":0,"adult":0,"impostor":95,"lowpriority":0,"suspect":98,"mlx":99,"mlxlog":999,"cot":-2147483648}},"version":{"engine":"8.12.0-2004280000","definitions":"main-2311150137"}},"zerohour":{"score":"suspicious"}},"metadata":{"origin":{"data":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0081514.ppops.net"}}}},"msgParts":[{"structureId":"0","disposition":"inline","labeledName":"text.html","detectedName":"text.html","labeledExt":"html","detectedExt":"HTML","labeledMime":"text/html","detectedMime":"text/html","labeledCharset":"UTF-8","detectedCharset":"UTF-8","sizeDecodedBytes":9814,"detectedSizeBytes":9814,"md5":"8b4791a87b322a36b8e3909772c72bdf","sha256":"bf48386a3471bb210168b9c2b489a77b5a8dcfa832b85eef62a5b6c8a77a9223","dataBase64":"U0NBTEFSKDB4N2ZhMDg4YTNhOTAwKQ==","textExtracted":"U0NBTEFSKDB4N2ZhMDg3NjI2ZDk4KQ==","isArchive":false,"isProtected":false,"isCorrupted":false,"isDeleted":false,"isVirtual":false,"isTimedOut":false,"urls":[{"url":"https://urldefense.proofpoint.com/v3/__http://login-portal-auth.com/renew-sso-token__;!!M9Lb!Xz894_badsite_payload","isRewritten":true,"src":["urldefense"]}],"metadata":{"title":"Urgent Security Update"}}]}
+```
+
+---
+
+### Scenario 3: Malicious Attachment (Weaponized Macro Dropper / AV Block)
+*An inbound phishing email carrying a weaponized Excel sheet (`Invoice_9941.xlsm`). The AV engine flags the malware signature and discards the message.*
+
+```json
+{"ts":"##$TimeStamp-0d0h02m45s$##","guid":"Malw4r3_xP2Q1l0pMnkK78VTjyfXG-MM","pps":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0081515.ppops.net"},"connection":{"ip":"45.154.255.89","host":"hosted-by.rdpdedicated.com","helo":"mail.finance-docshare.com","sid":"313xa1r9z1","country":"nl","protocol":"smtp:smtp","resolveStatus":"ok","tls":{"inbound":{"version":"TLSv1.2","cipher":"ECDHE-RSA-AES256-SHA384","cipherBits":256}}},"envelope":{"from":"billing@finance-docshare.com","fromHashed":"a1b2c3d4e5f60718293a4b5c6d7e8f90@finance-docshare.com","rcpts":["accounting.team@company.com"],"rcptsHashed":["79dcd5b24795fe50e3cbef24f10761a3@company.com"]},"msg":{"lang":"en","sizeBytes":87410,"header":{"from":["\"Vendor Accounts\" <billing@finance-docshare.com>"],"fromHashed":["a1b2c3d4e5f60718293a4b5c6d7e8f90@finance-docshare.com"],"to":["accounting.team@company.com"],"toHashed":["79dcd5b24795fe50e3cbef24f10761a3@company.com"],"subject":["Overdue Remittance Notice #INV-9941"],"message-id":["<docshare.994101.2023@finance-docshare.com>"]},"normalizedHeader":{"from":["billing@finance-docshare.com"],"fromHashed":["a1b2c3d4e5f60718293a4b5c6d7e8f90@finance-docshare.com"],"to":["accounting.team@company.com"],"toHashed":["79dcd5b24795fe50e3cbef24f10761a3@company.com"],"subject":["[EXT] Overdue Remittance Notice #INV-9941"],"message-id":["docshare.994101.2023@finance-docshare.com"]},"parsedAddresses":{"from":["billing@finance-docshare.com"],"fromHashed":["a1b2c3d4e5f60718293a4b5c6d7e8f90@finance-docshare.com"],"to":["accounting.team@company.com"],"toHashed":["79dcd5b24795fe50e3cbef24f10761a3@company.com"]}},"filter":{"qid":"04ILfTBL029911","startTime":"##$TimeStamp-0d0h02m45s$##","durationSecs":0.741029,"routeDirection":"inbound","routes":["default_inbound"],"disposition":"discard","isMsgEncrypted":false,"isMsgReinjected":false,"quarantine":{"rule":"virus_quarantine","folder":"Virus"},"suborgs":{"sender":"0","rcpts":["0"]},"msgSizeBytes":87410,"verified":{"rcpts":["accounting.team@company.com"],"rcptsHashed":["79dcd5b24795fe50e3cbef24f10761a3@company.com"]},"actions":[{"module":"pdr","action":"continue","rule":"pass"},{"module":"access","action":"set-header","rule":"pp_external_tag"},{"module":"access","action":"continue","rule":"pp_external_tag"},{"module":"spf","action":"add-header","rule":"neutral"},{"module":"spf","action":"continue","rule":"neutral"},{"module":"av","action":"quarantine","rule":"virus"},{"module":"av","action":"discard","rule":"virus","isFinal":true}],"modules":{"pdr":{"v2":{"response":"pass"}},"spf":{"domain":"finance-docshare.com","result":"neutral"},"dkimv":[],"dmarc":{"srvid":"company.com","filterdResult":"none","authResults":[{"method":"spf","result":"neutral","reason":"","emailIdentities":{"smtp.mailfrom":"billing@finance-docshare.com","smtp.mailfromHashed":"a1b2c3d4e5f60718293a4b5c6d7e8f90@finance-docshare.com"}}]},"spam":{"langs":["en"],"triggeredClassifier":"malware","scores":{"overall":100,"engine":100,"classifiers":{"malware":100,"phish":45,"spam":85,"bulk":0,"adult":0,"impostor":0,"lowpriority":0,"suspect":100,"mlx":99,"mlxlog":999,"cot":-2147483648}},"version":{"engine":"8.12.0-2004280000","definitions":"main-2311150137"}},"zerohour":{"score":"suspicious"}},"metadata":{"origin":{"data":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0081515.ppops.net"}}}},"msgParts":[{"structureId":"0","disposition":"inline","labeledName":"text.plain","detectedName":"text.plain","labeledExt":"txt","detectedExt":"TXT","labeledMime":"text/plain","detectedMime":"text/plain","labeledCharset":"UTF-8","detectedCharset":"UTF-8","sizeDecodedBytes":320,"detectedSizeBytes":320,"md5":"3949ba380293da82cbbef093a1098234","sha256":"9023485abcf019348e3095819385012398410293840192834019283401928341","dataBase64":"U0NBTEFSKDB4N2ZhMDgxZTU1YTk4KQ==","textExtracted":"U0NBTEFSKDB4N2ZhMDdhMjc0Mjg4KQ==","isArchive":false,"isProtected":false,"isCorrupted":false,"isDeleted":false,"isVirtual":false,"isTimedOut":false,"urls":[],"metadata":{}},{"structureId":"1","disposition":"attachment","labeledName":"Invoice_9941.xlsm","detectedName":"Invoice_9941.xlsm","labeledExt":"xlsm","detectedExt":"XLSM","labeledMime":"application/vnd.ms-excel.sheet.macroEnabled.12","detectedMime":"application/vnd.ms-excel.sheet.macroEnabled.12","labeledCharset":"","detectedCharset":"","sizeDecodedBytes":72500,"detectedSizeBytes":72500,"md5":"7d928347fbcba9012384918237490123","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","dataBase64":"U0NBTEFSKDB4N2ZhMDdhMDljOGI4KQ==","textExtracted":"","isArchive":false,"isProtected":false,"isCorrupted":false,"isDeleted":true,"isVirtual":false,"isTimedOut":false,"urls":[],"metadata":{"malwareName":"VBA/TrojanDropper.Agent.AY"}}]}
+```
+
+---
+
+### Scenario 4: Outbound Clean Relay (Internal User to External Recipient)
+*An internal corporate user sending an outbound status email through the Proofpoint MTA relay.*
+
+```json
+{"ts":"##$TimeStamp-0d0h00m40s$##","guid":"Outb0und_Rel4y_91AzWWL8z3EsfU71d9","pps":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0075523.ppops.net"},"connection":{"ip":"10.201.10.45","host":"mail-outbound.company.local","helo":"citsuwexc001.corp.company.local","sid":"313xa1r5u4","country":"**","protocol":"smtp:smtp","resolveStatus":"ok","tls":{"inbound":{"version":"TLSv1.2","cipher":"ECDHE-RSA-AES256-SHA384","cipherBits":256}}},"envelope":{"from":"sarah.connor@company.com","fromHashed":"1eeb575f09cce00e1bffab47396d486b@company.com","rcpts":["client.rep@clientcorp.com"],"rcptsHashed":["18b9b756df9332757e6a15d8b9311336@clientcorp.com"]},"msg":{"lang":"en","sizeBytes":34200,"header":{"from":["\"Sarah Connor\" <sarah.connor@company.com>"],"fromHashed":["1eeb575f09cce00e1bffab47396d486b@company.com"],"to":["client.rep@clientcorp.com"],"toHashed":["18b9b756df9332757e6a15d8b9311336@clientcorp.com"],"subject":["Project Status Deliverables - Week 46"],"message-id":["<d98a3a297eb34435b90f4396044f99d4@company.local>"],"x-originating-ip":["[10.201.10.45]"]},"normalizedHeader":{"from":["sarah.connor@company.com"],"fromHashed":["1eeb575f09cce00e1bffab47396d486b@company.com"],"to":["client.rep@clientcorp.com"],"toHashed":["18b9b756df9332757e6a15d8b9311336@clientcorp.com"],"subject":["Project Status Deliverables - Week 46"],"message-id":["d98a3a297eb34435b90f4396044f99d4@company.local"],"x-originating-ip":["10.201.10.45"]},"parsedAddresses":{"from":["sarah.connor@company.com"],"fromHashed":["1eeb575f09cce00e1bffab47396d486b@company.com"],"to":["client.rep@clientcorp.com"],"toHashed":["18b9b756df9332757e6a15d8b9311336@clientcorp.com"]}},"filter":{"qid":"04ILfTBL025889","startTime":"##$TimeStamp-0d0h00m40s$##","durationSecs":0.081294,"routeDirection":"outbound","routes":["allow_relay","spfsafe"],"disposition":"continue","isMsgEncrypted":false,"isMsgReinjected":false,"quarantine":{"rule":"","folder":""},"suborgs":{"sender":"0","rcpts":["0"]},"msgSizeBytes":34200,"verified":{"rcpts":["client.rep@clientcorp.com"],"rcptsHashed":["18b9b756df9332757e6a15d8b9311336@clientcorp.com"]},"actions":[{"module":"av","action":"add-header","rule":"clean"},{"module":"av","action":"continue","rule":"clean","isFinal":true},{"module":"spam","action":"audit","rule":"notspam"},{"module":"spam","action":"add-header","rule":"notspam"},{"module":"spam","action":"continue","rule":"notspam"}],"modules":{"spam":{"langs":["en"],"scores":{"overall":0,"engine":0,"classifiers":{"spam":0,"phish":0,"malware":0,"bulk":0,"adult":0,"impostor":0,"lowpriority":0,"suspect":0,"mlx":0,"mlxlog":999,"cot":-2147483648}},"version":{"engine":"8.12.0-2004280000","definitions":"main-2311150184"}},"zerohour":{"score":"unknown"}},"metadata":{"origin":{"data":{"cid":"corp_hosted","version":"8.18.6.12","agent":"m0075523.ppops.net"}}}},"msgParts":[{"structureId":"0","disposition":"inline","labeledName":"text.html","detectedName":"text.html","labeledExt":"html","detectedExt":"HTML","labeledMime":"text/html","detectedMime":"text/html","labeledCharset":"UTF-8","detectedCharset":"UTF-8","sizeDecodedBytes":32015,"detectedSizeBytes":32015,"md5":"ca29f6ccd618a2be1d3d35b39a5da500","sha256":"7b207c093a7413469d3222e96eca5307bd408c20ac937c254175e92d173eb945","dataBase64":"U0NBTEFSKDB4N2ZiNmQ0YWI2OWQ4KQ==","textExtracted":"U0NBTEFSKDB4N2ZiNjhkZWI2MzYwKQ==","isArchive":false,"isProtected":false,"isCorrupted":false,"isDeleted":false,"isVirtual":false,"isTimedOut":false,"urls":[],"metadata":{"generator":"Microsoft Word 15"}}]}
+```
+
+---
+
+## 6. Key Constraints & Common Pitfalls
+
+### Critical Schema Dependencies (Avoid Parsing Failures)
+1. **JSON Escaping**: RFC 5322 header strings containing quotes or backslashes (e.g., `"from": ["\"Display Name\" <user@domain.com>"]`) must have nested double quotes escaped (`\"`).
+2. **Hashed Identifier Pattern**: In Proofpoint POD logs, anonymized fields (`fromHashed`, `rcptsHashed`, `toHashed`, `ccHashed`) retain the original recipient domain:
+   $$\text{<32-character hex MD5>} + \text{"@"} + \text{domain.com}$$
+3. **Array Consistency in Headers**: All items inside `msg.header`, `msg.normalizedHeader`, and `msg.parsedAddresses` (e.g., `to`, `from`, `cc`, `subject`, `message-id`) must be arrays of strings, not bare strings, even when containing only one entry.
+4. **Matching Timestamps**: The root `ts` string and `filter.startTime` must match identically.
+5. **Disposition & Action Hierarchy**:
+   - If `filter.disposition` is `"discard"`, at least one action inside `filter.actions` must specify `"action": "discard"` with `"isFinal": true`.
+   - If quarantined, `filter.quarantine` must populate both `folder` and `rule` with corresponding non-empty strings.
+6. **Classifier Score Defaults**: The `spam.scores.classifiers.cot` (Chain of Trust) classifier defaults to the 32-bit signed integer minimum `-2147483648` when not triggered. `mlxlog` is typically `999` or `991`.
+7. **Perl Scalar Base64 References**: `dataBase64` and `textExtracted` in POD logs represent internal memory pointers (e.g., `SCALAR(0x7f273ed1eca8)` encoded into base64 as `"U0NBTEFSKDB4N2YyNzNlZDFlY2E4KQ=="`). Maintain this formatting for authentic parser emulation.

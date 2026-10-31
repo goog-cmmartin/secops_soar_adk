@@ -1,0 +1,177 @@
+# GCP Cloud DNS Query Log Generation Playbook
+
+---
+
+## 1. Overview & Log Purpose
+
+### Description
+**GCP Cloud DNS Query Logs** record authoritative and recursive DNS queries handled by Google Cloud DNS. Cloud DNS logging captures queries originating from within Google Cloud (Compute Engine VMs, GKE pods, Serverless VPC Access) and incoming queries from the public Internet targeted at public managed zones hosted on GCP.
+
+### Security & Operational Value
+- **Threat Detection**: Identification of DNS tunneling/exfiltration, Domain Generation Algorithms (DGA), fast-flux infrastructure, beaconing to malicious C2 domains, and DNS-based reconnaissance.
+- **Incident Response**: Correlating compromised internal Compute Engine (GCE) instances and GKE workloads to external network interactions using VM metadata embedded in the log.
+- **Troubleshooting**: Diagnosing name resolution failures (`NXDOMAIN`, `SERVFAIL`), high latency, misconfigured DNS forwarding/peering, and split-horizon DNS routing issues.
+
+---
+
+## 2. Format Specification
+
+| Parameter | Specification |
+| :--- | :--- |
+| **Classification** | Structured JSON (Google Cloud Logging `LogEntry` standard envelope) |
+| **Delivery / Packaging** | Single-line Newline Delimited JSON (NDJSON) when exported via Cloud Logging Sinks (Pub/Sub, Cloud Storage, BigQuery, Chronicle/SIEM) |
+| **Character Encoding** | UTF-8 |
+| **Quoting Rules** | Standard JSON syntax. Keys and string values are enclosed in double quotes (`"`). Numeric, boolean, and null values remain unquoted. |
+
+---
+
+## 3. Schema Breakdown & Fields
+
+GCP Cloud DNS logs conform to the Google Cloud Logging envelope structure, containing top-level metadata and a specialized `jsonPayload` containing DNS-specific attributes.
+
+### 3.1. Top-Level Envelope (`LogEntry`)
+
+| Field Name | Type | Required | Description / Allowed Values |
+| :--- | :--- | :---: | :--- |
+| `insertId` | String | Yes | Unique identifier for the log entry (e.g., alphanumeric string like `"of4onjd9km0"`, `"1pli502e1a4m2"`). |
+| `logName` | String | Yes | Fully qualified resource path formatted as: `projects/{project_id}/logs/dns.googleapis.com%2Fdns_queries`. |
+| `resource` | Object | Yes | Monitored resource descriptor (see Section 3.2). |
+| `timestamp` | String | Yes | RFC 3339 / ISO 8601 UTC timestamp of query processing (nanosecond precision). |
+| `receiveTimestamp` | String | Yes | RFC 3339 / ISO 8601 UTC timestamp when Cloud Logging ingested the event (typically 0.1 to 2.0 seconds after `timestamp`). |
+| `severity` | String | Yes | Log event severity. Usually `"INFO"` or `"NOTICE"`. |
+| `jsonPayload` | Object | Yes | Detailed DNS transaction payload (see Section 3.3). |
+
+---
+
+### 3.2. `resource` Object
+
+| Field Name | Type | Required | Description / Allowed Values |
+| :--- | :--- | :---: | :--- |
+| `type` | String | Yes | Always `"dns_query"`. |
+| `labels.project_id` | String | Yes | GCP Project ID hosting the zone or VM (e.g., `"corp-prod-infrastructure"`). |
+| `labels.location` | String | Yes | Region or scope of the query. Examples: `"global"`, `"us-central1"`, `"europe-west3"`. |
+| `labels.source_type` | String | Yes | Query source. Values: `"gce-vm"`, `"internet"`, `"gke"`, `"serverless"`, `"on-prem"`. |
+| `labels.target_type` | String | Yes | Resolution destination. Values: `"public-zone"`, `"private-zone"`, `"forwarding-zone"`, `"peering-zone"`, `"external"`. |
+| `labels.target_name` | String | Yes | Managed zone name in Cloud DNS (e.g., `"corp-public-zone"`, `"internal-vpc-dns"`). Empty string `""` for external lookups. |
+
+---
+
+### 3.3. `jsonPayload` Object
+
+#### Core DNS Transaction Fields
+
+| Field Name | Type | Required | Description / Allowed Values |
+| :--- | :--- | :---: | :--- |
+| `queryName` | String | Yes | Fully Qualified Domain Name (FQDN) queried, terminated with a trailing dot (`.`). Often retains 0x20 mixed-case encoding (e.g., `"wWw.ExAmPLe.CoM."`). |
+| `queryType` | String | Yes | DNS Record Type: `"A"`, `"AAAA"`, `"CNAME"`, `"TXT"`, `"MX"`, `"PTR"`, `"SRV"`, `"SOA"`, `"NS"`, `"HTTPS"`, `"SVCB"`. |
+| `protocol` | String | Yes | Transport layer protocol: `"UDP"` (90%+) or `"TCP"` (<10%). |
+| `responseCode` | String | Yes | DNS RCODE name: `"NOERROR"`, `"NXDOMAIN"`, `"SERVFAIL"`, `"REFUSED"`, `"FORMERR"`, `"BADCOOKIE"`. |
+| `authAnswer` | Boolean | Yes | `true` if response came authoritatively from the hosted zone; `false` if resolved recursively or via cache. |
+| `serverLatency` | Float | Yes | DNS server processing latency in milliseconds or seconds (typically `0.0` to `5.0`). |
+| `sourceIP` | String | Yes | IPv4 or IPv6 address of the client/resolver making the query. |
+| `destinationIP` | String | Optional | IPv4 or IPv6 address of the Cloud DNS nameserver receiving the query (e.g., `"198.51.100.5"`, `"169.254.169.254"`, or public resolver). |
+| `structuredRdata` | Array[Obj] | Optional | List of resolved resource records returned in the answer section. |
+| `rdata` | String | Optional | Flattened record data string (common on external queries or NXDOMAINs where it is empty `""`). |
+| `dns64Translated` | Boolean | Optional | `true` if synthetic IPv6 address translation (DNS64) was applied. |
+
+#### `structuredRdata` Sub-Schema
+
+Each element in the `structuredRdata` array contains:
+- `domainName` (String): Normalized (lowercase) FQDN with trailing dot (e.g., `"api.example.com."`).
+- `type` (String): Record type (e.g., `"A"`, `"CNAME"`, `"TXT"`).
+- `class` (String): DNS class, almost exclusively `"IN"`.
+- `ttl` (String/Int): Time-To-Live in seconds (e.g., `"300"` or `300`).
+- `rvalue` (String): Resolved value (e.g., IPv4 `"203.0.113.10"`, CNAME target `"lb.example.com."`, or TXT string `"v=spf1 ..."`).
+
+#### Compute Engine (GCE) Context Fields *(Populated when `source_type == "gce-vm"`)*
+
+| Field Name | Type | Required | Description / Values |
+| :--- | :--- | :---: | :--- |
+| `vmProjectId` | String | Conditional | GCP Project ID hosting the source VM. |
+| `vmZoneName` | String | Conditional | Zone where the VM resides (e.g., `"us-central1-a"`, `"europe-west1-b"`). |
+| `vmInstanceName` | String | Conditional | Formatted string: `{instance_id_prefix}.{instance_name}` (e.g., `"87777871037.gke-prod-node-37f4a2a4"`). |
+| `vmInstanceId` | Float/Int | Conditional | Numeric 64-bit unique instance identifier. |
+| `vmInstanceIdString` | String | Conditional | String representation of `vmInstanceId`. |
+| `sourceNetwork` | String | Conditional | VPC Network name originating the query (e.g., `"prod-vpc-network"`). |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+GCP Cloud Logging uses RFC 3339 UTC timestamps with nanosecond precision:
+`YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ`
+
+### Time Synchronization Rules
+1. `timestamp`: Point in time the DNS query was processed.
+2. `receiveTimestamp`: Ingestion time by Cloud Logging. Must be slightly later than `timestamp` (add +0.1s to +1.5s).
+
+### Dynamic Placeholder Tags
+When generating scenarios dynamically, use the following relative template tags:
+- `timestamp`: `##$TimeStamp-0d0h0m0s$##` (format: `YYYY-MM-DDTHH:MM:SS.000000000Z`)
+- `receiveTimestamp`: `##$TimeStamp-0d0h0m0s$##` (offset by +1 second)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Standard Authoritative Resolution from Internet (Public Zone)
+*Scenario: Public internet client querying a public Cloud DNS zone for an `A` record.*
+
+```json
+{"insertId":"1pli502e1a4m2","jsonPayload":{"authAnswer":true,"destinationIP":"198.51.100.5","protocol":"UDP","queryName":"dNs.dATAsOFt.CloudnS.PH.","queryType":"A","responseCode":"NOERROR","serverLatency":0.0,"sourceIP":"198.51.100.0","structuredRdata":[{"class":"IN","domainName":"dns.datasoft.cloudns.ph.","rvalue":"198.51.100.4","ttl":"300","type":"A"}]},"logName":"projects/chronical-34531/logs/dns.googleapis.com%2Fdns_queries","receiveTimestamp":"##$TimeStamp-0d0h5m0s$##","resource":{"labels":{"location":"global","project_id":"chronical-34531","source_type":"internet","target_name":"clouddns-zone","target_type":"public-zone"},"type":"dns_query"},"severity":"INFO","timestamp":"##$TimeStamp-0d0h5m1s$##"}
+```
+
+---
+
+### Example 2: Internal Compute Engine VM External Resolution (NXDOMAIN)
+*Scenario: A GKE/GCE instance attempts to resolve a non-existent internal domain, resulting in an `NXDOMAIN` response.*
+
+```json
+{"insertId":"zaw7fcejx7vm","jsonPayload":{"authAnswer":true,"dns64Translated":false,"protocol":"UDP","queryName":"storage.googleapis.com.google.internal.","queryType":"A","rdata":"","responseCode":"NXDOMAIN","serverLatency":0.0,"sourceNetwork":"corp-cicd-prod-vpc","sourceIP":"10.128.0.45","vmInstanceId":4.4851152355194746E17,"vmInstanceIdString":"448511523551947443","vmInstanceName":"123456789012.gke-gitlab-runner-mp-37f4a2a4-9scw","vmProjectId":"corp-cicd-runner-prod","vmZoneName":"northamerica-northeast1-b"},"logName":"projects/corp-cicd-runner-prod/logs/dns.googleapis.com%2Fdns_queries","receiveTimestamp":"##$TimeStamp-0d0h2m10s$##","resource":{"labels":{"location":"northamerica-northeast1","project_id":"corp-cicd-runner-prod","source_type":"gce-vm","target_name":"","target_type":"external"},"type":"dns_query"},"severity":"NOTICE","timestamp":"##$TimeStamp-0d0h2m11s$##"}
+```
+
+---
+
+### Example 3: IPv6 HTTPS / CNAME Resolution
+*Scenario: Public IPv6 client querying an `HTTPS` alias record over UDP.*
+
+```json
+{"insertId":"rh8otme1q62h","jsonPayload":{"authAnswer":true,"destinationIP":"2001:db8:3333:4444:CCCC:DDDD:EEEE:FFFF","protocol":"UDP","queryName":"wWW.DNs.DatASoFt.ClOUdNS.ph.","queryType":"HTTPS","responseCode":"NOERROR","serverLatency":0.0,"sourceIP":"2001:db8:3333:4444:5555:6666:7777:8888","structuredRdata":[{"class":"IN","domainName":"www.dns.datasoft.cloudns.ph.","rvalue":"datasoft.cloudns.ph.","ttl":"300","type":"CNAME"}]},"logName":"projects/chronical-34531/logs/dns.googleapis.com%2Fdns_queries","receiveTimestamp":"##$TimeStamp-0d0h1m20s$##","resource":{"labels":{"location":"global","project_id":"chronical-34531","source_type":"internet","target_name":"clouddns-zone","target_type":"public-zone"},"type":"dns_query"},"severity":"INFO","timestamp":"##$TimeStamp-0d0h1m21s$##"}
+```
+
+---
+
+### Example 4: Security Threat - DNS Tunneling / Exfiltration Attempt
+*Scenario: An infected internal VM performing DNS exfiltration via high-entropy subdomains against an attacker-controlled authoritative server.*
+
+```json
+{"insertId":"c2exf9104kd8a","jsonPayload":{"authAnswer":false,"dns64Translated":false,"protocol":"UDP","queryName":"aW5maWx0cmF0aW9uX2tleV9kYXRhCg.c2.attacker-control-domain.com.","queryType":"TXT","rdata":"\"ack\"","responseCode":"NOERROR","serverLatency":14.2,"sourceNetwork":"corp-finance-vpc","sourceIP":"10.240.12.108","vmInstanceId":8.921345102948123E17,"vmInstanceIdString":"892134510294812345","vmInstanceName":"99128340192.db-finance-sql-01","vmProjectId":"corp-finance-prod","vmZoneName":"us-east4-a"},"logName":"projects/corp-finance-prod/logs/dns.googleapis.com%2Fdns_queries","receiveTimestamp":"##$TimeStamp-0d0h0m14s$##","resource":{"labels":{"location":"us-east4","project_id":"corp-finance-prod","source_type":"gce-vm","target_name":"","target_type":"external"},"type":"dns_query"},"severity":"INFO","timestamp":"##$TimeStamp-0d0h0m15s$##"}
+```
+
+---
+
+### Example 5: DNS Cookie Failure / Malformed Query (`BADCOOKIE`)
+*Scenario: Inbound external DNS transaction resulting in a protocol security validation failure.*
+
+```json
+{"insertId":"of4onjd9km0","jsonPayload":{"authAnswer":true,"destinationIP":"198.51.100.5","protocol":"UDP","queryName":"dNs.DataSOfT.cLoUDnS.pH.","queryType":"AAAA","responseCode":"BADCOOKIE","serverLatency":0.0,"sourceIP":"203.0.113.199","structuredRdata":[],"vmInstanceName":"329088982544.vm-707dd8df-9e19-4537-410d-e2b5597f49b8","vmProjectId":"abc12-123456","vmZoneName":"us-central1-c"},"logName":"projects/abc12-123456/logs/dns.googleapis.com%2Fdns_queries","receiveTimestamp":"##$TimeStamp-0d0h0m01s$##","resource":{"labels":{"location":"global","project_id":"abc12-123456","source_type":"internet","target_name":"clouddns-zone","target_type":"public-zone"},"type":"dns_query"},"severity":"INFO","timestamp":"##$TimeStamp-0d0h0m02s$##"}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Trailing Dots in DNS Names**:
+   `queryName` and `domainName` fields **must** end with a dot (`.`) (e.g., `"example.com."` not `"example.com"`).
+2. **0x20 Case Randomization**:
+   Real-world Cloud DNS queries in `jsonPayload.queryName` often preserve mixed-casing sent by resolvers (e.g., `"wWw.GoOGLe.cOm."`). However, `structuredRdata.domainName` and `structuredRdata.rvalue` must always be canonical lowercase.
+3. **Project ID Consistency**:
+   The `project_id` must match across:
+   - `logName`: `projects/{project_id}/logs/...`
+   - `resource.labels.project_id`: `{project_id}`
+   - `jsonPayload.vmProjectId`: `{project_id}` (when originating from the same project).
+4. **Source Type vs. VM Fields**:
+   - When `resource.labels.source_type == "internet"`, VM fields (`vmInstanceName`, `vmZoneName`, `sourceNetwork`) should generally be omitted (unless specific target mapping applies).
+   - When `resource.labels.source_type == "gce-vm"`, VM fields (`vmProjectId`, `vmZoneName`, `vmInstanceName`, `vmInstanceIdString`, `sourceNetwork`) **must** be populated.
+5. **Array Formatting**:
+   `structuredRdata` is an array of JSON objects. If no records are returned (e.g., for `NXDOMAIN`, `BADCOOKIE`, or certain query types), it must be an empty array `[]`.

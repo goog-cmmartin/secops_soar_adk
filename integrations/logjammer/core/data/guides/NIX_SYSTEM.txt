@@ -1,0 +1,239 @@
+# AI Generation Guide (Playbook) — `NIX_SYSTEM`
+
+---
+
+## 1. Overview & Log Purpose
+
+The `NIX_SYSTEM` log type aggregates operating system, kernel, subsystem, security auditing, and core service logs across Unix and Linux distributions (e.g., RHEL, CentOS, Debian, Ubuntu, Amazon Linux, SLES, Oracle Linux). 
+
+### Activities Recorded
+* **Authentication & Authorization**: SSH logins (`sshd`), PAM transactions (`pam_unix`, `pam_sss`, `pam_winbind`), console/terminal access (`su`, `sudo`, `login`), and privilege escalation attempts.
+* **Audit Framework (`auditd` / `audispd`)**: Linux audit records covering system calls (`SYSCALL`), command execution (`EXECVE`, `USER_CMD`), SELinux/AppArmor mandatory access control decisions (`AVC`), user/group provisioning (`ADD_USER`, `ADD_GROUP`, `USER_MGMT`), and process termination anomalies (`ANOM_ABEND`).
+* **Kernel & Low-Level Hardware (`kernel`)**: Boot messages, memory initialization, CPU topology, PCIe buses, device drivers, netfilter/iptables packet alerts, and martian IP source alerts.
+* **System Daemons & Session Managers**: `systemd`, `systemd-logind`, `cron`/`crond`, `NetworkManager`, `rsyslogd`, `fstrim`.
+* **Standard Network Daemons & Local Services**: Postfix/Sendmail (MTA), vsftpd (FTP), OpenVPN Access Server, Apache/Nginx web server runtime and error logs.
+* **Cloud & SIEM Ingestion Envelopes**: Syslog forwarded directly, encapsulated in cloud agent payloads (Google Cloud Operations/Stackdriver, Azure Log Analytics/Sentinel), or wrapped by SIEM forwarders.
+
+---
+
+## 2. Format Specification
+
+`NIX_SYSTEM` logs follow four primary representations depending on source subsystem and ingestion pipeline:
+
+```
++-----------------------------------------------------------------------------+
+|                               NIX_SYSTEM Formats                            |
++-----------------------------------------------------------------------------+
+| 1. RFC 3164 Syslog (BSD)   : <PRI>MMM [D|DD] HH:MM:SS Host Tag[PID]: Msg    |
+| 2. RFC 5424 Syslog (IETF)  : <PRI>1 YYYY-MM-DDTHH:MM:SS.s+TZ Host App Proc -|
+| 3. Raw Linux Audit Format  : type=TYPE msg=audit(Epoch.msec:ID): k=v ...    |
+| 4. Cloud Ingestion Envelopes: JSON wrapper around syslog/audit payload      |
++-----------------------------------------------------------------------------+
+```
+
+### A. Syslog RFC 3164 (BSD Syslog)
+* **Pattern**: `<PRI>MMM [D|DD] HH:MM:SS <Host> <Tag>[<PID>]: <Message>`
+* **PRI**: Optional priority integer enclosed in angle brackets: `PRI = (Facility * 8) + Severity`.
+* **Timestamp**: Short month name, day of month (single-digit days are left-padded with a space, e.g., `"Apr  7"` vs `"Apr 28"`), and 24-hour time `HH:MM:SS`.
+* **Tag / Process**: Process name, optionally followed by `[PID]:` (e.g., `sshd[23573]:`, `kernel:`, `sudo:`).
+
+### B. Syslog RFC 5424 (IETF Syslog)
+* **Pattern**: `<PRI>1 YYYY-MM-DDTHH:MM:SS.ssssss+ZZ:ZZ <Host> <AppName> <PID> <MsgID> <StructuredData> <Message>`
+* Example: `<86>1 2024-06-13T16:01:32.747733+01:00 web-srv01 su 1234 - - pam_unix(su-l:session): session opened for user root`
+
+### C. Linux Audit Subsystem (`auditd` / `audispd`)
+* **Raw Audit Pattern**: `type=<TYPE> msg=audit(<Epoch_Seconds>.<Milliseconds>:<Event_ID>): <Key>=<Value> ...`
+* **Syslog-Wrapped Audit**: `<PRI>MMM DD HH:MM:SS <Host> audispd[<PID>]: node=<Host> type=<TYPE> msg=audit(...): ... UID="<user>" AUID="<user>",HOST=<IP>`
+* **Quoting & Delimiters**: Space-delimited key-value pairs (`key=value`, `key="value"`, `key='value'`).
+* **Hex Encoding**: Arguments containing spaces, quotes, or unprintable characters are hex-encoded without quotes (e.g., `a2=2F7573722F62696E2F676574636F6E66` or `cmd=6466202D505469`).
+
+### D. Cloud Ingestion JSON Envelopes
+* **Google Cloud Logging (`syslog`)**: JSON payload containing `insertId`, `timestamp` (ISO 8601 UTC), `resource.labels`, and `jsonPayload.message` (holding the raw syslog line).
+* **Azure Monitor / Sentinel (`Syslog`)**: Flat JSON object containing `TimeGenerated`, `HostName`, `HostIP`, `ProcessName`, `ProcessID`, `Facility`, `SeverityLevel`, and `SyslogMessage`.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Syslog Header & Priority Mapping
+
+$$\text{Priority (PRI)} = (\text{Facility} \times 8) + \text{Severity}$$
+
+| Facility | Value | Severity | Value | Calculated PRI Example |
+| :--- | :--- | :--- | :--- | :--- |
+| `user` | 1 | `err` (3) | 3 | `<11>` |
+| `user` | 1 | `notice` (5) | 5 | `<13>` |
+| `daemon` | 3 | `info` (6) | 6 | `<30>` |
+| `auth` | 4 | `warning` (4) | 4 | `<36>` |
+| `auth` | 4 | `notice` (5) | 5 | `<37>` |
+| `authpriv` | 10 | `err` (3) | 3 | `<83>` |
+| `authpriv` | 10 | `notice` (5) | 5 | `<85>` |
+| `authpriv` | 10 | `info` (6) | 6 | `<86>` |
+| `local6` | 22 | `info` (6) | 6 | `<182>` |
+
+---
+
+### Core Subsystem Schemas
+
+#### 1. PAM & Authentication Logs (`sshd`, `su`, `sudo`, `systemd-logind`)
+
+```
++-----------------------------------------------------------------------------------------------+
+| Field Name      | Type    | Description / Allowed Values                                      |
++-----------------------------------------------------------------------------------------------+
+| Hostname        | String  | Server hostname, FQDN, or IPv4 (e.g., `prod-app01`, `localhost`)   |
+| Process         | String  | `sshd`, `su`, `sudo`, `systemd-logind`, `CRON`, `useradd`         |
+| PID             | Integer | Process ID (e.g., `23573`, `119931`)                              |
+| PAM Module      | String  | `pam_unix`, `pam_sss`, `pam_winbind`, `pam_tally2`                |
+| PAM Context     | String  | `sshd:auth`, `su:session`, `cron:session`, `su-l:session`          |
+| User            | String  | Target account name (e.g., `root`, `deploy`, `svc_app`, `oracle`)  |
+| Remote Host     | IP/FQDN | Client IP or hostname (`rhost=198.51.100.1`)                      |
+| Result Action   | String  | `authentication failure`, `session opened`, `session closed`      |
++-----------------------------------------------------------------------------------------------+
+```
+
+**Common Patterns**:
+* **SSH Success**: `sshd[<PID>]: Accepted (password|publickey) for <user> from <IP> port <port> ssh2`
+* **SSH Failure**: `sshd[<PID>]: Failed password for (invalid user )?<user> from <IP> port <port> ssh2`
+* **PAM Failure**: `sshd[<PID>]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=<IP> user=<user>`
+* **Sudo Execution**: `sudo[<PID>]: <invoking_user> : TTY=<tty> ; PWD=<path> ; USER=<target_user> ; COMMAND=<command>`
+
+---
+
+#### 2. Linux Audit System (`auditd`)
+
+```
++-----------------------------------------------------------------------------------------------+
+| Field Name      | Type    | Description / Formatting Rules                                    |
++-----------------------------------------------------------------------------------------------+
+| type            | String  | Record Type (`SYSCALL`, `EXECVE`, `USER_AUTH`, `USER_LOGIN`, etc.)|
+| msg=audit(...)  | Timestamp| Epoch time with millisecond precision and event serial counter:  |
+|                 |         | `msg=audit(1651565389.241:46):`                                   |
+| pid             | Integer | Process ID executing the action                                   |
+| ppid            | Integer | Parent Process ID                                                 |
+| uid             | Integer | Effective UID (e.g., `0` for root, `1000`+ for regular users)     |
+| auid (loginuid) | Integer | Audit Login UID (original login UID; `4294967295` or `-1` = unset)|
+| ses             | Integer | Session ID (`4294967295` or `-1` = unset / daemon session)        |
+| exe             | String  | Absolute binary path (`"/usr/sbin/sshd"`, `"/bin/su"`)            |
+| comm            | String  | Command name string (`"sshd"`, `"bash"`, `"ls"`)                  |
+| terminal        | String  | TTY device (`pts/0`, `/dev/pts/1`, `ssh`, `cron`, `?`)            |
+| res             | String  | Result (`success`, `failed`, `1`, `0`)                            |
+| subj            | String  | SELinux/AppArmor context (`unconfined_u:unconfined_r:unconfined_t`)|
++-----------------------------------------------------------------------------------------------+
+```
+
+**Prominent Audit Record Types**:
+* `USER_AUTH`, `USER_LOGIN`, `USER_START`, `USER_END`: PAM lifecycle tracking.
+* `USER_CHAUTHTOK`: Password change events via `passwd` or `usermod`.
+* `ADD_USER`, `ADD_GROUP`, `DEL_GROUP`, `USER_MGMT`: User and group account provisioning.
+* `SYSCALL`: Syscall interception details (`arch`, `syscall`, `success`, `exit`, `items`).
+* `EXECVE`: Command-line arguments: `argc=N a0="..." a1="..." a2="..."`.
+* `CWD` / `PATH`: Working directory and file access paths associated with syscalls.
+* `AVC` / `USER_AVC`: Mandatory Access Control denials (`denied { getattr } for pid=...`).
+
+---
+
+#### 3. Linux Kernel Messages (`kernel`)
+
+* **Uptime Prefix**: `[ <seconds_since_boot>.<microseconds> ]`
+* **Martian Source Alert**: `IPv4: martian source <dest_ip> from <src_ip>, on dev <interface>`
+* **AppArmor/SELinux Alert**: `audit: type=1400 audit(<Epoch>.<msec>:<ID>): apparmor="<ACTION>" operation="<OP>" profile="<PROFILE>" name="<PATH>" pid=<PID>`
+* **Driver / Hardware Events**: `pci`, `scsi`, `EDAC`, `smpboot`, `clocksource`, `bridge`.
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+The `NIX_SYSTEM` log type uses distinct timestamp conventions across subsystems. When generating synthetic scenarios, use the specified time templating tags.
+
+```
++-----------------------------------------------------------------------------------------------+
+| Subsystem / Format        | Timestamp Syntax                 | Generator Template Tag         |
++-----------------------------------------------------------------------------------------------+
+| Syslog RFC 3164 (BSD)     | MMM [D|DD] HH:MM:SS              | ##$SyslogTime-0d0h0m0s$##      |
+| Syslog RFC 5424 (ISO 8601)| YYYY-MM-DDTHH:MM:SS.ssssss+ZZ:ZZ | ##$TimeStamp-0d0h0m0s$##       |
+| Auditd Header Timestamp   | Epoch.msec (e.g., 1651565389.241)| ##$Epoch-0d0h0m0s$##.<msec>    |
+| Apache Access Log         | [DD/MMM/YYYY:HH:MM:SS +ZZZZ]     | [##$ApacheTime-0d0h0m0s$##]    |
+| Apache Error Log          | [Day MMM DD HH:MM:SS.uuuuuu YYYY]| [##$ApacheErrTime-0d0h0m0s$##] |
+| Cloud Ingestion JSON (UTC)| YYYY-MM-DDTHH:MM:SS.sssssssssZ   | ##$TimeStamp-0d0h0m0s$##       |
++-----------------------------------------------------------------------------------------------+
+```
+
+### Relative Time Offset Formatting
+* For an event 15 minutes in the past: `##$SyslogTime-0d0h15m0s$##`
+* For an audit log 2 hours in the past: `msg=audit(##$Epoch-0d2h0m0s$##.482:1042)`
+* For RFC 5424 timestamps: `##$TimeStamp-0d0h0m0s$##` (expands to `2026-03-30T14:22:18.123456+00:00`)
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: SSH Brute Force Authentication Failure (Syslog RFC 3164)
+```syslog
+<85>##$SyslogTime-0d0h5m12s$## prod-srv-db01 sshd[48102]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=198.51.100.45 user=root
+<86>##$SyslogTime-0d0h5m10s$## prod-srv-db01 sshd[48102]: Failed password for root from 198.51.100.45 port 53210 ssh2
+```
+
+### Scenario 2: Sudo Privilege Escalation and Command Execution (RFC 3164)
+```syslog
+<86>##$SyslogTime-0d0h2m30s$## ip-10-50-2-176 sudo[51290]:   devops_user : TTY=pts/2 ; PWD=/home/devops_user ; USER=root ; COMMAND=/bin/cat /etc/shadow
+```
+
+### Scenario 3: User Provisioning and Password Modification (Auditd syslog-wrapped)
+```syslog
+<182>##$SyslogTime-0d0h10m0s$## srv-linux-node01 audispd[1042]: type=ADD_USER msg=audit(##$Epoch-0d0h10m0s$##.124:5912): pid=607783 uid=0 auid=1001 ses=276 subj=unconfined_u:unconfined_r:unconfined_t:s0 msg='op=add-user acct="backdoor_user" exe="/usr/sbin/useradd" hostname=srv-linux-node01 addr=? terminal=pts/0 res=success' UID="root" AUID="attacker",HOST=198.51.100.22
+<182>##$SyslogTime-0d0h9m58s$## srv-linux-node01 audispd[1042]: type=USER_CHAUTHTOK msg=audit(##$Epoch-0d0h9m58s$##.890:5913): pid=607790 uid=0 auid=1001 ses=276 subj=unconfined_u:unconfined_r:passwd_t:s0 msg='op=PAM:chauthtok grantors=pam_unix acct="backdoor_user" exe="/usr/bin/passwd" hostname=srv-linux-node01 addr=? terminal=pts/0 res=success' UID="root" AUID="attacker",HOST=198.51.100.22
+```
+
+### Scenario 4: Syscall Execution and SELinux Access Denial (Raw Auditd Format)
+```text
+type=AVC msg=audit(##$Epoch-0d1h15m22s$##.601:4210): avc:  denied  { read } for  pid=4812 comm="cat" path="/etc/shadow" dev="dm-0" ino=131075 scontext=system_u:system_r:httpd_t:s0 tcontext=system_u:object_r:shadow_t:s0 tclass=file permissive=0
+type=SYSCALL msg=audit(##$Epoch-0d1h15m22s$##.601:4210): arch=c000003e syscall=2 success=no exit=-13 a0=7ffd3a48e910 a1=0 a2=1fffffffffff0000 a3=7ffd3a48dc70 items=1 ppid=4801 pid=4812 auid=4294967295 uid=48 gid=48 euid=48 suid=48 fsuid=48 egid=48 sgid=48 fsgid=48 tty=(none) ses=4294967295 comm="cat" exe="/bin/cat" subj=system_u:system_r:httpd_t:s0 key="unauthorized_file_read"
+type=PATH msg=audit(##$Epoch-0d1h15m22s$##.601:4210): item=0 name="/etc/shadow" inode=131075 dev=fd:00 mode=0100000 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:shadow_t:s0 nametype=NORMAL cap_fp=0000000000000000 cap_fi=0000000000000000 cap_fe=0 cap_fver=0
+```
+
+### Scenario 5: Service Lifecycle & Daemon State (Syslog RFC 5424)
+```syslog
+<30>1 ##$TimeStamp-0d0h1m0s$## web-prod-app03 systemd 1 - - Starting System Logging Service...
+<30>1 ##$TimeStamp-0d0h0m59s$## web-prod-app03 systemd 1 - - Started System Logging Service.
+<86>1 ##$TimeStamp-0d0h0m45s$## web-prod-app03 su 18920 - - pam_unix(su:session): session opened for user root by admin_ops(uid=1002)
+```
+
+### Scenario 6: Cloud Platform Ingested Syslog (GCP JSON Envelope)
+```json
+{
+  "insertId": "1pwfaokfpjtp59",
+  "jsonPayload": {
+    "message": "##$SyslogTime-0d0h12m00s$## gce-prod-node01 sshd[12450]: Accepted publickey for ubuntu from 198.51.100.77 port 41234 ssh2: RSA SHA256:4ZlU07f1o5wN8m7"
+  },
+  "resource": {
+    "type": "gce_instance",
+    "labels": {
+      "project_id": "corp-infra-prod-102a",
+      "instance_id": "9058063662179264369",
+      "zone": "us-east1-b"
+    }
+  },
+  "timestamp": "##$TimeStamp-0d0h12m00s$##",
+  "labels": {
+    "compute.googleapis.com/resource_name": "gce-prod-node01"
+  },
+  "logName": "projects/corp-infra-prod-102a/logs/syslog"
+}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Mandatory Parsing Rules
+1. **RFC 3164 Spacing**: Single-digit day numbers must have two spaces between Month and Day (e.g., `"May  2"` vs `"May 22"`). Omitting the extra space causes timestamp parser failures in SIEM ingestion engines.
+2. **Audit AUID vs UID**:
+   * `auid=4294967295` (or `auid=-1` / `auid=unset`) indicates a system process, cron job, or daemon initialized prior to any interactive login.
+   * `auid=1000+` represents the authentic login identity of the human user, even if they later executed `su` or `sudo` to become `uid=0 (root)`.
+3. **Audit Hex Encoding**: Any command containing spaces or special characters executed via `EXECVE` or `USER_CMD` can be rendered in uppercase hex representation (e.g., `cmd=2F62696E2F6C73202D6C61` for `/bin/ls -la`). Parsers expect valid hex strings without quotation marks when encoded.
+4. **PID Formatting**:
+   * Standard syslog tags place the PID directly inside brackets immediately following the process name: `sshd[23573]:`.
+   * Kernel messages do **not** use a process PID tag; they use `kernel:` followed by the bracketed float uptime: `kernel: [ 5079.912215]`.
+5. **JSON String Escaping**: In JSON wrapper envelopes (GCP / Azure / SIEM forwarders), inner quotes and backslashes in syslog or audit lines must be escaped (`\"` or `\\`).
+6. **Audit Multiline Sequences**: Correlated audit events (such as `SYSCALL`, `EXECVE`, `CWD`, and `PATH`) share the exact same timestamp and sequence id `msg=audit(Epoch.msec:ID):` to allow SIEMs to reconstruct the complete execution chain. Always use identical IDs for related event records.

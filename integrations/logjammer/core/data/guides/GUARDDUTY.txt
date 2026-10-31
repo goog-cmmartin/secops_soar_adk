@@ -1,0 +1,219 @@
+# AWS GuardDuty Finding Log Generation Playbook
+
+## 1. Overview & Log Purpose
+Amazon GuardDuty is an intelligent threat detection service that continuously monitors AWS accounts, workloads, and data for malicious activity and unauthorized behavior. GuardDuty analyzes billions of events across multiple AWS data sources—including AWS CloudTrail management and event logs, Amazon VPC Flow Logs, EKS audit logs, DNS logs, and Amazon S3 data events.
+
+When a threat or anomaly is detected, GuardDuty generates a **Finding**. These findings represent actionable security alerts covering tactics such as reconnaissance, credential exfiltration, command and control (C2) communication, denial of service (DoS), cryptocurrency mining, unauthorized API calls, and privilege escalation.
+
+GuardDuty logs can be consumed in two primary JSON wrappers:
+1. **Raw GuardDuty Finding JSON**: Directly exported to S3 or fetched via GuardDuty APIs.
+2. **AWS EventBridge (formerly CloudWatch Events) Envelope JSON**: Produced when findings are streamed via EventBridge to SIEMs, Kinesis, Lambda, or SQS.
+
+---
+
+## 2. Format Specification
+
+### Classification & Structure
+* **Format**: Strictly structured JSON (JavaScript Object Notation).
+* **Delivery**: Emitted as single-line (minified) JSON strings per event to SIEM ingestion pipelines, SQS queues, or log shippers (e.g., Fluent Bit, Datadog Agent, Splunk Universal Forwarder).
+* **Quoting & Escaping**:
+  * Standard JSON rules: all field names and string values must be enclosed in double quotes (`"`).
+  * Characters such as backslashes (`\`), double quotes (`"`), and control characters within strings (e.g., in user agents or tags) must be properly escaped (`\\`, `\"`).
+  * Nested objects and arrays are heavily utilized. Trailing commas are strictly prohibited.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Top-Level Finding Schema (Common to all Findings)
+
+| Field Name | Type | Description / Constraints | Example Value |
+| :--- | :--- | :--- | :--- |
+| `schemaVersion` | String | Schema version of the finding (always `"2.0"`). | `"2.0"` |
+| `accountId` | String | 12-digit AWS account ID where the activity was detected. | `"123456789012"` |
+| `region` | String | AWS Region where the finding was generated. | `"us-east-1"`, `"eu-west-1"` |
+| `partition` | String | AWS partition name. | `"aws"`, `"aws-us-gov"`, `"aws-cn"` |
+| `id` | String | Unique 32-character hexadecimal finding identifier. | `"3ebce68c9bd2b15518ff7ac27b69f178"` |
+| `arn` | String | Full Amazon Resource Name of the finding. Follows pattern: `arn:<partition>:guardduty:<region>:<accountId>:detector/<detectorId>/finding/<id>` | `"arn:aws:guardduty:us-east-1:123456789012:detector/00b7c3aea1d6fa9c66fa179757c17a7b/finding/3ebce68c9bd2b15518ff7ac27b69f178"` |
+| `type` | String | Finding type naming convention: `<ThreatPurpose>:<ResourceTypeAffected>/<ThreatFamilyName>[.<ThreatFamilyVariant>]`. | `"Recon:EC2/PortProbeUnprotectedPort"`, `"UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration"` |
+| `severity` | Number | Numeric severity score. High: `7.0`–`8.9` (or `8`), Medium: `4.0`–`6.9` (or `5`), Low: `0.1`–`3.9` (or `2`). | `2`, `5`, `8`, `2.0`, `8.0` |
+| `createdAt` | String | ISO 8601 timestamp with milliseconds when finding was first created. | `"2023-10-15T14:20:52.517Z"` |
+| `updatedAt` | String | ISO 8601 timestamp with milliseconds when finding was last updated. | `"2023-10-15T15:40:49.958Z"` |
+| `title` | String | Human-readable short summary of the finding. | `"Unprotected port on EC2 instance i-06df12df279bffe5e is being probed."` |
+| `description` | String | Detailed description of the threat, context, and potential impact. | `"EC2 instance has an unprotected port which is being probed by a known malicious host."` |
+| `resource` | Object | Details of the AWS resource involved (Instance, AccessKey, S3Bucket, etc.). | *See Resource Schema below* |
+| `service` | Object | GuardDuty-specific metadata, action triggers, network connections, and profiling. | *See Service Schema below* |
+
+---
+
+### EventBridge Envelope Schema (When Delivered via EventBridge)
+
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `version` | String | EventBridge envelope version (typically `"0"`). |
+| `id` | String | UUID representing the EventBridge event ID. |
+| `detail-type` | String | Always `"GuardDuty Finding"`. |
+| `source` | String | Always `"aws.guardduty"`. |
+| `account` | String | 12-digit AWS Account ID. |
+| `time` | String | ISO 8601 timestamp (`YYYY-MM-DDTHH:MM:SSZ`). |
+| `region` | String | AWS Region name. |
+| `resources` | Array | Typically an empty array `[]` for GuardDuty events. |
+| `detail` | Object | Contains the full **Raw GuardDuty Finding JSON** payload. |
+
+---
+
+### The `resource` Object Schema
+
+The structure varies depending on `resource.resourceType`:
+
+#### 1. EC2 Instance (`resourceType`: `"Instance"`)
+* `resourceType`: `"Instance"`
+* `instanceDetails`:
+  * `instanceId`: String (`i-0a8d172a06154b0b6`)
+  * `instanceType`: String (`t2.xlarge`, `m5.4xlarge`, `c5.large`)
+  * `launchTime`: String (ISO 8601 UTC `2021-03-31T07:06:47Z`)
+  * `platform`: String or `null` (`"windows"`, `null` for Linux)
+  * `imageId`: String (`ami-02b5cd5aa444bee23`)
+  * `imageDescription`: String or `null`
+  * `instanceState`: String (`"running"`, `"stopped"`)
+  * `availabilityZone`: String (`"us-east-1a"`, `"us-east-1c"`)
+  * `iamInstanceProfile`: Object with `arn` and `id`, or `null`
+  * `productCodes`: Array of objects `[{"productCodeId": "...", "productCodeType": "marketplace"}]`
+  * `tags`: Array of key-value objects `[{"key": "Name", "value": "Prod-Web"}]`
+  * `networkInterfaces`: Array of ENI objects containing:
+    * `networkInterfaceId` (`eni-0669916c082242270`)
+    * `privateDnsName`, `privateIpAddress`
+    * `privateIpAddresses`: Array of private IP mappings
+    * `publicDnsName`, `publicIp`
+    * `subnetId` (`subnet-0012cd14f5fe54a78`), `vpcId` (`vpc-019fd40c78b99a7c8`)
+    * `securityGroups`: Array of `[{"groupName": "launch-wizard-2", "groupId": "sg-0f5bcac494c60a5bf"}]`
+
+#### 2. IAM Access Key (`resourceType`: `"AccessKey"`)
+* `resourceType`: `"AccessKey"`
+* `accessKeyDetails`:
+  * `accessKeyId`: String (`ASIA...` for temporary credentials, `AKIA...` for long-term keys)
+  * `principalId`: String (`AIDA...` for IAM user, `AROA...:<sessionName>` for AssumedRole, account ID for Root)
+  * `userType`: String (`"IAMUser"`, `"AssumedRole"`, `"Root"`, `"FederatedUser"`)
+  * `userName`: String (`"AWSReservedSSO_AdministratorAccess"`, `"deploy-bot"`, `"admin-user"`)
+* *Optional Associated Resources*: May also contain `instanceDetails` (for credential exfiltration from an EC2 instance) or `s3BucketDetails`.
+
+---
+
+### The `service` Object Schema
+
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `serviceName` | String | Always `"guardduty"`. |
+| `detectorId` | String | 32-character hexadecimal ID of the detector. |
+| `resourceRole` | String | Role of the resource in the finding: `"TARGET"` or `"ACTOR"`. |
+| `action` | Object | The specific action that triggered the alert. Contains `actionType` and action-specific sub-objects. |
+| `eventFirstSeen` | String | ISO 8601 timestamp (`YYYY-MM-DDTHH:MM:SSZ`) of first event. |
+| `eventLastSeen` | String | ISO 8601 timestamp (`YYYY-MM-DDTHH:MM:SSZ`) of last event. |
+| `archived` | Boolean | `false` for active findings, `true` for archived findings. |
+| `count` | Integer | Total count of aggregated security events for this finding. |
+| `additionalInfo` | Object | Finding-specific metadata (threat intel lists, profiled behavior anomalies, scanned ports). |
+| `evidence` | Object/Null | Threat intelligence evidence or `null`. |
+
+#### Action Types & Nested Fields (`service.action`):
+
+1. **`actionType`: `"NETWORK_CONNECTION"`**
+   * `networkConnectionAction`:
+     * `connectionDirection`: `"INBOUND"` or `"OUTBOUND"`
+     * `protocol`: `"TCP"`, `"UDP"`
+     * `blocked`: Boolean (`true`/`false`)
+     * `localPortDetails`: `{"port": 3389, "portName": "RDP"}`
+     * `remotePortDetails`: `{"port": 1028, "portName": "Unknown"}`
+     * `localIpDetails`: `{"ipAddressV4": "10.0.1.50"}`
+     * `remoteIpDetails`: `{"ipAddressV4": "4.5.6.7", "organization": {"asn": "...", "asnOrg": "...", "isp": "...", "org": "..."}, "country": {"countryName": "..."}, "city": {"cityName": "..."}, "geoLocation": {"lat": 0.0, "lon": 0.0}}`
+
+2. **`actionType`: `"AWS_API_CALL"`**
+   * `awsApiCallAction`:
+     * `api`: API name (e.g., `"DeleteBucketPublicAccessBlock"`, `"DeleteTrail"`, `"UpdateInstanceInformation"`, `"ListTags"`)
+     * `serviceName`: Target AWS service (e.g., `"s3.amazonaws.com"`, `"cloudtrail.amazonaws.com"`, `"ssm.amazonaws.com"`)
+     * `callerType`: `"Remote IP"`, `"Domain"`, or `"AWS Service"`
+     * `remoteIpDetails` or `domainDetails`: Calling entity details
+     * `affectedResources`: Key-value map of targeted AWS resources (e.g., `{"AWS::S3::Bucket": "finance-records"}`)
+
+3. **`actionType`: `"PORT_PROBE"`**
+   * `portProbeAction`:
+     * `blocked`: Boolean (`false`)
+     * `portProbeDetails`: Array of probed ports and attacker IP details:
+       * `localPortDetails`: `{"port": 22, "portName": "SSH"}`
+       * `remoteIpDetails`: Object with GeoIP and ASN details.
+
+4. **`actionType`: `"DNS_REQUEST"`**
+   * `dnsRequestAction`:
+     * `domain`: Query domain (e.g., `"malicious-c2-domain.com"`, `"pool.minexmr.com"`)
+     * `protocol`: `"UDP"`
+     * `blocked`: Boolean
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+GuardDuty uses two distinct timestamp formats across finding fields:
+1. **ISO 8601 with Milliseconds (`YYYY-MM-DDTHH:MM:SS.sssZ`)**: Used for `createdAt` and `updatedAt`.
+2. **ISO 8601 Standard UTC (`YYYY-MM-DDTHH:MM:SSZ`)**: Used for `eventFirstSeen`, `eventLastSeen`, `launchTime`, and EventBridge envelope `time`.
+
+### Templating Variables Instruction
+When synthetically generating logs, use relative dynamic timestamp macros to simulate realistic time intervals. The event history must be chronological:
+`launchTime` < `eventFirstSeen` <= `eventLastSeen` <= `createdAt` <= `updatedAt` / `time`
+
+* **`createdAt`**: `##$TimeStamp-0d0h5m0s$##.124Z`
+* **`updatedAt`**: `##$TimeStamp-0d0h1m0s$##.891Z`
+* **`eventFirstSeen`**: `##$TimeStamp-0d2h0m0s$##Z`
+* **`eventLastSeen`**: `##$TimeStamp-0d0h6m0s$##Z`
+* **`launchTime`**: `##$TimeStamp-10d0h0m0s$##Z`
+* **EventBridge `time`**: `##$TimeStamp-0d0h1m0s$##Z`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: EC2 Port Probing / Recon (Raw JSON)
+```json
+{"schemaVersion":"2.0","accountId":"123456789012","region":"us-east-1","partition":"aws","id":"9abce68c9bd2b15518ff7ac27b69f101","arn":"arn:aws:guardduty:us-east-1:123456789012:detector/d1b7c3aea1d6fa9c66fa179757c17a11/finding/9abce68c9bd2b15518ff7ac27b69f101","type":"Recon:EC2/PortProbeUnprotectedPort","resource":{"resourceType":"Instance","instanceDetails":{"imageId":"ami-0c55b159cbfafe1f0","instanceId":"i-0123456789abcdef0","instanceType":"t3.medium","launchTime":"##$TimeStamp-5d0h0m0s$##Z","platform":null,"productCodes":[],"iamInstanceProfile":null,"networkInterfaces":[{"ipv6Addresses":[],"networkInterfaceId":"eni-0a1b2c3d4e5f67890","privateDnsName":"ip-10-0-1-15.ec2.internal","privateIpAddress":"10.0.1.15","privateIpAddresses":[{"privateDnsName":"ip-10-0-1-15.ec2.internal","privateIpAddress":"10.0.1.15"}],"subnetId":"subnet-0123456789abcdef0","vpcId":"vpc-0fedcba9876543210","securityGroups":[{"groupName":"web-secgroup","groupId":"sg-0123456789abcdef0"}],"publicDnsName":"ec2-54-210-10-20.compute-1.amazonaws.com","publicIp":"54.210.10.20"}],"outpostArn":null,"tags":[{"key":"Environment","value":"Production"},{"key":"Name","value":"Public-Web-Server"}],"instanceState":"running","availabilityZone":"us-east-1a"}},"service":{"serviceName":"guardduty","detectorId":"d1b7c3aea1d6fa9c66fa179757c17a11","action":{"actionType":"PORT_PROBE","portProbeAction":{"portProbeDetails":[{"localPortDetails":{"port":8080,"portName":"HTTP-Alt"},"remoteIpDetails":{"ipAddressV4":"198.51.100.23","organization":{"asn":"13335","asnOrg":"CLOUDFLARENET","isp":"Cloudflare Inc.","org":"Cloudflare"},"country":{"countryName":"United States"},"city":{"cityName":"San Jose"},"geoLocation":{"lat":37.3388,"lon":-121.8914}}}],"blocked":false}},"resourceRole":"TARGET","additionalInfo":{"threatName":"Scanner","threatListName":"ProofPoint"},"evidence":{"threatIntelligenceDetails":[{"threatNames":["Scanner"],"threatListName":"ProofPoint"}]},"eventFirstSeen":"##$TimeStamp-0d1h30m0s$##Z","eventLastSeen":"##$TimeStamp-0d0h10m0s$##Z","archived":false,"count":14},"severity":2,"createdAt":"##$TimeStamp-0d1h25m0s$##.415Z","updatedAt":"##$TimeStamp-0d0h5m0s$##.120Z","title":"Unprotected port on EC2 instance i-0123456789abcdef0 is being probed.","description":"EC2 instance has an unprotected port which is being probed by a known malicious host."}
+```
+
+### Example 2: Inbound SSH Brute Force Attack (Raw JSON)
+```json
+{"schemaVersion":"2.0","accountId":"123456789012","region":"us-east-1","partition":"aws","id":"88ba6c29627d23b473955da6aeb92c88","arn":"arn:aws:guardduty:us-east-1:123456789012:detector/d1b7c3aea1d6fa9c66fa179757c17a11/finding/88ba6c29627d23b473955da6aeb92c88","type":"UnauthorizedAccess:EC2/SSHBruteForce","resource":{"resourceType":"Instance","instanceDetails":{"imageId":"ami-08e4b3f19b9b56116","instanceId":"i-0abcdef1234567890","instanceType":"c5.xlarge","launchTime":"##$TimeStamp-15d0h0m0s$##Z","platform":null,"productCodes":[],"iamInstanceProfile":{"arn":"arn:aws:iam::123456789012:instance-profile/SSMManagedInstanceProfile","id":"AIPA123456789EXAMPLE1"},"networkInterfaces":[{"ipv6Addresses":[],"networkInterfaceId":"eni-0fedcba9876543210","privateDnsName":"ip-172-31-10-44.ec2.internal","privateIpAddress":"172.31.10.44","privateIpAddresses":[{"privateDnsName":"ip-172-31-10-44.ec2.internal","privateIpAddress":"172.31.10.44"}],"subnetId":"subnet-0fedcba9876543210","vpcId":"vpc-0123456789abcdef0","securityGroups":[{"groupName":"ssh-inbound","groupId":"sg-0abcdef1234567890"}],"publicDnsName":"ec2-3-90-100-50.compute-1.amazonaws.com","publicIp":"3.90.100.50"}],"outpostArn":null,"tags":[{"key":"Role","value":"Bastion"}],"instanceState":"running","availabilityZone":"us-east-1b"}},"service":{"serviceName":"guardduty","detectorId":"d1b7c3aea1d6fa9c66fa179757c17a11","action":{"actionType":"NETWORK_CONNECTION","networkConnectionAction":{"connectionDirection":"INBOUND","remoteIpDetails":{"ipAddressV4":"203.0.113.195","organization":{"asn":"4134","asnOrg":"CHINANET","isp":"China Telecom","org":"No.31 Jin-rong Street"},"country":{"countryName":"China"},"city":{"cityName":"Beijing"},"geoLocation":{"lat":39.9042,"lon":116.4074}},"remotePortDetails":{"port":48122,"portName":"Unknown"},"localPortDetails":{"port":22,"portName":"SSH"},"protocol":"TCP","blocked":false,"localIpDetails":{"ipAddressV4":"172.31.10.44"}}},"resourceRole":"TARGET","additionalInfo":{},"evidence":null,"eventFirstSeen":"##$TimeStamp-0d4h0m0s$##Z","eventLastSeen":"##$TimeStamp-0d0h15m0s$##Z","archived":false,"count":842},"severity":2,"createdAt":"##$TimeStamp-0d3h55m0s$##.102Z","updatedAt":"##$TimeStamp-0d0h10m0s$##.845Z","title":"203.0.113.195 is performing SSH brute force attacks against i-0abcdef1234567890.","description":"203.0.113.195 is performing SSH brute force attacks against i-0abcdef1234567890. Brute force attacks are used to gain unauthorized access to your instance by guessing the SSH password."}
+```
+
+### Example 3: S3 Public Access Disabled (EventBridge Envelope Wrapped)
+```json
+{"version":"0","id":"c2a5d911-3948-4a4b-8d18-5f9630c77431","detail-type":"GuardDuty Finding","source":"aws.guardduty","account":"123456789012","time":"##$TimeStamp-0d0h2m0s$##Z","region":"us-west-2","resources":[],"detail":{"schemaVersion":"2.0","accountId":"123456789012","region":"us-west-2","partition":"aws","id":"7ebd0549658b0234d2661d8ec94f3f99","arn":"arn:aws:guardduty:us-west-2:123456789012:detector/e2ba4bbad60e7284478ffa1c63772222/finding/7ebd0549658b0234d2661d8ec94f3f99","type":"Policy:S3/BucketBlockPublicAccessDisabled","resource":{"resourceType":"AccessKey","accessKeyDetails":{"accessKeyId":"AKIA0000000000EXAMPLE","principalId":"AIDA0000000000EXAMPLE","userType":"IAMUser","userName":"cloud-deployer"},"s3BucketDetails":[{"name":"company-confidential-financial-data","type":"Destination"}]},"service":{"serviceName":"guardduty","detectorId":"e2ba4bbad60e7284478ffa1c63772222","action":{"actionType":"AWS_API_CALL","awsApiCallAction":{"api":"DeleteBucketPublicAccessBlock","serviceName":"s3.amazonaws.com","callerType":"Remote IP","remoteIpDetails":{"ipAddressV4":"198.51.100.88","organization":{"asn":"15169","asnOrg":"GOOGLE","isp":"Google LLC","org":"Google LLC"},"country":{"countryName":"United States"},"city":{"cityName":"Mountain View"},"geoLocation":{"lat":37.422,"lon":-122.084}},"affectedResources":{"AWS::S3::Bucket":"company-confidential-financial-data"}}},"resourceRole":"TARGET","additionalInfo":{},"evidence":null,"eventFirstSeen":"##$TimeStamp-0d0h10m0s$##Z","eventLastSeen":"##$TimeStamp-0d0h10m0s$##Z","archived":false,"count":1},"severity":5,"createdAt":"##$TimeStamp-0d0h8m0s$##.115Z","updatedAt":"##$TimeStamp-0d0h8m0s$##.115Z","title":"Amazon S3 Block Public Access was disabled for S3 bucket company-confidential-financial-data.","description":"Amazon S3 Block Public Access was disabled for S3 bucket company-confidential-financial-data by cloud-deployer calling DeleteBucketPublicAccessBlock. If this behavior is not expected, it may indicate a configuration mistake or that your credentials are compromised."}}
+```
+
+### Example 4: High Severity Instance Credential Exfiltration (Raw JSON)
+```json
+{"schemaVersion":"2.0","accountId":"123456789012","region":"eu-west-1","partition":"aws","id":"3aba5dbf38c83c9bf00a32758ec2748a","arn":"arn:aws:guardduty:eu-west-1:123456789012:detector/80b879c85b8f7608f71859a5e15196b0/finding/3aba5dbf38c83c9bf00a32758ec2748a","type":"UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration","resource":{"resourceType":"AccessKey","instanceDetails":{"instanceId":"i-08afc37bce9e841b7","instanceType":"r5.2xlarge","launchTime":"##$TimeStamp-20d0h0m0s$##Z","platform":"linux","productCodes":[],"iamInstanceProfile":{"arn":"arn:aws:iam::123456789012:instance-profile/EC2DatabaseAdminProfile","id":"AIPA0000000000EXAMPLE"},"networkInterfaces":[{"ipv6Addresses":[],"networkInterfaceId":"eni-07469922458c62ec7","privateDnsName":"ip-10-237-246-50.eu-west-1.compute.internal","privateIpAddress":"10.237.246.50","privateIpAddresses":[{"privateDnsName":"ip-10-237-246-50.eu-west-1.compute.internal","privateIpAddress":"10.237.246.50"}],"subnetId":"subnet-04c9f897c0b287b42","vpcId":"vpc-058cdc9fea7db6296","securityGroups":[{"groupName":"DB-Internal-SG","groupId":"sg-049de0c748fe998cd"}],"publicDnsName":"","publicIp":""}],"outpostArn":null,"tags":[{"key":"Environment","value":"Production"},{"key":"Workload","value":"OracleDB"}],"instanceState":"running","availabilityZone":"eu-west-1b","imageId":"ami-0042be5a445cb4271","imageDescription":"Amazon Linux 2 AMI"},"accessKeyDetails":{"accessKeyId":"ASIA0000000000EXAMPLE","principalId":"AROA0000000000EXAMPLE:i-08afc37bce9e841b7","userType":"AssumedRole","userName":"EC2DatabaseAdminProfile"}},"service":{"serviceName":"guardduty","detectorId":"80b879c85b8f7608f71859a5e15196b0","action":{"actionType":"AWS_API_CALL","awsApiCallAction":{"api":"DescribeDBInstances","serviceName":"rds.amazonaws.com","callerType":"Remote IP","remoteIpDetails":{"ipAddressV4":"185.220.101.5","organization":{"asn":"208323","asnOrg":"Relaycorp","isp":"Tor Exit Node","org":"Tor Network"},"country":{"countryName":"Germany"},"city":{"cityName":"Frankfurt"},"geoLocation":{"lat":50.1109,"lon":8.6821}},"affectedResources":{}}},"resourceRole":"TARGET","additionalInfo":{"recentCredentials":[{"accessKeyId":"ASIA0000000000EXAMPLE","principalId":"AROA0000000000EXAMPLE:i-08afc37bce9e841b7","ipAddressV4":"185.220.101.5"}]},"evidence":null,"eventFirstSeen":"##$TimeStamp-0d0h45m0s$##Z","eventLastSeen":"##$TimeStamp-0d0h5m0s$##Z","archived":false,"count":12},"severity":8,"createdAt":"##$TimeStamp-0d0h40m0s$##.113Z","updatedAt":"##$TimeStamp-0d0h5m0s$##.790Z","title":"Credentials for instance role EC2DatabaseAdminProfile used from external IP address.","description":"Credentials created exclusively for an EC2 instance using instance role EC2DatabaseAdminProfile have been used from external IP address 185.220.101.5."}
+```
+
+### Example 5: High Severity Outbound Port Sweep / Compromised Actor (Raw JSON)
+```json
+{"schemaVersion":"2.0","accountId":"123456789012","region":"us-east-1","partition":"aws","id":"48bb180305aba5d5ec0de701d0eea503","arn":"arn:aws:guardduty:us-east-1:123456789012:detector/f4b866278a510b105b21a2ca3e0808a1/finding/48bb180305aba5d5ec0de701d0eea503","type":"Impact:EC2/PortSweep","resource":{"resourceType":"Instance","instanceDetails":{"instanceId":"i-009ff7566d51c316f","instanceType":"m5.4xlarge","launchTime":"##$TimeStamp-30d0h0m0s$##Z","platform":null,"productCodes":[],"iamInstanceProfile":{"arn":"arn:aws:iam::123456789012:instance-profile/SSMCloudWatchInstanceRole","id":"AIPA0000000000EXAMPLE"},"networkInterfaces":[{"ipv6Addresses":[],"networkInterfaceId":"eni-0a3a89c5ebd521862","privateDnsName":"ip-10-233-19-182.ec2.internal","privateIpAddress":"10.233.19.182","privateIpAddresses":[{"privateDnsName":"ip-10-233-19-182.ec2.internal","privateIpAddress":"10.233.19.182"}],"subnetId":"subnet-0219b69d17a41caa1","vpcId":"vpc-02cad0c8cbfd53481","securityGroups":[{"groupName":"default","groupId":"sg-077a243dd8f6ba641"}],"publicDnsName":"ec2-52-91-45-12.compute-1.amazonaws.com","publicIp":"52.91.45.12"}],"outpostArn":null,"tags":[{"key":"Name","value":"Infected-Compute-Node"},{"key":"Environment","value":"Prod"}],"instanceState":"running","availabilityZone":"us-east-1c","imageId":"ami-0222beaa5a66636b6","imageDescription":"Ubuntu 20.04 CIS Hardened"}},"service":{"serviceName":"guardduty","detectorId":"f4b866278a510b105b21a2ca3e0808a1","action":{"actionType":"NETWORK_CONNECTION","networkConnectionAction":{"connectionDirection":"OUTBOUND","remoteIpDetails":{"ipAddressV4":"203.0.113.8","organization":{"asn":"0","asnOrg":"UNKNOWN","isp":"UNKNOWN","org":"UNKNOWN"},"country":{"countryName":"United States"},"city":{"cityName":""},"geoLocation":{"lat":37.751,"lon":-97.822}},"remotePortDetails":{"port":22,"portName":"SSH"},"localPortDetails":{"port":51864,"portName":"Unknown"},"protocol":"TCP","blocked":false,"localIpDetails":{"ipAddressV4":"10.233.19.182"}}},"resourceRole":"ACTOR","additionalInfo":{"scannedPort":22,"additionalScannedPorts":[443,8080,3389,9443]},"evidence":null,"eventFirstSeen":"##$TimeStamp-0d6h0m0s$##Z","eventLastSeen":"##$TimeStamp-0d0h2m0s$##Z","archived":false,"count":4112},"severity":8,"createdAt":"##$TimeStamp-0d5h50m0s$##.191Z","updatedAt":"##$TimeStamp-0d0h1m0s$##.708Z","title":"EC2 instance i-009ff7566d51c316f is probing a port on a large number of publicly routable IP addresses.","description":"EC2 instance i-009ff7566d51c316f is probing a port on a large number of publicly routable IP addresses. This type of activity is typically used to find vulnerable hosts to exploit."}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Strict Resource and Action Coherence**:
+   * If `resource.resourceType` is `"Instance"`, `service.action` is almost always `"NETWORK_CONNECTION"`, `"PORT_PROBE"`, or `"DNS_REQUEST"`.
+   * If `resource.resourceType` is `"AccessKey"`, `service.action` must be `"AWS_API_CALL"`.
+   * **Exception**: `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration` uses `resourceType: "AccessKey"`, but contains both `instanceDetails` (the origin instance) and `accessKeyDetails` (the compromised role/key).
+2. **Actor vs. Target Semantics**:
+   * When an AWS resource is being attacked from the outside (e.g., port probed, brute-forced), `service.resourceRole` is `"TARGET"`.
+   * When an internal EC2 instance is compromised and conducting malicious scans or outbound C2, `service.resourceRole` is `"ACTOR"`.
+3. **Severity Value Range**:
+   * Low: `0.1` – `3.9` (represented commonly as `2` or `2.0`).
+   * Medium: `4.0` – `6.9` (represented commonly as `5` or `5.0`).
+   * High: `7.0` – `8.9` (represented commonly as `8` or `8.0`).
+4. **ARN Consistency**:
+   * `arn` field must match: `arn:aws:guardduty:<region>:<accountId>:detector/<detectorId>/finding/<id>`.
+   * Detector ID in `arn` must equal `service.detectorId`.
+   * ID in `arn` must equal the top-level `id` field.
+5. **JSON Structure & Escaping**:
+   * GuardDuty output contains deeply nested dictionaries. Avoid syntax errors like unbalanced brackets, missing commas between keys, or raw unescaped quotes inside `tags`, `title`, or `description`.
+   * SIEM ingestion pipes expect one complete JSON object per log record without internal line breaks.

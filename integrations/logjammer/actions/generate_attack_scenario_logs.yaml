@@ -1,0 +1,55 @@
+creator: admin
+description: Generates multi-source synthetic security telemetry using Gemini and bundled schema playbooks, with optional GTI enrichment and direct Google SecOps ingestion.
+dynamic_results_metadata:
+- result_example_path: resources/generate_attack_scenario_logs_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: LogJammer
+is_async: false
+name: Generate Attack Scenario Logs
+parameters:
+- default_value: ''
+  description: Natural language description of the attack scenario to simulate.
+  is_mandatory: true
+  name: Scenario Prompt
+  type: string
+- default_value: ''
+  description: Comma-separated list of log types (e.g. AWS_CLOUDTRAIL,WINDOWS_SYSMON). Leave empty for auto-inference.
+  is_mandatory: false
+  name: Log Types
+  type: string
+- default_value: ''
+  description: Optional Curated or Custom YARA-L rule ID(s) (comma-separated, e.g. ur_1,ur_2) or rule name to reverse-engineer into telemetry.
+  is_mandatory: false
+  name: Rule Identifier
+  type: string
+- default_value: 'fire'
+  description: Simulation outcome for rule-based generation (fire, evade, or full-chain).
+  is_mandatory: false
+  name: Rule Outcome
+  type: string
+- default_value: ''
+  description: Optional custom scenario name or tag applied to Google SecOps ingestion labels (SCENARIO_TAG).
+  is_mandatory: false
+  name: Scenario Name
+  type: string
+- default_value: '5'
+  description: Approximate number of synthetic log events to generate.
+  is_mandatory: false
+  name: Event Count
+  type: string
+- default_value: ''
+  description: Optional anchor timestamp (ISO-8601 e.g. [Alert.WindowStartTime] or Unix epoch ms e.g. [Alert.StartTime]) to backdate generated logs around. Leave empty to auto-detect from the current SOAR Alert timestamp.
+  is_mandatory: false
+  name: Base Timestamp
+  type: string
+- default_value: true
+  description: Ingest generated logs directly into Google SecOps (Chronicle) via v1alpha API.
+  is_mandatory: false
+  name: Ingest to SecOps
+  type: boolean
+- default_value: false
+  description: Enrich scenario prompt with live threat indicators from Google Threat Intelligence (GTI).
+  is_mandatory: false
+  name: Enrich with Google TI
+  type: boolean

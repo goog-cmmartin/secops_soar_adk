@@ -1,0 +1,25 @@
+api_version: "2.0"
+identifier: whois_xml_api
+name: "My first Integration - Whois XML API"
+description: "Custom integration for WHOIS XML API to look up domain registration details, availability, and enrich security entities."
+category: "Threat Intelligence"
+author: "Google SecOps Developer"
+version: "1.0.0"
+python_version: "3.11"
+is_custom: true
+
+configuration:
+  - name: "API Key"
+    description: "The API Key generated from WHOIS XML API account portal."
+    type: string
+    is_mandatory: true
+    is_password: true
+    default_value: ""
+  - name: "Verify SSL"
+    description: "Verify SSL certificates for API requests."
+    type: boolean
+    is_mandatory: false
+    default_value: true
+
+simulation_data:
+  provider_name: "My first Integration - Whois XML API"

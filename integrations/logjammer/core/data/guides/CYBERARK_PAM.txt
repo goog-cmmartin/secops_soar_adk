@@ -1,0 +1,255 @@
+# CyberArk Privileged Access Management (PAM) Log Generation Guide
+
+---
+
+## 1. Overview & Log Purpose
+
+### Log Description
+CyberArk PAM (Privileged Access Management) logs capture security-critical activities from the CyberArk Privileged Access Security suite. This includes events originating from the **CyberArk Enterprise Password Vault (EPV)**, **Central Policy Manager (CPM)**, **Password Vault Web Access (PVWA)**, **Privileged Session Manager (PSM / PSM for SSH)**, **Event-Driven Architecture (EDA)**, and **CyberArk Identity / Dynamic Privileged Access (DPA)** cloud services.
+
+### Monitored Activities
+* **Vault Access & User Authentication**: User logon, logoff, MFA verification, failed authentication attempts.
+* **Credential Lifecycle & Access**: Password retrieval (show/checkout), password usage, credential rotation (store, verify, reconcile, change) performed by PVWA users or CPM agents.
+* **Privileged Session Monitoring**: PSM session establishment, protocol proxying (RDP, SSH, Database clients), real-time window title tracking, keystroke logging, executed commands, session termination.
+* **Safe & Object Administration**: Creation/update/deletion of Safes, file/object permissions, category updates, policy associations.
+* **Cloud & Zero Standing Privilege (ZSP)**: DPA ephemeral user provisioning, session start/end on cloud/on-prem targets, Identity SSO federated logons.
+
+---
+
+## 2. Format Specification
+
+CyberArk PAM logs appear in multiple industry-standard formats depending on the vault translator template (`XSL` file) or cloud platform used:
+
+```
++-----------------------------------------------------------------------------------------------+
+| Log Format Variants                                                                           |
++-----------------------------------------------------------------------------------------------+
+| 1. Syslog CEF (RFC 5424 / RFC 3164) -> Output of CEFSyslog.xsl (Most Common)                 |
+| 2. Syslog LEEF (RFC 5424 / RFC 3164) -> Output of LEEFSyslog.xsl                              |
+| 3. CyberArk EDA JSON (RFC 5424)      -> Output of CyberArk Event-Driven Architecture JSON     |
+| 4. CyberArk Cloud / DPA JSON         -> REST Audit APIs / Cloud SaaS stream                   |
+| 5. Vault Key-Value Syslog            -> Standard RFC5424 translator with quoted Key=Value     |
+| 6. Legacy Pipe-Delimited Syslog      -> Legacy vault notification format                      |
++-----------------------------------------------------------------------------------------------+
+```
+
+### 2.1 Syslog CEF (Common Event Format)
+* **Header Structure**: `<PRI>VERSION TIMESTAMP HOSTNAME CEF:0|Cyber-Ark|Vault|ProductVersion|MessageID|Desc|Severity|`
+* **Extension Structure**: `act=Action suser=Issuer fname=File dvc=GatewayStation shost=Station dhost=Address duser=UserName externalId=SessionID app=Protocol reason=Reason cs1Label="Affected User Name" cs1=...`
+* **Delimiters**: Pipe (`|`) separates header fields; single spaces separate extension key-value pairs; equal signs (`=`) bind keys to values.
+* **Quoting Rules**: Labels containing spaces (e.g., `cs1Label="Affected User Name"`) use double quotes. Values containing spaces or special characters may be plain or quoted depending on configuration.
+
+### 2.2 Syslog LEEF (Log Event Extended Format)
+* **Header Structure**: `<PRI>VERSION TIMESTAMP HOSTNAME LEEF:1.0|Cyber-Ark|Vault|ProductVersion|MessageID|`
+* **Extension Structure**: Tab (`\t`) or space-delimited `Key=Value` pairs.
+* **Mandatory Keys**: `sev=`, `Action=`, `EventMessage=`, `usrName=`, `src=`, `Safe=`, `File=`.
+
+### 2.3 CyberArk EDA JSON
+* **Header**: Standard Syslog RFC 5424 header prefix (`<PRI>1 TIMESTAMP HOSTNAME`).
+* **Payload**: Single-line JSON object containing `{"format":"cyberark-eda-json","version":"1.0","syslog":{"audit_record":{...}}}`.
+
+### 2.4 CyberArk Cloud / DPA JSON
+* Pure NDJSON/JSON format emitted by CyberArk Identity Security Cloud Services containing `uuid`, `tenantId`, `applicationCode`, `auditCode`, `customData`, etc.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Syslog Header Fields
+
+| Field Name | Type | Description | Example Values |
+| :--- | :--- | :--- | :--- |
+| `PRI` | String | Syslog Facility/Severity code enclosed in `<>` | `<5>1`, `<7>1`, `<5>`, `<13>` |
+| `Version` | Integer | RFC 5424 syslog version (omitted in RFC 3164) | `1` |
+| `Timestamp` | String | ISO 8601 UTC or BSD format | `2026-03-26T10:11:59Z`, `May 06 04:21:42` |
+| `Hostname` | String | Vault or component hostname / FQDN | `VAULT-PROD-01`, `VAULT-NODE-PROD-02` |
+
+---
+
+### 3.2 CEF Extension Fields (`CEFSyslog.xsl`)
+
+| Field Key | Field Label / Meaning | Data Type | Sample Distribution / Description |
+| :--- | :--- | :--- | :--- |
+| `act` | Action | String | `Logon`, `Retrieve password`, `Store password`, `PSM Connect`, `Use Password`, `Window Title`, `Find Files` |
+| `suser` | Source / Requesting User | String | `admin`, `PasswordManager` (CPM), `PVWAGWUser`, `svc_scanner`, `john.doe@company.com` |
+| `fname` | Vault File / Object Path | String | `Root\Database-PLAT-ORACLE-SYSTEM-host01-SYSTEM`, `Root\Operating System-Dom_Win-ad.domain.com-adm_user` |
+| `dvc` | Device IP (Gateway Station) | IP Address | IP of PVWA or PSM initiating proxy connection (e.g., `10.0.10.15`) |
+| `shost` | Source Station / Host | IP / Hostname | Client/User source workstation IP or hostname (`192.168.1.50`, `CORP-LAPTOP-01`) |
+| `dhost` | Destination Host | IP / Hostname | Target endpoint machine (`dbprod01.domain.com`, `10.20.30.40`) |
+| `duser` | Destination Account / Target | String | Target privileged account (`SYSTEM`, `root`, `administrator`, `svc_app`) |
+| `externalId`| Session UUID / Ticket ID | UUID / String | `469adea1-3e1b-4ac1-a497-2a709cb8d8a0`, `INC000000190554` |
+| `app` | Application Protocol | String | `RDP`, `SSH`, `Database`, `HTTPS`, `SQL Server` |
+| `reason` | Request / Ticket Reason | String | Justification provided by user or automation rationale |
+| `cs1Label` | `"Affected User Name"` | Label | Static CEF label definition |
+| `cs1` | Affected User | String | Targeted user context when modifying user objects |
+| `cs2Label` | `"Safe Name"` | Label | Static CEF label definition |
+| `cs2` | Safe Name | String | `P-SYS-PROD-AD`, `PVWAReports`, `DEV-ORA-LA-SUPP`, `PasswordManagerShared` |
+| `cs3Label` | `"Device Type"` | Label | Static CEF label definition |
+| `cs3` | Device Type | String | `Operating System`, `Database`, `Application`, `Network`, `Cloud Infrastructure` |
+| `cs4Label` | `"Database"` | Label | Static CEF label definition |
+| `cs4` | Database Instance | String | Oracle SID, MSSQL Database Name (or empty) |
+| `cs5Label` | `"Other info"` | Label | Static CEF label definition |
+| `cs5` | Gateway / Extra IP | IP / String | Secondary station identifier |
+| `cn1Label` | `"Request Id"` | Label | Static CEF label definition |
+| `cn1` | Request ID | Integer | Dual-control request ID number |
+| `cn2Label` | `"Ticket Id"` | Label | Static CEF label definition |
+| `cn2` | Ticket Number / Integration | String | `CPM`, `Validate ticket number [Byp4ssC0d3]`, `CPM internal process` |
+| `msg` | Raw Message Payload | String | Detailed audit message, error strings, or ticket verification metadata |
+
+---
+
+### 3.3 Core CyberArk Message IDs & Event Codes
+
+| MessageID | Action Verb / Name | Typical Severity | Description |
+| :--- | :--- | :--- | :--- |
+| `4` | `User Authentication` | 3 (Low) | Successful or failed Vault identity authentication |
+| `7` | `Logon` | 5 (Info) | User/Component logged into Vault |
+| `24` | `CPM Change Password` | 6 (Info) | Automated or manual CPM credential rotation |
+| `51` | `Retrieve File` | 5 (Info) | General object/file read from Safe |
+| `56` | `Failure: Find Files` / `Find Files` | 7 (Warning) | Search or directory listing failure/permission denied |
+| `88` | `Set Password` | 5 (Info) | Manual or API-driven password overwrite |
+| `106` | `Update File Category` | 6 (Info) | Updating metadata/compliance properties on safe objects |
+| `236` | `Backup Metadata` | 5 (Info) | Vault backup/replication job triggered |
+| `294` | `Store password` | 5 (Info) | New password value saved to Vault |
+| `295` | `Retrieve password` | 5 (Info) | Credential checked out / shown to user / retrieved by CPM |
+| `300` | `PSM Connect` | 5 (Info) | Live proxy connection initiated through PSM |
+| `308` | `Use Password` | 5 (Info) | Credential injected directly into remote session |
+| `411` | `Window Title` | 6 (Info) | PSM active foreground window/process tracking |
+
+---
+
+### 3.4 CyberArk Cloud / Identity / DPA JSON Fields
+
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `uuid` | String (UUID) | Unique event identifier |
+| `tenantId` | String (UUID) | Cloud tenant ID |
+| `timestamp` | Long (Epoch ms) | Event timestamp in milliseconds |
+| `username` / `userId` | String | Cloud administrator or SSO identity |
+| `applicationCode` | String | Component: `DPA` (Dynamic Privileged Access), `IDP` (Identity), `PVWA` |
+| `auditCode` | String | Action code (e.g., `DPAI401` = Session start, `IDP2012` = MFA summary) |
+| `component` | String | Sub-service (`DPA-RDP Connection`, `Identity`, `Privilege Cloud`) |
+| `customData` | Object | Nested dynamic metadata (session duration, ephemeral user, GeoIP, connection string) |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+CyberArk implementations output logs in three main timestamp styles:
+
+1. **RFC 5424 ISO-8601 UTC**: Used in modern syslog wrappers and EDA JSON:
+   `2026-04-23T13:27:25Z` or `2026-04-23T13:27:25.123Z`
+2. **RFC 3164 BSD Syslog**: Used in standard syslog collectors:
+   `May 06 04:21:42` (Note: Single-digit days are space-padded: `May  6 04:21:42`)
+3. **Epoch Milliseconds**: Used in Cloud API / DPA JSON:
+   `1746455057516`
+
+### Dynamic Generation Template Tags
+When generating test data, replace all static time values with relative timestamp macros:
+
+* **ISO-8601 Format**: `##$TimeStamp-0d2h15m0s$##` (produces `2026-04-23T13:27:25Z`)
+* **Syslog BSD Format**: `##$SyslogTime-0d0h30m0s$##` (produces `May 06 04:21:42`)
+* **Epoch Seconds**: `##$Epoch-0d1h0m0s$##` (produces `1774519755`)
+* **Epoch Milliseconds**: `##$Epoch-0d1h0m0s$##000` or `##$EpochMs-0d0h5m0s$##`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: Password Retrieval / Checkout by Human Administrator (CEF Format)
+* **Description**: User retrieves an administrative domain account password via PVWA with ticket justification.
+```text
+<5>1 ##$TimeStamp-0d0h15m0s$## PAM-VAULT-01 CEF:0|Cyber-Ark|Vault|14.6.0000|295|Retrieve password|5|act=Retrieve password suser=adm_jdoe@corp.example fname=Root\Operating System-Corp_Domain_Admin-dc01.corp.example-svc_tier0 dvc=10.100.12.5 shost=192.168.45.12 dhost=dc01.corp.example duser=svc_tier0 externalId=INC-9948210 app= reason=Emergency Domain Controller maintenance cs1Label="Affected User Name" cs1= cs2Label="Safe Name" cs2=P-CORP-SYS-TIER0-ADM cs3Label="Device Type" cs3=Operating System cs4Label="Database" cs4= cs5Label="Other info" cs5=10.100.12.5 cn1Label="Request Id" cn1=1892 cn2Label="Ticket Id" cn2=INC-9948210 msg=Emergency Domain Controller maintenance
+```
+
+### Scenario 2: Privileged Session Manager (PSM) Live Session Start (CEF Format)
+* **Description**: Interactive RDP session launched through PSM proxy, capturing connection GUID.
+```text
+<5>1 ##$TimeStamp-0d1h30m0s$## PAM-VAULT-01 CEF:0|Cyber-Ark|Vault|14.6.0000|300|PSM Connect|5|act=PSM Connect suser=s_morgan@cyberark.cloud fname=Root\Operating System-Linux_Prod_Servers-srv-app-10.internal-root dvc=10.100.12.20 shost=10.200.4.55 dhost=srv-app-10.internal duser=root externalId=8f7e2c91-b31a-4299-8d17-9102ca1478fe app=SSH reason= cs1Label="Affected User Name" cs1= cs2Label="Safe Name" cs2=P-LINUX-PROD-ROOT cs3Label="Device Type" cs3=Operating System cs4Label="Database" cs4= cs5Label="Other info" cs5= cn1Label="Request Id" cn1= cn2Label="Ticket Id" cn2= msg=
+```
+
+### Scenario 3: Suspicious PSM Window Title / Process Execution (LEEF Format)
+* **Description**: Threat actor inside a privileged session launches PowerShell to run reconnaissance scripts.
+```text
+<5>1 ##$TimeStamp-0d0h05m0s$## PSM-GW-PROD02 LEEF:1.0|Cyber-Ark|Vault|14.2.0003|411|sev=6	Action=Window Title	EventMessage=Window Title	OSUser=	usrName=contractor_tlee	src=192.168.100.84	SourceUser=	TargetUser=	File=Root\Operating System-Corporate_IT-mgmt01.corp-admin_tlee	Safe=E102-IT-MGMT	Location=	Category=	RequestId=	Reason=	ExtraDetails=Command=powershell.exe, Windows PowerShell - Invoke-Mimikatz;ConnectionComponentId=PSM-RDP;DstHost=mgmt01.corp;ProcessId=14208;ProcessName=powershell.exe;Protocol=RDP;PSMID=PSM-GW-PROD02;RDPOffset=1200B;SessionID=39aa02c1-6b44-42b1-9bb4-ec5721a7114e;SrcHost=192.168.100.84;User=admin_tlee;VIDOffset=412T;	GatewayStation=10.100.12.20	CAPolicy=	shost=192.168.100.84	dhost=mgmt01.corp	duser=admin_tlee	externalId=39aa02c1-6b44-42b1-9bb4-ec5721a7114e	app=RDP	reason=powershell.exe, Windows PowerShell - Invoke-Mimikatz
+```
+
+### Scenario 4: Central Policy Manager (CPM) Automated Password Rotation (CyberArk EDA JSON)
+* **Description**: CPM successfully reconciles and changes an Oracle service account password.
+```text
+<5>1 ##$TimeStamp-0d0h45m0s$## PAM-VAULT-01 {"format":"cyberark-eda-json","version":"1.0","syslog":{"audit_record":{"Rfc5424":"yes","Timestamp":"##$SyslogTime-0d0h45m0s$##","IsoTimestamp":"##$TimeStamp-0d0h45m0s$##","Hostname":"PAM-VAULT-01","Vendor":"Cyber-Ark","Product":"Vault","Version":"14.6.0000","MessageID":"24","Desc":"CPM Change Password","Severity":"Info","Issuer":"PasswordManager","Action":"CPM Change Password","SourceUser":"","TargetUser":"","Safe":"P-ORA-PROD-PASSWORDS","File":"Root\\Database-PLAT-ORACLE-FINDB-db01.corp.example-app_finance","Station":"10.100.12.10","Location":"","Category":"","RequestId":"","Reason":"ExpirationPeriod","ExtraDetails":"address=db01.corp.example;username=app_finance;","Message":"CPM Change Password","GatewayStation":"","CAProperties":{"CAProperty":[{"Name":"LogonDomain","Value":""},{"Name":"DeviceType","Value":"Database"},{"Name":"PolicyID","Value":"Oracle_Database_Automated"},{"Name":"Address","Value":"db01.corp.example"},{"Name":"UserName","Value":"app_finance"},{"Name":"CreationMethod","Value":"PVWA"},{"Name":"LastSuccessVerification","Value":"##$Epoch-1d0h0m0s$##"},{"Name":"SequenceID","Value":"240"},{"Name":"LastSuccessChange","Value":"##$Epoch-0d0h45m0s$##"},{"Name":"RetriesCount","Value":"0"},{"Name":"CPMStatus","Value":"success"},{"Name":"LastTask","Value":"ChangeTask"}]}}}}
+```
+
+### Scenario 5: CyberArk Dynamic Privileged Access (DPA) Zero Standing Privilege Session Start (Cloud JSON)
+* **Description**: Ephemeral zero-standing privilege Windows administrative session initiated via CyberArk DPA.
+```json
+{
+  "uuid": "893c52a0-4b11-4791-8842-3a87114e9102",
+  "tenantId": "c9284fa1-8204-4b17-a551-7140e915fa01",
+  "timestamp": ##$Epoch-0d0h10m0s$##000,
+  "username": "alice.wong@example.com",
+  "applicationCode": "DPA",
+  "auditCode": "DPAI401",
+  "auditType": "Info",
+  "action": "DPA Windows session started",
+  "userId": "alice.wong@example.com",
+  "source": "198.51.100.24",
+  "actionType": "Start",
+  "component": "DPA-RDP Connection",
+  "serviceName": "Secure Infrastructure Access",
+  "accessMethod": "Ephemeral",
+  "accountId": null,
+  "target": "prod-k8s-node01.infra.example.com",
+  "command": null,
+  "sessionId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "message": "A DPA session on Windows was started by alice.wong@example.com",
+  "customData": {
+    "DPA": {
+      "ephemeral_user": "dpa-alice-9912",
+      "access_method": "Zero Standing Privilege",
+      "assigned_groups": "Cloud-Infra-Admins",
+      "authentication_methods": "Federation-SAML",
+      "target_machine": "prod-k8s-node01.infra.example.com",
+      "source_user": "alice.wong@example.com",
+      "source_hostname": "MAC-LPT-ALICE",
+      "assigned_domain_groups": "Domain Admins",
+      "connection_string": "secureaccess /i alice.wong@example.com /s eu-fintech-access /d infra.example.com /a prod-k8s-node01.infra.example.com /u dpa-alice-9912",
+      "maximum_session_duration": "480 Minutes"
+    }
+  },
+  "cloudProvider": "aws",
+  "cloudWorkspacesAndRoles": [],
+  "cloudIdentities": null,
+  "cloudAssets": null,
+  "safe": null,
+  "accountName": null,
+  "targetPlatform": "Cloud",
+  "targetAccount": null,
+  "identityType": "HUMAN",
+  "correlationId": null
+}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Parser Compatibility Requirements
+1. **Empty Field Representation**:
+   * In standard CEF logs exported by CyberArk, empty extension fields **must maintain the label pairing**, e.g.:
+     `cs1Label="Affected User Name" cs1= cs2Label="Safe Name" cs2=P-SECURE-SAFE`
+   * Do not drop the key name (`cs1=`) even if the value is empty, or standard SIEM CEF parsers may fail to calculate key offsets.
+2. **Escaping Equals Signs in Message and Tickets**:
+   * Inside CEF `msg=` or `cn2=` fields containing sub-key-value pairs, equal signs and backslashes must be escaped with a backslash:
+     `msg=(Action: Connect)(Ticket ID\=INC10293)(Ticketing System\=ServiceNow)`
+3. **File Path Nomenclature (`fname`)**:
+   * CyberArk vault file paths follow the strict convention:
+     `Root\<PlatformType>-<DeviceType/Policy>-<TargetHost/Address>-<Username>`
+     *(e.g., `Root\Operating System-Dom_Windows_MAN-ad.corp.com-adm_svc`)*.
+4. **Distinction Between `suser`, `usrName`, and `duser`**:
+   * `suser` / `usrName` / `Issuer`: The authenticated Vault user or automation component requesting access (e.g., `PasswordManager`, `PVWAAppUser`, `john_smith`).
+   * `duser` / `TargetUser` / `UserName`: The privileged managed target account whose password is being checked out (e.g., `root`, `Administrator`, `oracle_dba`).
+5. **Syslog PRI Header Rules**:
+   * `<5>1` represents Facility 0 (kernel/local), Severity 5 (Notice) with RFC 5424 Version 1.
+   * `<7>1` represents Severity 7 (Debug/Informational).
+   * Ensure there is a single space between the Syslog header and the `CEF:0` or `LEEF:1.0` declaration.
