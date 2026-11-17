@@ -1,6 +1,6 @@
 """Google SecOps (Chronicle) rule management and retrieval service."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -22,6 +22,43 @@ def slugify(s: str) -> str:
     return "uncategorized"
   cleaned = re.sub(r"[^\w]+", "_", s.strip().lower()).strip("_")
   return cleaned or "uncategorized"
+
+
+def parse_date_spec(spec: Optional[str]) -> Optional[datetime]:
+  """Parse an ISO date/timestamp or relative duration (e.g. '30d', '24h', '2026-01-01') into UTC datetime."""
+  if not spec or not spec.strip():
+    return None
+  s = spec.strip()
+  rel_match = re.match(r"^(\d+)\s*([dhwmy])$", s.lower())
+  if rel_match:
+    val = int(rel_match.group(1))
+    unit = rel_match.group(2)
+    now = datetime.now(timezone.utc)
+    if unit == "h":
+      return now - timedelta(hours=val)
+    if unit == "d":
+      return now - timedelta(days=val)
+    if unit == "w":
+      return now - timedelta(weeks=val)
+    if unit == "m":
+      return now - timedelta(days=val * 30)
+    if unit == "y":
+      return now - timedelta(days=val * 365)
+
+  if re.match(r"^\d{4}-\d{2}$", s):
+    s = f"{s}-01T00:00:00+00:00"
+  elif re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+    s = f"{s}T00:00:00+00:00"
+  elif s.endswith("Z"):
+    s = s[:-1] + "+00:00"
+
+  try:
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+      dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+  except ValueError:
+    return None
 
 
 def extract_mitre_ids(rule_data: Dict[str, Any], text: str = "") -> tuple[List[str], List[str]]:
@@ -454,10 +491,26 @@ class RuleService:
       tactic: Optional[str] = None,
       live_only: bool = False,
       rule_type: str = "all",
+      precision: Optional[str] = None,
+      created_after: Optional[str] = None,
+      created_before: Optional[str] = None,
+      updated_after: Optional[str] = None,
+      updated_before: Optional[str] = None,
+      sort_by: Optional[str] = None,
   ) -> List[SecOpsRule]:
     """Convenience alias for search_rules."""
     return self.search_rules(
-        query=query, technique=technique, tactic=tactic, live_only=live_only, rule_type=rule_type
+        query=query,
+        technique=technique,
+        tactic=tactic,
+        live_only=live_only,
+        rule_type=rule_type,
+        precision=precision,
+        created_after=created_after,
+        created_before=created_before,
+        updated_after=updated_after,
+        updated_before=updated_before,
+        sort_by=sort_by,
     )
 
   def get_rule(self, identifier: str) -> Optional[SecOpsRule]:
@@ -548,8 +601,13 @@ class RuleService:
       precision: Optional[str] = None,
       alerting_only: bool = False,
       require_text: bool = False,
+      created_after: Optional[str] = None,
+      created_before: Optional[str] = None,
+      updated_after: Optional[str] = None,
+      updated_before: Optional[str] = None,
+      sort_by: Optional[str] = None,
   ) -> List[SecOpsRule]:
-    """Search and filter rules with optional precision, alerting, and relevance ranking."""
+    """Search and filter rules with optional precision, alerting, date, and relevance ranking."""
     corpus = rules if rules is not None else self.load_rules_from_cache(rule_type=rule_type)
     results = []
 
@@ -557,6 +615,11 @@ class RuleService:
     t_upper = technique.strip().upper() if technique and technique.strip() else None
     tac_upper = tactic.strip().upper() if tactic and tactic.strip() else None
     prec_upper = precision.strip().upper() if precision and precision.strip() else None
+
+    c_after_dt = parse_date_spec(created_after)
+    c_before_dt = parse_date_spec(created_before)
+    u_after_dt = parse_date_spec(updated_after)
+    u_before_dt = parse_date_spec(updated_before)
 
     for r in corpus:
       if rule_type != "all":
@@ -569,7 +632,7 @@ class RuleService:
       if require_text and not (r.text and r.text.strip()):
         continue
       if prec_upper and prec_upper != "ALL":
-        rule_prec = str(r.raw_data.get("precision", "")).upper()
+        rule_prec = (r.precision or str(r.raw_data.get("precision", ""))).upper()
         if rule_prec != prec_upper:
           continue
       if alerting_only and not r.raw_data.get("alerting", False):
@@ -578,6 +641,22 @@ class RuleService:
         continue
       if tac_upper and tac_upper not in r.tactics:
         continue
+      if c_after_dt or c_before_dt:
+        r_created = parse_date_spec(r.create_time)
+        if not r_created:
+          continue
+        if c_after_dt and r_created < c_after_dt:
+          continue
+        if c_before_dt and r_created > c_before_dt:
+          continue
+      if u_after_dt or u_before_dt:
+        r_updated = parse_date_spec(r.update_time or r.create_time)
+        if not r_updated:
+          continue
+        if u_after_dt and r_updated < u_after_dt:
+          continue
+        if u_before_dt and r_updated > u_before_dt:
+          continue
       if q_lower:
         match_query = (
             q_lower in r.display_name.lower()
@@ -602,6 +681,18 @@ class RuleService:
           corpus=corpus,
       )
       results = [item[0] for item in ranked]
+
+    effective_sort = sort_by or ("updated" if (u_after_dt or u_before_dt) else ("created" if (c_after_dt or c_before_dt) else None))
+    if effective_sort:
+      s_key = effective_sort.lower()
+      if s_key == "updated":
+        results.sort(key=lambda x: x.update_time or x.create_time or "", reverse=True)
+      elif s_key == "created":
+        results.sort(key=lambda x: x.create_time or "", reverse=True)
+      elif s_key == "name":
+        results.sort(key=lambda x: x.display_name.lower())
+      elif s_key == "id":
+        results.sort(key=lambda x: x.rule_id.lower())
 
     return results
 

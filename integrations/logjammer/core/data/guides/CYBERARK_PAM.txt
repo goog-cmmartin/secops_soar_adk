@@ -150,7 +150,7 @@ When generating test data, replace all static time values with relative timestam
 * **ISO-8601 Format**: `##$TimeStamp-0d2h15m0s$##` (produces `2026-04-23T13:27:25Z`)
 * **Syslog BSD Format**: `##$SyslogTime-0d0h30m0s$##` (produces `May 06 04:21:42`)
 * **Epoch Seconds**: `##$Epoch-0d1h0m0s$##` (produces `1774519755`)
-* **Epoch Milliseconds**: `##$Epoch-0d1h0m0s$##000` or `##$EpochMs-0d0h5m0s$##`
+* **Epoch Milliseconds**: `##$Epoch-0d1h0m0s$##000` or `##$EpochMS-0d0h5m0s$##`
 
 ---
 
@@ -210,7 +210,7 @@ When generating test data, replace all static time values with relative timestam
       "assigned_groups": "Cloud-Infra-Admins",
       "authentication_methods": "Federation-SAML",
       "target_machine": "prod-k8s-node01.infra.example.com",
-      "source_user": "alice.wong@example.com",
+      "source_user": "",
       "source_hostname": "MAC-LPT-ALICE",
       "assigned_domain_groups": "Domain Admins",
       "connection_string": "secureaccess /i alice.wong@example.com /s eu-fintech-access /d infra.example.com /a prod-k8s-node01.infra.example.com /u dpa-alice-9912",

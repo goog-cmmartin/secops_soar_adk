@@ -235,7 +235,7 @@ When generating synthetic scenarios, replace static epoch timestamps with dynami
 - `##$Epoch-0d0h0m0s$##` : Current event timestamp in epoch seconds (e.g., `1738839878`).
 - `##$Epoch-0d0h5m0s$##` : 5 minutes prior to the base timestamp (epoch seconds).
 - `##$Epoch-0d2h0m0s$##` : 2 hours prior to the base timestamp (epoch seconds).
-- `##$EpochMicro-0d0h0m10s$##` : Microsecond-level timestamp for `details.action_timestamp` (16 digits).
+- `##$EpochMicroseconds-0d0h0m10s$##` : Microsecond-level timestamp for `details.action_timestamp` (16 digits).
 
 ---
 
@@ -256,7 +256,7 @@ When generating synthetic scenarios, replace static epoch timestamps with dynami
 
 ### Scenario 3: Security Anomaly Alert (Data Exfiltration / Excessive Downloads)
 ```json
-{"id": "95b7e8cc-f651-40cd-80d9-b3afc9bd42a0", "date_create": ##$Epoch-0d0h10m00s$##, "action": "anomaly", "actor": {"type": "user", "user": {"id": "U04106Q8ELA", "name": "Alex Mercer", "email": "amercer@acme.com", "team": "E01JHFK2BF0"}}, "entity": {"type": "user", "user": {"id": "U04106Q8ELA", "name": "Alex Mercer", "email": "amercer@acme.com", "team": "E01JHFK2BF0"}}, "context": {"location": {"type": "enterprise", "id": "E01JHFK2BF0", "name": "Acme Global", "domain": "acmeww"}, "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_3_0) AppleWebKit/537.36 (KHTML, like Gecko) Slack/4.41.105 Chrome/130.0.6723.118 Electron/33.2.0 Safari/537.36 AppleSilicon Sonic Slack_SSB/4.41.105", "ip_address": "203.0.113.88", "session_id": 8269895388903}, "details": {"action_timestamp": ##$EpochMicro-0d0h10m05s$##, "client_ja3_fingerprint": "1be8360b66649edee1de25f81d98ec27", "location": "Bucharest, RO", "previous_ip_address": "198.51.100.45", "previous_ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "reason": ["excessive_downloads", "impossible_travel"]}}
+{"id": "95b7e8cc-f651-40cd-80d9-b3afc9bd42a0", "date_create": ##$Epoch-0d0h10m00s$##, "action": "anomaly", "actor": {"type": "user", "user": {"id": "U04106Q8ELA", "name": "Alex Mercer", "email": "amercer@acme.com", "team": "E01JHFK2BF0"}}, "entity": {"type": "user", "user": {"id": "U04106Q8ELA", "name": "Alex Mercer", "email": "amercer@acme.com", "team": "E01JHFK2BF0"}}, "context": {"location": {"type": "enterprise", "id": "E01JHFK2BF0", "name": "Acme Global", "domain": "acmeww"}, "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_3_0) AppleWebKit/537.36 (KHTML, like Gecko) Slack/4.41.105 Chrome/130.0.6723.118 Electron/33.2.0 Safari/537.36 AppleSilicon Sonic Slack_SSB/4.41.105", "ip_address": "203.0.113.88", "session_id": 8269895388903}, "details": {"action_timestamp": ##$EpochMicroseconds-0d0h10m05s$##, "client_ja3_fingerprint": "1be8360b66649edee1de25f81d98ec27", "location": "Bucharest, RO", "previous_ip_address": "198.51.100.45", "previous_ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "reason": ["excessive_downloads", "impossible_travel"]}}
 ```
 
 ### Scenario 4: User Joins Public Channel via Bot Integration

@@ -1,10 +1,10 @@
-# AI Generation Playbook: Google Cloud Platform (GCP) Firewall Logs (`GPC_FIREWALL`)
+# AI Generation Playbook: Google Cloud Platform (GCP) Firewall Logs (`GCP_FIREWALL`)
 
 ---
 
 ## 1. Overview & Log Purpose
 
-**GPC_FIREWALL** logs (officially Google Cloud VPC Firewall Rules Logging) capture TCP, UDP, ICMP, and other IP traffic evaluated by Google Compute Engine (GCE) VPC firewall rules. When firewall logging is enabled on a subnet or firewall rule, Google Cloud Logging generates structured records for every connection (or sampled packets) matching the configured rules.
+**GCP_FIREWALL** logs (officially Google Cloud VPC Firewall Rules Logging) capture TCP, UDP, ICMP, and other IP traffic evaluated by Google Compute Engine (GCE) VPC firewall rules. When firewall logging is enabled on a subnet or firewall rule, Google Cloud Logging generates structured records for every connection (or sampled packets) matching the configured rules.
 
 ### Primary Activities Recorded:
 * **Allowed / Denied Ingress Traffic**: External or lateral inbound traffic hitting GCE virtual machine network interfaces.

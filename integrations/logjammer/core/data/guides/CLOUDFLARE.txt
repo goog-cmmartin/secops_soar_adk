@@ -137,9 +137,9 @@ Cloudflare logs primarily use **ISO 8601 UTC string format (`YYYY-MM-DDTHH:MM:SS
 
 When generating synthetic scenarios, use the following replacement variables:
 * Standard UTC ISO 8601: `##$TimeStamp-0d0h0m0s$##` (Evaluates to: `YYYY-MM-DDTHH:MM:SSZ`)
-* Fractional Seconds UTC: `##$TimeStampIso8601_Nano-0d0h0m0s$##` (Evaluates to: `YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ`)
+* Fractional Seconds UTC: `##$TimeStamp-0d0h0m0s|%Y-%m-%dT%H:%M:%S.%f000Z$##` (Evaluates to: `YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ`)
 * Unix Epoch Seconds: `##$Epoch-0d0h0m0s$##`
-* Unix Epoch Nanoseconds: `##$EpochNano-0d0h0m0s$##`
+* Unix Epoch Nanoseconds: `##$EpochNanoseconds-0d0h0m0s$##`
 
 ### Temporal Consistency Rules:
 1. `EdgeStartTimestamp` must be equal to or slightly precede `EdgeEndTimestamp` (typically `0` to `5` seconds difference).

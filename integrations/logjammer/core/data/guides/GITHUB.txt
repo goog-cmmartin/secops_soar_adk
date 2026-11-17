@@ -122,7 +122,7 @@ GitHub logs utilize three major timestamp variations depending on log emission t
 | **Syslog Header** | `MMM DD HH:MM:SS` (RFC 3164) | `##$SyslogTime-0d0h0m0s$##` | `Mar 28 23:16:16` |
 | **ISO 8601 (UTC)** | `YYYY-MM-DDTHH:MM:SSZ` | `##$TimeStamp-0d0h0m0s$##` | `2023-09-27T23:59:02Z` |
 | **ISO 8601 (Sub-second)**| `YYYY-MM-DDTHH:MM:SS.ffffffZ`| `##$TimeStamp-0d0h0m0s$##` | `2023-03-28T23:16:14.751740633Z` |
-| **Nginx / Combined** | `[DD/MMM/YYYY:HH:MM:SS +0000]` | `[##$HTTPDate-0d0h0m0s$##]` | `[09/May/2023:12:34:23 +0000]` |
+| **Nginx / Combined** | `[DD/MMM/YYYY:HH:MM:SS +0000]` | `[##$TimeStamp-0d0h0m0s|%d/%b/%Y:%H:%M:%S +0000$##]` | `[09/May/2023:12:34:23 +0000]` |
 
 ### Rules for Synthetic Generation:
 1. When generating JSON audit logs, set both `"created_at"` and `"@timestamp"` to the same 13-digit millisecond value.

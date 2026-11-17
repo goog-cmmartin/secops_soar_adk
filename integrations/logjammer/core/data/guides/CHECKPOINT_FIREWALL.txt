@@ -163,10 +163,10 @@ Check Point logs embed up to three timestamp instances: the Syslog arrival heade
 | :--- | :--- | :--- |
 | **Syslog RFC 3164** | `MMM DD HH:MM:SS` (e.g., `Jul  9 02:10:09`) | `##$SyslogTime-0d0h0m0s$##` |
 | **ISO-8601 UTC** | `YYYY-MM-DDTHH:MM:SSZ` (e.g., `2023-11-20T07:47:29Z`) | `##$TimeStamp-0d0h0m0s$##` |
-| **ISO-8601 Timezone** | `YYYY-MM-DDTHH:MM:SS[+-]HH:MM` | `##$TimeStampIsoTZ-0d0h0m0s$##` |
+| **ISO-8601 Timezone** | `YYYY-MM-DDTHH:MM:SS[+-]HH:MM` | `##$TimeStamp-0d0h0m0s|%Y-%m-%dT%H:%M:%S%:z$##` |
 | **Epoch Seconds** | Integer seconds (e.g., `1625809605`) | `##$Epoch-0d0h0m0s$##` |
-| **Epoch Milliseconds** | Integer milliseconds (e.g., `1625811007000`) | `##$EpochMs-0d0h0m0s$##` |
-| **CEF Date Format** | `YYYY-MM-DD HH:MM:SS` (e.g., `2023-04-24 05:32:56`) | `##$TimeStampCef-0d0h0m0s$##` |
+| **Epoch Milliseconds** | Integer milliseconds (e.g., `1625811007000`) | `##$EpochMS-0d0h0m0s$##` |
+| **CEF Date Format** | `YYYY-MM-DD HH:MM:SS` (e.g., `2023-04-24 05:32:56`) | `##$TimeStamp-0d0h0m0s|%Y-%m-%d %H:%M:%S$##` |
 
 ---
 
@@ -199,7 +199,7 @@ Check Point logs embed up to three timestamp instances: the Syslog arrival heade
 ### Example 5: Remote Access VPN - Connectra Client Login Success (CEF Format)
 **Scenario**: Remote user authenticating to Endpoint Security VPN with Windows 11 client posture verification.
 ```text
-<13>CEF:0|Check Point|Connectra|Check Point|Log|Log|Unknown|act=Log In cnt=0 cs3Label=User Group cs3=Remote_Engineering cs5Label=Authentication Method deviceDirection=0 duser=m.garcia@acme.corp outcome=Success requestClientApplication=Endpoint Security VPN rt=##$TimeStampCef-0d0h4m00s$## spt=0 dpt=443 loguid={0x6446453f,0x2,0x101a8c0,0x3ffffdc5} origin=10.68.106.170 originsicname=CN\=VPN-GW-01,O\=MGMT-CLUSTER..g8bt3p sequencenum=186 version=5 client_build=986103000 client_version=E87.20 cvpn_category=Session device_identification={820E8BF2-DF82-4BE6-A2D1-E4FC9E6AFDF8} event_type=Login failed_login_factor_num=0 host_ip=192.168.1.155 host_type=PC login_option=Standard login_timestamp=##$Epoch-0d0h4m00s$## more=authenticated_machine\= (CN\=LAPTOP-MGARCIA,OU\=Laptops,OU\=Computers,DC\=acme,DC\=corp) office_mode_ip=172.28.14.92 os_bits=64bit os_build=22621 os_edition=Enterprise os_name=Windows os_version=11 proto=6 proxy_src_ip=0.0.0.0 session_timeout=28800 session_uid={6446453F-0002-0000-C0A8-0101C5FDFF3F} src=198.51.100.77 tunnel_protocol=IPSec user_dn=CN=Maria Garcia,OU=Users,DC=acme,DC=corp
+<13>CEF:0|Check Point|Connectra|Check Point|Log|Log|Unknown|act=Log In cnt=0 cs3Label=User Group cs3=Remote_Engineering cs5Label=Authentication Method deviceDirection=0 duser=m.garcia@acme.corp outcome=Success requestClientApplication=Endpoint Security VPN rt=##$TimeStamp-0d0h4m00s|%Y-%m-%d %H:%M:%S$## spt=0 dpt=443 loguid={0x6446453f,0x2,0x101a8c0,0x3ffffdc5} origin=10.68.106.170 originsicname=CN\=VPN-GW-01,O\=MGMT-CLUSTER..g8bt3p sequencenum=186 version=5 client_build=986103000 client_version=E87.20 cvpn_category=Session device_identification={820E8BF2-DF82-4BE6-A2D1-E4FC9E6AFDF8} event_type=Login failed_login_factor_num=0 host_ip=192.168.1.155 host_type=PC login_option=Standard login_timestamp=##$Epoch-0d0h4m00s$## more=authenticated_machine\= (CN\=LAPTOP-MGARCIA,OU\=Laptops,OU\=Computers,DC\=acme,DC\=corp) office_mode_ip=172.28.14.92 os_bits=64bit os_build=22621 os_edition=Enterprise os_name=Windows os_version=11 proto=6 proxy_src_ip=0.0.0.0 session_timeout=28800 session_uid={6446453F-0002-0000-C0A8-0101C5FDFF3F} src=198.51.100.77 tunnel_protocol=IPSec user_dn=CN=Maria Garcia,OU=Users,DC=acme,DC=corp
 ```
 
 ---

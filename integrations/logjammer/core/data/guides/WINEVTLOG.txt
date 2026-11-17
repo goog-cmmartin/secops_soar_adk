@@ -1,0 +1,75 @@
+# Windows Event Log (`WINEVTLOG`) Generation Playbook
+
+## 1. Overview & Log Purpose
+Windows Event Logs (`WINEVTLOG`) capture native operating system security, system, and application audit events across Windows endpoints, member servers, and Active Directory Domain Controllers. In Google SecOps (Chronicle SIEM), the `WINEVTLOG` parser processes events collected primarily from the `Security`, `System`, and `Application` channels (forwarded via NXLog `im_msvistalog` flattened JSON, BindPlane / Chronicle Forwarder, or Winlogbeat).
+
+## 2. Format Specification (NXLog `im_msvistalog` Flattened JSON)
+The canonical format expected by the Google SecOps `WINEVTLOG` parser is **single-line flattened JSON** produced by NXLog (`im_msvistalog`), containing both standard Windows Event header fields and event-specific payload fields at the root JSON object level, alongside a formatted `Message` string.
+
+### Mandatory Header Fields
+| Field Name | Type | Description | Example |
+| :--- | :--- | :--- | :--- |
+| `EventTime` | String | Event timestamp (`YYYY-MM-DD HH:MM:SS`) | `"2026-10-22 21:00:05"` |
+| `Hostname` | String | FQDN of the Windows host | `"wks-fin04.corp.contoso.local"` |
+| `Keywords` | Integer | Windows audit keyword bitmask | `-9214364837600034816` (Audit Success) |
+| `EventType` | String | Audit outcome | `"AUDIT_SUCCESS"`, `"AUDIT_FAILURE"`, `"INFO"` |
+| `SeverityValue` | Integer | Numeric severity | `2` |
+| `Severity` | String | Severity label | `"INFO"` |
+| `EventID` | Integer | Windows Event ID | `4688`, `4624`, `4672`, `4697`, `7045` |
+| `SourceName` | String | Event provider name | `"Microsoft-Windows-Security-Auditing"` |
+| `ProviderGuid` | String | Security Auditing Provider GUID | `"{54849625-5478-4994-A5BA-3E3B0328C30D}"` |
+| `Version` | Integer | Event schema version | `2` |
+| `Task` | Integer | Audit subcategory task ID | `13312` (Process Creation), `12544` (Logon) |
+| `OpcodeValue` | Integer | Event opcode | `0` |
+| `RecordNumber` | Integer | Sequential event record ID | `501294` |
+| `ProcessID` | Integer | LSASS/system logging PID | `684` |
+| `ThreadID` | Integer | Logging thread ID | `712` |
+| `Channel` | String | Windows Event channel | `"Security"`, `"System"` |
+| `Category` | String | Audit subcategory name | `"Process Creation"`, `"Logon"` |
+| `Opcode` | String | Opcode label | `"Info"` |
+| `EventReceivedTime` | String | Collector timestamp (`YYYY-MM-DD HH:MM:SS`) | `"2026-10-22 21:00:06"` |
+| `SourceModuleName` | String | NXLog input module name | `"eventlog"` |
+| `SourceModuleType` | String | NXLog module type | `"im_msvistalog"` |
+
+---
+
+## 3. Core Event IDs & UDM Mapping Rules
+
+### Event ID 4688: A new process has been created (`PROCESS_LAUNCH`)
+Critically important for process and command-line detection rules in Google SecOps:
+* **UDM Mapping (`WINEVTLOG` parser for EventID 4688)**:
+  * `ParentProcessName` -> `$e.principal.process.file.full_path`
+  * `ProcessId` (Parent Process ID in 4688) -> `$e.principal.process.pid`
+  * `NewProcessName` -> `$e.target.process.file.full_path`
+  * `NewProcessId` -> `$e.target.process.pid`
+  * `CommandLine` -> `$e.target.process.command_line`
+  * `SubjectUserName` -> `$e.principal.user.userid`
+  * `SubjectDomainName` -> `$e.principal.administrative_domain`
+  * `TargetUserName` -> `$e.target.user.userid`
+* **Required Payload Fields**:
+  * `SubjectUserSid`, `SubjectUserName`, `SubjectDomainName`, `SubjectLogonId` (e.g. `"0x12a4b5"`)
+  * `NewProcessId` (hex string, e.g. `"0x131c"`), `NewProcessName` (full Windows path, e.g. `"C:\\Windows\\System32\\wbem\\WMIC.exe"`)
+  * `TokenElevationType` (`"%%1936"` for Type 1, `"%%1937"` for Full, `"%%1938"` for Limited)
+  * `ProcessId` (hex string of parent process, e.g. `"0x1040"`), `ParentProcessName` (full Windows path, e.g. `"C:\\Windows\\System32\\cmd.exe"`)
+  * `CommandLine` (exact command line executed)
+  * `MandatoryLabel` (`"S-1-16-8192"` Medium, `"S-1-16-12288"` High, `"S-1-16-16384"` System)
+
+### Event ID 4624: An account was successfully logged on (`USER_LOGIN`)
+* **Required Payload Fields**:
+  * `SubjectUserSid`, `SubjectUserName`, `SubjectDomainName`, `SubjectLogonId`
+  * `TargetUserSid`, `TargetUserName`, `TargetDomainName`, `TargetLogonId`
+  * `LogonType` (`3` Network, `10` RemoteInteractive, `2` Interactive)
+  * `LogonProcessName` (`"NtLmSsp "`, `"User32 "`, `"Advapi  "`), `AuthenticationPackageName` (`"NTLM"`, `"Kerberos"`, `"Negotiate"`)
+  * `WorkstationName`, `IpAddress`, `IpPort`
+
+### Event ID 4672: Special privileges assigned to new logon (`USER_UNCATEGORIZED` / Privilege Escalation)
+* **Required Payload Fields**:
+  * `SubjectUserSid`, `SubjectUserName`, `SubjectDomainName`, `SubjectLogonId`
+  * `PrivilegeList` (e.g. `"SeSecurityPrivilege\n\t\t\tSeTakeOwnershipPrivilege\n\t\t\tSeLoadDriverPrivilege\n\t\t\tSeDebugPrivilege\n\t\t\tSeImpersonatePrivilege"`)
+
+---
+
+## 4. Concrete Valid Example (Event ID 4688 - Process Creation)
+```json
+{"EventTime":"##$TimeStamp-0d0h10m0s|%Y-%m-%d %H:%M:%S$##","Hostname":"wks-fin04.corp.contoso.local","Keywords":-9214364837600034816,"EventType":"AUDIT_SUCCESS","SeverityValue":2,"Severity":"INFO","EventID":4688,"SourceName":"Microsoft-Windows-Security-Auditing","ProviderGuid":"{54849625-5478-4994-A5BA-3E3B0328C30D}","Version":2,"Task":13312,"OpcodeValue":0,"RecordNumber":501294,"ProcessID":684,"ThreadID":712,"Channel":"Security","Category":"Process Creation","Opcode":"Info","SubjectUserSid":"S-1-5-21-1482476501-1645522239-145654321-1104","SubjectUserName":"jdoe","SubjectDomainName":"CORP","SubjectLogonId":"0x2a145","NewProcessId":"0x14d0","NewProcessName":"C:\\Windows\\System32\\nltest.exe","TokenElevationType":"%%1937","ProcessId":"0x10bc","CommandLine":"nltest.exe /domain_trusts /all_trusts","TargetUserSid":"S-1-0-0","TargetUserName":"-","TargetDomainName":"-","TargetLogonId":"0x0","ParentProcessName":"C:\\Windows\\System32\\cmd.exe","MandatoryLabel":"S-1-16-12288","Message":"A new process has been created.\r\n\r\nCreator Subject:\r\n\tSecurity ID:\t\tS-1-5-21-1482476501-1645522239-145654321-1104\r\n\tAccount Name:\t\tjdoe\r\n\tAccount Domain:\t\tCORP\r\n\tLogon ID:\t\t0x2A145\r\n\r\nTarget Subject:\r\n\tSecurity ID:\t\tS-1-0-0\r\n\tAccount Name:\t\t-\r\n\tAccount Domain:\t\t-\r\n\tLogon ID:\t\t0x0\r\n\r\nProcess Information:\r\n\tNew Process ID:\t\t0x14d0\r\n\tNew Process Name:\tC:\\Windows\\System32\\nltest.exe\r\n\tToken Elevation Type:\t%%1937\r\n\tMandatory Label:\t\tS-1-16-12288\r\n\tCreator Process ID:\t0x10bc\r\n\tCreator Process Name:\tC:\\Windows\\System32\\cmd.exe\r\n\tProcess Command Line:\tnltest.exe /domain_trusts /all_trusts","EventReceivedTime":"##$TimeStamp-0d0h9m59s|%Y-%m-%d %H:%M:%S$##","SourceModuleName":"eventlog","SourceModuleType":"im_msvistalog"}
+```

@@ -173,7 +173,7 @@ To support high-fidelity, dynamic log generation across diverse scenarios, use t
 | **TAP ISO 8601 Milliseconds** | `YYYY-MM-DDTHH:MM:SS.000Z` | `##$TimeStamp-0d2h15m0s$##` | `2023-10-25T12:45:00.000Z` |
 | **TAP Query End Time** | `YYYY-MM-DDTHH:MM:SSZ` | `##$TimeStamp-0d0h0m0s$##` | `2023-10-25T15:00:00Z` |
 | **BSD Syslog (RFC 3164)** | `MMM D HH:MM:SS` (space-padded day) | `##$SyslogTime-0d0h10m0s$##` | `Oct 25 14:50:00` |
-| **RFC 5424 Timestamp** | `YYYY-MM-DDTHH:MM:SS.ffffffZZ:ZZ` | `##$ISO8601-0d0h10m0s$##` | `2023-10-25T14:50:00.156633-04:00` |
+| **RFC 5424 Timestamp** | `YYYY-MM-DDTHH:MM:SS.ffffffZZ:ZZ` | `##$TimeStamp-0d0h10m0s|%Y-%m-%dT%H:%M:%S.%f%:z$##` | `2023-10-25T14:50:00.156633-04:00` |
 | **Epoch Unix Timestamp** | Seconds since Unix epoch | `##$Epoch-0d0h10m0s$##` | `1698245400` |
 
 ### Timestamp Offsetting Logic
@@ -225,8 +225,8 @@ To support high-fidelity, dynamic log generation across diverse scenarios, use t
 *Scenario: Downstream mail server defers connection due to mailbox storage quota limits.*
 
 ```syslog
-<22>##$ISO8601-0d0h02m10s$## pps-agent02 sendmail[19842]: STARTTLS=client, relay=mxa-internal.victimcorp.com., version=TLSv1.2, verify=OK, cipher=ECDHE-RSA-AES256-GCM-SHA384, bits=256/256
-<22>##$ISO8601-0d0h02m09s$## pps-agent02 sendmail[19842]: 1CU4K0lx021948: to=<jdoe@victimcorp.com>, delay=00:00:04, xdelay=00:00:02, mailer=esmtp, tls_verify=OK, tls_version=TLSv1.2, cipher=ECDHE-RSA-AES256-GCM, pri=145200, relay=mxa-internal.victimcorp.com. [10.0.20.15], dsn=4.2.2, reply=452-4.2.2 The email account that you tried to reach is over quota. Please direct, stat=Deferred: 452-4.2.2 The email account that you tried to reach is over quota. Please direct
+<22>##$TimeStamp-0d0h02m10s|%Y-%m-%dT%H:%M:%S.%f%:z$## pps-agent02 sendmail[19842]: STARTTLS=client, relay=mxa-internal.victimcorp.com., version=TLSv1.2, verify=OK, cipher=ECDHE-RSA-AES256-GCM-SHA384, bits=256/256
+<22>##$TimeStamp-0d0h02m09s|%Y-%m-%dT%H:%M:%S.%f%:z$## pps-agent02 sendmail[19842]: 1CU4K0lx021948: to=<jdoe@victimcorp.com>, delay=00:00:04, xdelay=00:00:02, mailer=esmtp, tls_verify=OK, tls_version=TLSv1.2, cipher=ECDHE-RSA-AES256-GCM, pri=145200, relay=mxa-internal.victimcorp.com. [10.0.20.15], dsn=4.2.2, reply=452-4.2.2 The email account that you tried to reach is over quota. Please direct, stat=Deferred: 452-4.2.2 The email account that you tried to reach is over quota. Please direct
 ```
 
 ---

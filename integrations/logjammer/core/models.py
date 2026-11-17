@@ -167,6 +167,8 @@ class LearnResult:
   guide_path: Optional[Path] = None
   sample_count: int = 0
   files_analyzed: int = 1
+  # Time template tags in the generated guide that LogJammer cannot fill. Empty when the guide is clean.
+  unsupported_time_tags: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -180,6 +182,9 @@ class SecOpsRule:
   description: Optional[str] = None
   author: Optional[str] = None
   rule_owner: Optional[str] = None
+  precision: Optional[str] = None
+  create_time: Optional[str] = None
+  update_time: Optional[str] = None
   live_mode_enabled: bool = False
   tactics: List[str] = field(default_factory=list)
   techniques: List[str] = field(default_factory=list)
@@ -195,6 +200,9 @@ class SecOpsRule:
         "description": self.description,
         "author": self.author,
         "rule_owner": self.rule_owner,
+        "precision": self.precision,
+        "create_time": self.create_time,
+        "update_time": self.update_time,
         "live_mode_enabled": self.live_mode_enabled,
         "tactics": self.tactics,
         "techniques": self.techniques,
@@ -203,6 +211,42 @@ class SecOpsRule:
 
   @classmethod
   def from_dict(cls, data: Dict[str, Any]) -> "SecOpsRule":
+    precision = (
+        data.get("precision")
+        or (
+            data.get("curatedRuleContent", {}).get("precision")
+            if isinstance(data.get("curatedRuleContent"), dict)
+            else None
+        )
+        or (
+            data.get("raw_data", {}).get("precision")
+            if isinstance(data.get("raw_data"), dict)
+            else None
+        )
+    )
+    meta = data.get("contentMetadata", {}) if isinstance(data.get("contentMetadata"), dict) else {}
+    raw_meta = (
+        data.get("raw_data", {}).get("contentMetadata", {})
+        if isinstance(data.get("raw_data"), dict) and isinstance(data.get("raw_data", {}).get("contentMetadata"), dict)
+        else {}
+    )
+    create_time = (
+        data.get("create_time")
+        or data.get("createTime")
+        or meta.get("createTime")
+        or raw_meta.get("createTime")
+        or (data.get("raw_data", {}).get("createTime") if isinstance(data.get("raw_data"), dict) else None)
+    )
+    update_time = (
+        data.get("update_time")
+        or data.get("updateTime")
+        or data.get("revisionCreateTime")
+        or meta.get("updateTime")
+        or raw_meta.get("updateTime")
+        or (data.get("raw_data", {}).get("revisionCreateTime") if isinstance(data.get("raw_data"), dict) else None)
+        or (data.get("raw_data", {}).get("updateTime") if isinstance(data.get("raw_data"), dict) else None)
+        or create_time
+    )
     return cls(
         rule_id=data.get("rule_id") or data.get("name", "").split("/")[-1],
         display_name=data.get("display_name") or data.get("displayName", "Unnamed Rule"),
@@ -211,6 +255,9 @@ class SecOpsRule:
         description=data.get("description"),
         author=data.get("author"),
         rule_owner=data.get("rule_owner") or data.get("ruleOwner"),
+        precision=precision,
+        create_time=create_time,
+        update_time=update_time,
         live_mode_enabled=bool(data.get("live_mode_enabled") or data.get("liveModeEnabled", False)),
         tactics=data.get("tactics", []),
         techniques=data.get("techniques", []),

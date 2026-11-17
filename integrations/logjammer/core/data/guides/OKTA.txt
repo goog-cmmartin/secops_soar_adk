@@ -1,0 +1,209 @@
+# OKTA System Log — AI Generation Guide & Field Playbook
+
+## 1. Overview & Log Purpose
+Okta System Logs record identity, authentication, authorization, directory synchronization, and administrative events across an organization's Okta Identity Cloud tenant. 
+
+Primary recorded activities include:
+- **Authentication & Sessions**: Logins (`user.session.start`), logouts, step-up MFA verifications, MFA push challenges/denials, legacy authentication via Active Directory/RADIUS agents.
+- **Single Sign-On (SSO) & OAuth**: Application access requests via SAML 2.0, WS-Federation, OIDC authorization code grants, token issuances.
+- **Policy Evaluations**: Sign-on policy, MFA enrollment policy, and password policy decisions (`policy.evaluate_sign_on`).
+- **Identity & Access Governance**: Group membership changes, application assignments, user lifecycle state changes (provisioning, deprovisioning, user import/matching).
+- **Administrative Actions**: Privilege grants (`user.account.privilege.grant`), API token creation, policy modifications, network zone changes.
+- **Threat Intelligence & Security Signals**: Okta ThreatInsight alerts (`security.threat.detected`), impossible travel / new behavior detection, user-reported suspicious activity.
+
+---
+
+## 2. Format Specification
+- **Encoding & Wire Format**: Single-line UTF-8 JSON objects (NDJSON / newline-delimited JSON).
+- **Delimiters & Quotes**: Standard JSON rules apply. All keys and string values must be enclosed in double quotes (`"`). Internal quotes, backslashes, and control characters must be escaped.
+- **Structural Integrity**: Objects can be nested up to 4 levels deep (e.g., `client.geographicalContext.geolocation.lat`). Key order within the JSON object may vary between log collectors, but all core keys must maintain their exact hierarchical structure.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Top-Level Attributes
+
+| Field | Type | Description | Allowed / Realistic Values |
+| :--- | :--- | :--- | :--- |
+| `uuid` | String | Unique event identifier (UUID v4) | e.g., `"94f7b9ff-535a-54dc-f0db-245e23456c1c"` |
+| `published` | String / Integer | Event generation timestamp | ISO 8601 UTC string (`"YYYY-MM-DDTHH:MM:SS.sssZ"`) or Unix Epoch seconds (`1587379735`). |
+| `eventType` | String | Dot-notated Okta event taxonomy string | e.g., `user.session.start`, `user.authentication.sso`, `policy.evaluate_sign_on` (See Event Types list) |
+| `displayMessage` | String | Human-readable event description | e.g., `"User login to Okta"`, `"Grant user privilege"` |
+| `severity` | String | Event severity level | `"INFO"`, `"WARN"`, `"ERROR"`, `"DEBUG"` |
+| `version` | String | Okta log schema version | Always `"0"` |
+| `legacyEventType` | String / null | Backward-compatible event tag | e.g., `"core.user_auth.login_success"`, `"app.auth.sso"`, or `null` |
+
+---
+
+### Nested Objects
+
+#### `actor`
+Represents the entity that initiated the event.
+- `id` (String): Okta entity ID (e.g., `"00u1h1jzn5YF01nyN417"`), alphanumeric string, system ID (e.g., `"opl1tjun5qEGhDpsV9p3"`), or IPv4/IPv6 address.
+- `type` (String): `"User"`, `"SystemPrincipal"`, `"PublicClientApp"`, `"IP address"`, `"AppInstance"`.
+- `alternateId` (String): Primary user email (e.g., `"alex.a@example.com"`), `"system@okta.com"`, application name, or `"unknown"`.
+- `displayName` (String / null): Display name of the user/system or `null`.
+- `detailEntry` (Object / null): Additional metadata, usually `null`.
+
+#### `outcome`
+The result of the action or policy evaluation.
+- `result` (String / null): `"SUCCESS"`, `"FAILURE"`, `"CHALLENGE"`, `"ALLOW"`, `"DENY"`, `"UNKNOWN"`, `"SKIPPED"`, or `null`.
+- `reason` (String / null): Explanatory reason (e.g., `null`, `"INVALID_PASSWORD"`, `"Sign-on policy evaluation resulted in CHALLENGE"`, `"User rejected Okta push verify"`, `"Password Spray"`).
+
+#### `client`
+Information about the client device, browser, and network origin.
+- `device` (String / null): `"Computer"`, `"Mobile"`, `"Tablet"`, `"Unknown"`, or `null`.
+- `id` (String / null): Client application ID or `null`.
+- `ipAddress` (String / null): Public IPv4/IPv6 address of the originating client.
+- `zone` (String / null): Configured Okta Network Zone name (e.g., `"Zone 01"`, `"Corporate_VPN"`, `"null"`, or `null`).
+- `userAgent` (Object / null):
+  - `rawUserAgent` (String): Full User-Agent string.
+  - `os` (String): e.g., `"Windows 10"`, `"Mac OS X"`, `"iOS"`, `"Android"`, `"Linux"`, `"UNKNOWN"`.
+  - `browser` (String): e.g., `"CHROME"`, `"FIREFOX"`, `"SAFARI"`, `"EDGE"`, `"UNKNOWN"`.
+- `geographicalContext` (Object / null):
+  - `city` (String / null): e.g., `"Sydney"`, `"Atlanta"`, `"London"`, `null`.
+  - `state` (String / null): e.g., `"New South Wales"`, `"Georgia"`, `null`.
+  - `country` (String / null): e.g., `"Australia"`, `"United States"`, `"Germany"`.
+  - `postalCode` (String / null): e.g., `"2000"`, `"30305"`, `null`.
+  - `geolocation` (Object / null): `{"lat": -33.8591, "lon": 151.2002}`.
+
+#### `authenticationContext`
+Details regarding the authentication mechanism and state.
+- `authenticationStep` (Integer): Step index in multi-step flow (`0`, `1`, `2`).
+- `externalSessionId` (String / null): Okta session identifier (e.g., `"711OOh4OM2iK3j1slkuUdkcfG"` or `null`).
+- `interface` (String / null): Interaction interface (e.g., `"AD APP Instance"`, `"Radius"`, `null`).
+- `issuer` (String / null): Identity issuer URL/URI or `null`.
+- `authenticationProvider` (String / null): `"ACTIVE_DIRECTORY"`, `"FACTOR_PROVIDER"`, `"OKTA"`, `"FEDERATION"`, or `null`.
+- `credentialProvider` (String / null): `"OKTA_CREDENTIAL_PROVIDER"`, `"RSA_CREDENTIAL_PROVIDER"`, `"DUO_CREDENTIAL_PROVIDER"`, or `null`.
+- `credentialType` (String / null): `"PASSWORD"`, `"SMS"`, `"PUSH"`, `"OTP"`, `"FIDO_U2F"`, `"FIDO_WEBAUTHN"`, or `null`.
+
+#### `securityContext`
+Network routing and threat enrichment context.
+- `asNumber` (Integer / null): Autonomous System Number (e.g., `12400`, `15169`, `null`).
+- `asOrg` (String / null): ASN Organization name (e.g., `"Microsoft Corporation"`, `"example isp"`, `null`).
+- `isp` (String / null): Internet Service Provider name.
+- `domain` (String / null): Reverse DNS domain (e.g., `"example.net"`, `null`).
+- `isProxy` (Boolean / null): `true`, `false`, or `null`.
+
+#### `transaction`
+Details linking multiple related log entries.
+- `type` (String / null): `"WEB"`, `"JOB"`, or `null`.
+- `id` (String): Transaction identifier or `"unknown"`.
+- `detail` (Object): Custom metadata object, usually `{}`.
+
+#### `request`
+Contains the list of IP hops recorded by Okta edge infrastructure.
+- `ipChain` (Array of Objects):
+  - `ip` (String): IPv4/IPv6 address.
+  - `version` (String): `"V4"` or `"V6"`.
+  - `source` (String / null): Source indicator or `null`.
+  - `geographicalContext` (Object): Same schema as `client.geographicalContext`.
+
+#### `target`
+Array of entities (or `null`) affected by or referenced in the event.
+Each element contains:
+- `id` (String): Unique identifier of target.
+- `type` (String): `"User"`, `"AppUser"`, `"AppInstance"`, `"PolicyEntity"`, `"PolicyRule"`, `"UserGroup"`, `"code"`.
+- `alternateId` (String / null): Email address, application key, or `null`.
+- `displayName` (String / null): Target display label.
+- `detailEntry` (Object / null): Specialized metadata (e.g., `{"policyType": "OktaSignOn"}`, `{"signOnModeType": "SAML_2_0"}`), or `null`.
+
+#### `debugContext.debugData`
+A key-value dictionary containing dynamic event-specific contextual attributes. Common keys include:
+- `requestId` (String): Unique HTTP request identifier.
+- `requestUri` (String): Internal API/endpoint URI (e.g., `"/api/v1/authn"`, `"/oauth2/v1/authorize"`).
+- `url` (String): Full relative URL string.
+- `threatSuspected` (String): `"true"` or `"false"`.
+- `authnRequestId` (String): Authentication challenge tracking ID.
+- `deviceFingerprint` (String): Hexadecimal device fingerprint hash.
+- `privilegeGranted` (String): Administrator roles granted (e.g., `"Super admin"`, `"Read only admin, Group Membership administrator (all)"`).
+- `signOnMode` (String): Application sign-on mode (e.g., `"SAML 2.0"`, `"OpenID Connect"`, `"WS-Federation"`).
+- `behaviors` (String): Serialized behavioral risk flags (e.g., `"{New Geo-Location=NEGATIVE, New Device=NEGATIVE, New IP=NEGATIVE, New State=NEGATIVE, New Country=NEGATIVE, Velocity=NEGATIVE, New City=NEGATIVE}"`).
+- `risk` (String): Risk score evaluation (e.g., `"{level=LOW}"`, `"{level=HIGH}"`).
+
+---
+
+### High-Value Event Types & Mappings
+
+| Event Type (`eventType`) | Default Severity | Common Display Message | Typical Outcome Results |
+| :--- | :--- | :--- | :--- |
+| `user.session.start` | `INFO` / `WARN` | `"User login to Okta"` | `SUCCESS`, `FAILURE` |
+| `user.authentication.sso` | `INFO` | `"User single sign on to app"` | `SUCCESS`, `FAILURE` |
+| `policy.evaluate_sign_on` | `INFO` | `"Evaluation of sign-on policy"` | `ALLOW`, `DENY`, `CHALLENGE` |
+| `user.mfa.okta_verify.deny_push`| `WARN` | `"User rejected Okta push verify"` | `FAILURE` |
+| `system.push.send_factor_verify_push` | `INFO` | `"A push was sent to a user for verification"` | `SUCCESS` |
+| `user.authentication.auth_via_mfa` | `INFO` | `"Authentication of user via MFA"` | `SUCCESS`, `FAILURE` |
+| `user.authentication.auth_via_AD_agent` | `INFO` | `"Authenticate user with AD agent"` | `SUCCESS`, `FAILURE` |
+| `user.account.privilege.grant` | `WARN` / `INFO` | `"Grant user privilege"` | `SUCCESS` |
+| `user.account.privilege.revoke` | `WARN` / `INFO` | `"Revoke user privilege"` | `SUCCESS` |
+| `security.threat.detected` | `WARN` | `"Request from suspicious actor"` | `ALLOW`, `DENY` |
+| `user.account.report_suspicious_activity_by_enduser` | `WARN` | `"User report suspicious activity"` | `SUCCESS` |
+| `group.user_membership.add` | `INFO` | `"Add user to group membership"` | `SUCCESS` |
+| `group.user_membership.remove` | `INFO` | `"Remove user from group membership"` | `SUCCESS` |
+| `application.user_membership.add` | `INFO` | `"Assign user to application"` | `SUCCESS` |
+| `application.user_membership.remove` | `INFO` | `"Remove user's application membership"` | `SUCCESS` |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Okta logs natively use ISO 8601 extended UTC format with millisecond precision (`YYYY-MM-DDTHH:mm:ss.sssZ`). When streaming via certain collectors/APIs, it can also appear as integer Unix epoch seconds.
+
+### Dynamic Time Tags
+When generating synthetic logs for scenario test suites, use relative time template tags:
+- **ISO 8601 Milliseconds**: `##$TimeStamp-0d0h0m0s$##` (Evaluates to `YYYY-MM-DDTHH:mm:ss.sssZ`)
+- **Unix Epoch Seconds**: `##$Epoch-0d0h0m0s$##` (Evaluates to integer epoch seconds, e.g., `1710000000`)
+- **Offset Examples**:
+  - Current event: `##$TimeStamp-0d0h0m0s$##`
+  - 10 minutes prior: `##$TimeStamp-0d0h10m0s$##`
+  - 2 hours prior (Epoch): `##$Epoch-0d2h0m0s$##`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: Standard SSO Authentication via SAML 2.0 (Success)
+```json
+{"actor":{"alternateId":"charlie.a@example.com","detailEntry":null,"displayName":"Charlie A.","id":"00u71jmihq1wpDhlSEuq","type":"User"},"authenticationContext":{"authenticationProvider":null,"authenticationStep":0,"credentialProvider":null,"credentialType":null,"externalSessionId":"895SJ-MkKMIOdH1j0ivsgdKiE","interface":null,"issuer":null},"client":{"device":"Computer","geographicalContext":{"city":"Clondalkin","country":"Ireland","geolocation":{"lat":53.3244,"lon":-6.3972},"postalCode":"D22","state":"Leinster"},"id":null,"ipAddress":"198.51.100.15","userAgent":{"browser":"CHROME","os":"Windows 10","rawUserAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},"zone":"null"},"debugContext":{"debugData":{"authnRequestId":"Di2k7LosTyOpkm82ntNtEJRFMrO","initiationType":"SP_INITIATED","requestId":"Hf3@QlLtVo8EhppQsq7p1EMMK0m","requestUri":"/app/acmeproduction_passwordstate_1/exkbpixs2uywOGGh31t7/sso/saml","signOnMode":"SAML 2.0","threatSuspected":"false","url":"/app/acmeproduction_passwordstate_1/exkbpixs2uywOGGh31t7/sso/saml?"}},"device":null,"displayMessage":"User single sign on to app","eventType":"user.authentication.sso","legacyEventType":"app.auth.sso","outcome":{"reason":null,"result":"SUCCESS"},"published":"##$TimeStamp-0d0h0m10s$##","request":{"ipChain":[{"geographicalContext":{"city":"Clondalkin","country":"Ireland","geolocation":{"lat":53.3244,"lon":-6.3972},"postalCode":"D22","state":"Leinster"},"ip":"198.51.100.15","source":null,"version":"V4"}]},"securityContext":{"asNumber":6830,"asOrg":"Liberty Global B.V.","domain":"example.net","isProxy":false,"isp":"Liberty Global"},"severity":"INFO","target":[{"alternateId":"PasswordState","detailEntry":{"signOnModeType":"SAML_2_0"},"displayName":"PasswordState","id":"0oa3djqeimv5rB1qoQrH","type":"AppInstance"},{"alternateId":"charlie.a@example.com","detailEntry":null,"displayName":"Charlie A.","id":"00u8loegssumubq7rMqo","type":"AppUser"}],"transaction":{"detail":{},"id":"Hf3@QlLtVo8EhppQsq7p1EMMK0m","type":"WEB"},"uuid":"91d5515f-a8a8-9653-8061-cca0f5453559","version":"0"}
+```
+
+### Scenario 2: Failed Login via Password Brute Force / Invalid Credentials
+```json
+{"actor":{"alternateId":"amal.a@example.com","detailEntry":null,"displayName":"Amal A.","id":"00u20n21p37lkKpEKs2v","type":"User"},"authenticationContext":{"authenticationProvider":null,"authenticationStep":0,"credentialProvider":null,"credentialType":null,"externalSessionId":"711OOh4OM2iK3j1slkuUdkcfG","interface":null,"issuer":null},"client":{"device":"Computer","geographicalContext":{"city":"Hawthorn","country":"Australia","geolocation":{"lat":-37.8199,"lon":145.0285},"postalCode":"3122","state":"Victoria"},"id":null,"ipAddress":"198.51.100.1","userAgent":{"browser":"FIREFOX","os":"Windows 10","rawUserAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0"},"zone":"null"},"debugContext":{"debugData":{"requestId":"Boln3lKlJkImhPmgOmwyJNMJSKI","requestUri":"/api/v1/authn","threatSuspected":"false","url":"/api/v1/authn?"}},"device":null,"displayMessage":"User login to Okta","eventType":"user.session.start","legacyEventType":"core.user_auth.login_failed","outcome":{"reason":"INVALID_PASSWORD","result":"FAILURE"},"published":"##$TimeStamp-0d0h05m00s$##","request":{"ipChain":[{"geographicalContext":{"city":"Hawthorn","country":"Australia","geolocation":{"lat":-37.8199,"lon":145.0285},"postalCode":"3122","state":"Victoria"},"ip":"198.51.100.1","source":null,"version":"V4"}]},"securityContext":{"asNumber":13335,"asOrg":"Cloudflare, Inc.","domain":"example.net","isProxy":false,"isp":"Cloudflare"},"severity":"WARN","target":null,"transaction":{"detail":{},"id":"Boln3lKlJkImhPmgOmwyJNMJSKI","type":"WEB"},"uuid":"aeedddf3-3cdd-818c-f37f-e9cf8937ce77","version":"0"}
+```
+
+### Scenario 3: Privilege Escalation — Granting Super Admin Role
+```json
+{"actor":{"alternateId":"raha.a@example.com","detailEntry":null,"displayName":"Raha A.","id":"00u54r26irhi820gIRR9","type":"User"},"authenticationContext":{"authenticationProvider":null,"authenticationStep":0,"credentialProvider":null,"credentialType":null,"externalSessionId":"049RnH51R25O6DGoLL5SadHpm","interface":null,"issuer":null},"client":{"device":"Computer","geographicalContext":{"city":"Tel Aviv","country":"Israel","geolocation":{"lat":32.0668,"lon":34.7649},"postalCode":"61000","state":"Tel Aviv"},"id":null,"ipAddress":"198.51.100.44","userAgent":{"browser":"CHROME","os":"Mac OS X","rawUserAgent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"},"zone":"null"},"debugContext":{"debugData":{"privilegeGranted":"Super administrator","requestId":"COmIGO5s4tbiQOqhQQ8q5mLSIHI","requestUri":"/api/internal/administrators","url":"/api/internal/administrators?"}},"device":null,"displayMessage":"Grant user privilege","eventType":"user.account.privilege.grant","legacyEventType":"core.user.admin_privilege.granted","outcome":{"reason":null,"result":"SUCCESS"},"published":"##$TimeStamp-0d0h15m30s$##","request":{"ipChain":[{"geographicalContext":{"city":"Tel Aviv","country":"Israel","geolocation":{"lat":32.0668,"lon":34.7649},"postalCode":"61000","state":"Tel Aviv"},"ip":"198.51.100.44","source":null,"version":"V4"}]},"securityContext":{"asNumber":12400,"asOrg":"Bezeq International","domain":"example.net","isProxy":false,"isp":"Bezeq"},"severity":"WARN","target":[{"alternateId":"amal.a@example.com","detailEntry":null,"displayName":"Amal A.","id":"00u15grsj3jxrjmknPnG","type":"User"}],"transaction":{"detail":{},"id":"COmIGO5s4tbiQOqhQQ8q5mLSIHI","type":"WEB"},"uuid":"c3ee8df3-7973-7f4e-18e9-93835cf3ea69","version":"0"}
+```
+
+### Scenario 4: User Rejected MFA Push (Suspicious / Push Fatigue Alert)
+```json
+{"actor":{"alternateId":"cruz.a@example.com","detailEntry":null,"displayName":"Cruz A.","id":"00u46ole4i5kmgPfFEh5","type":"User"},"authenticationContext":{"authenticationProvider":"FACTOR_PROVIDER","authenticationStep":0,"credentialProvider":"OKTA_CREDENTIAL_PROVIDER","credentialType":null,"externalSessionId":"cbqkMipM34-Fq-msrOj1J5rnl","interface":null,"issuer":null},"client":{"device":"Mobile","geographicalContext":{"city":"Cambridge","country":"United States","geolocation":{"lat":42.3649,"lon":-71.0987},"postalCode":"02139","state":"Massachusetts"},"id":null,"ipAddress":"203.0.113.19","userAgent":{"browser":"UNKNOWN","os":"iOS","rawUserAgent":"Okta Verify/4.4.0 (iPhone; iOS 17.2; Scale/3.00)"},"zone":"null"},"debugContext":{"debugData":{"requestId":"Ng2r-ooqiMHhGd9iSVtu3PHGIJp","requestUri":"/api/v1/authn/factors/opfbsra9dz5O6wtad1t7/transactions/00SOGFzXTvJsA-Ct2p7r7kBKyFyBrsYybyMg61_xDW/verify","threatSuspected":"false","url":"/api/v1/authn/factors/opfbsra9dz5O6wtad1t7/transactions/00SOGFzXTvJsA-Ct2p7r7kBKyFyBrsYybyMg61_xDW/verify?"}},"device":null,"displayMessage":"User rejected Okta push verify","eventType":"user.mfa.okta_verify.deny_push","legacyEventType":null,"outcome":{"reason":"User rejected Okta push verify","result":"FAILURE"},"published":"##$TimeStamp-0d0h22m10s$##","request":{"ipChain":[{"geographicalContext":{"city":"Cambridge","country":"United States","geolocation":{"lat":42.3649,"lon":-71.0987},"postalCode":"02139","state":"Massachusetts"},"ip":"203.0.113.19","source":null,"version":"V4"}]},"securityContext":{"asNumber":7922,"asOrg":"Comcast Cable Communications","domain":"example.net","isProxy":false,"isp":"Comcast"},"severity":"WARN","target":null,"transaction":{"detail":{},"id":"Ng2r-ooqiMHhGd9iSVtu3PHGIJp","type":"WEB"},"uuid":"a86241d4-dc28-1743-403f-c5d7958b2f33","version":"0"}
+```
+
+### Scenario 5: Okta ThreatInsight Threat Detection (Password Spray Event)
+```json
+{"actor":{"alternateId":"unknown","detailEntry":null,"displayName":"203.0.113.88","id":"203.0.113.88","type":"IP address"},"authenticationContext":{"authenticationProvider":null,"authenticationStep":0,"credentialProvider":null,"credentialType":null,"externalSessionId":null,"interface":null,"issuer":null},"client":{"device":"Computer","geographicalContext":{"city":null,"country":null,"geolocation":{"lat":0.0,"lon":0.0},"postalCode":null,"state":null},"id":null,"ipAddress":"203.0.113.88","userAgent":{"browser":"UNKNOWN","os":"Windows","rawUserAgent":"MSFT-WIN-4/10.0.10574"},"zone":"null"},"debugContext":{"debugData":{"requestId":"Ci3HpnThw1lJmGSpnNO7pCKMHJj","requestUri":"/app/office365/exk1jkymj0sdRaX0f1t7/sso/wsfed/active","threatSuspected":"true","url":"/app/office365/exk1jkymj0sdRaX0f1t7/sso/wsfed/active?"}},"device":null,"displayMessage":"Request from suspicious actor","eventType":"security.threat.detected","legacyEventType":"security.threat.detected","outcome":{"reason":"Password Spray","result":"ALLOW"},"published":"##$TimeStamp-0d1h10m00s$##","request":{"ipChain":[{"geographicalContext":{"city":null,"country":null,"geolocation":{"lat":0.0,"lon":0.0},"postalCode":null,"state":null},"ip":"203.0.113.88","source":null,"version":"V4"},{"geographicalContext":{"city":"Cheyenne","country":"United States","geolocation":{"lat":41.1399,"lon":-104.8193},"postalCode":"82002","state":"Wyoming"},"ip":"192.0.2.2","source":null,"version":"V4"}]},"securityContext":{"asNumber":41281,"asOrg":"Example Bad Hosting ASN","domain":"badactor.net","isProxy":true,"isp":"Bad Hosting LLC"},"severity":"WARN","target":null,"transaction":{"detail":{},"id":"Ci3HpnThw1lJmGSpnNO7pCKMHJj","type":"WEB"},"uuid":"83d35cd8-6f86-380f-c271-51cad54dd355","version":"0"}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Mandatory Top-Level Keys**:
+   Parsers like Splunk Add-on for Okta (`Splunk_TA_okta`) or Elastic Okta integration fail if `uuid`, `eventType`, `published`, `severity`, or `version` are missing or improperly typed.
+2. **Handling Nulls vs Missing Fields**:
+   - `target` is explicitly `null` or a JSON array of objects (`[{...}]`), never an empty object `{}`.
+   - `outcome.reason` must be `null` if the action succeeded without errors.
+   - When geolocation is unavailable, coordinate objects must be `{"lat": 0.0, "lon": 0.0}` or `null`, and string fields (city, state) must be explicit `null`.
+   - `zone` frequently contains the literal string `"null"` rather than JSON `null` when no specific named network zone matched.
+3. **Array vs Single-Object Constraints**:
+   - `request.ipChain` must always be an Array, even if it contains 0 items (`[]`) or 1 item.
+   - `target` must always be an Array when populated, even if there is only 1 target entity.
+4. **Context Dependency in `debugContext.debugData`**:
+   - `threatSuspected` is a string (`"true"` / `"false"`), not a JSON boolean.
+   - Admin privilege grants (`user.account.privilege.grant`) must include `privilegeGranted` in `debugData`.
+   - End-user suspicious reports (`user.account.report_suspicious_activity_by_enduser`) contain nested sub-event coordinates prefixed with `suspiciousActivityEvent*` inside `debugData`.
+5. **No Trailing Commas**: Ensure all JSON objects and arrays adhere to strict RFC 8259 syntax with zero trailing commas.

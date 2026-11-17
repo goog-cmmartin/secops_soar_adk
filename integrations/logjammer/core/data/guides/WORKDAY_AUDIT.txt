@@ -1,0 +1,103 @@
+# Workday Audit Log (`WORKDAY_AUDIT`) Generation Playbook
+
+## 1. Overview & Log Purpose
+`WORKDAY_AUDIT` logs capture authentication, user activity, access delegation, and administrative proxy events within the **Workday Enterprise Management Cloud**. These logs originate from Workday's Report-as-a-Service (RaaS) Signon Audit exports and SIEM integration pipelines (e.g., Splunk Add-on for Workday, AWS S3 export plugins, or Kafka streams). 
+
+Key activities recorded include:
+- Interactive user sign-ins via SSO/SAML, Biometric (Mobile), DID (Decentralized Identity), or Direct Credentials.
+- Authentication failures, lockouts, and access denials.
+- User proxy/impersonation events (e.g., Help Desk or HR Administrators assuming worker accounts).
+- Tenant owner / system administrator direct access sessions.
+- Session termination, client environment details, and TLS negotiation metadata.
+
+---
+
+## 2. Format Specification
+- **Classification**: Comma-Separated Values (CSV) / Delimited Flat File.
+- **Record Delimiter**: Standard newline (`\n` or `\r\n`).
+- **Field Delimiter**: Comma (`,`).
+- **Quoting Rules**: **Strict Full Quoting**. Every single column—including empty strings, numeric values, and boolean flags—**must** be enclosed in double quotes (`"`).
+- **Fixed Column Count**: Exactly **18 columns** per record.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+| Index | Field Name | Data Type | Required | Description & Valid Values |
+|:---:|:---|:---:|:---:|:---|
+| **0** | `tenant_environment` | String | Yes | Workday tenant name or environment identifier. Examples: `"PROD"`, `"SBX"`, `"DEV"`, `"UAT"`, `"IMPL"`, or custom tenant aliases like `"example1"`. |
+| **1** | `session_signature` | String | Yes | Unique composite key constructed as: `"<Session Actor>: <YYYY MM DD HH MM SS mmm -ZZZZ>"`. |
+| **2** | `event_count` | Integer (String) | Yes | Counter for the event sequence; typically `"1"`. |
+| **3** | `event_timestamp` | Timestamp | Yes | ISO 8601 timestamp with timezone offset (`YYYY-MM-DDTHH:MM:SS±HH:MM`). Corresponds to the timestamp in Field 1 without milliseconds. |
+| **4** | `session_actor` | String | Yes | Identity initiating the session. Formats include:<br>• Direct Worker: `"<EmployeeID> / <Firstname Lastname>"` (e.g., `"AC11328 / ALEX A."`)<br>• Proxy/Delegation: `"<AdminEmail> / <AdminName> on behalf of <TargetID> / <TargetName>"`<br>• Service/System User: `"wd-tenantowner"`, `"ariel.a@example.com on behalf of wd-certified"` |
+| **5** | `target_worker_name` | String | Optional | The worker account display name (e.g., `"ALEX A."`). Empty (`""`) for system accounts or self-contained admin accounts. |
+| **6** | `organization_name` | String | Optional | Workday Supervisory Organization, Cost Center, or Department (e.g., `"ORGANIZATION 01"`, `"ORGANIZATION 02"`, `"Engineering Operations"`). Empty (`""`) for system/service users. |
+| **7** | `session_end_time` | Timestamp | Optional | ISO 8601 sign-off timestamp (`YYYY-MM-DDTHH:MM:SS±HH:MM`) if the session has concluded; otherwise empty string (`""`). |
+| **8** | `device_type` | Enum (String) | Yes | Client platform/device type. Values: `"Desktop"`, `"Phone"`, `"Tablet"`, `"Mobile"`, `"Unknown"`. |
+| **9** | `is_system_account` | Enum (String) | Yes | Flag indicating tenant admin/system-level account access. Values: `"Y"`, `"N"`. |
+| **10** | `is_delegated` | Enum (String) | Yes | Flag indicating delegated / proxy authorization. Values: `"Y"`, `"N"`. |
+| **11** | `mfa_enforced` | Enum (String) | Yes | Multi-factor authentication challenged/passed flag. Values: `"Y"`, `"N"`. |
+| **12** | `failure_reason` | String | Optional | Status description if the event encountered errors. Empty (`""`) on success. Examples: `"Auth Failed"`, `"Invalid Credentials"`, `"Account Locked"`, `"IP Blocked"`. |
+| **13** | `auth_method_action` | String | Yes | Authentication protocol or sign-on action. Examples: `"SAML"`, `"Biometric"`, `"User Name Password"`, `"DID Authentication"`, `"Proxy Started"`, `"OpenID Connect"`, `"OAuth 2.0"`. |
+| **14** | `request_hash` | Hex String | Optional | 6-character hexadecimal correlation/session hash (e.g., `"0cb491"`, `"765771"`). Empty (`""`) for certain direct service logins. |
+| **15** | `source_ip` | IPv4 Address | Yes | Client source IP (Public WAN IP or Corporate Gateway). Examples: `"198.51.100.1"`, `"203.0.113.5"`, `"10.20.0.8"`. |
+| **16** | `tls_version` | String | Optional | TLS handshake version (e.g., `"TLSv1.3"`, `"TLSv1.2"`). Empty (`""`) for internal proxying or older API clients. |
+| **17** | `interface_channel` | Enum (String) | Yes | Workday access channel. Values: `"UI"`, `"Web Services"`, `"Integration"`, `"REST API"`. |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Workday audit logs utilize two distinct timestamp formats within a single event line:
+
+1. **Composite Session Signature Timestamp (Field Index 1)**: Space-separated year, month, day, hour, minute, second, 3-digit millisecond, and 4-digit timezone offset (`YYYY MM DD HH MM SS mmm -ZZZZ`).
+   - Template: `##$TimeStamp-<offset>|%Y %m %d %H %M %S %3f %z|<timezone_offset>$##`
+   - Example (`-08:00`): `##$TimeStamp-0d0h10m0s|%Y %m %d %H %M %S %3f %z|-08:00$##` -> `2026 08 24 11 15 00 123 -0800`
+
+2. **Event & Session End Timestamps (Field Indices 3 and 7)**: ISO 8601 format with colon-delimited timezone offset (`YYYY-MM-DDTHH:MM:SS±HH:MM`).
+   - Template: `##$TimeStamp-<offset>|%Y-%m-%dT%H:%M:%S%:z|<timezone_offset>$##`
+   - Example (`-08:00`): `##$TimeStamp-0d0h10m0s|%Y-%m-%dT%H:%M:%S%:z|-08:00$##` -> `2026-08-24T11:15:00-08:00`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: Standard Successful SAML Login (Desktop UI)
+```csv
+"PROD","E849102 / JORDAN M.: ##$TimeStamp-0d0h15m0s|%Y %m %d %H %M %S %3f %z|-08:00$##","1","##$TimeStamp-0d0h15m0s|%Y-%m-%dT%H:%M:%S%:z|-08:00$##","E849102 / JORDAN M.","JORDAN M.","Finance & Accounting","","Desktop","N","N","N","","SAML","5e8a12","198.51.100.45","TLSv1.3","UI"
+```
+
+### Scenario 2: Failed Biometric Authentication (Mobile Phone)
+```csv
+"PROD","AC11328 / ALEX A.: ##$TimeStamp-0d0h12m30s|%Y %m %d %H %M %S %3f %z|-08:00$##","1","##$TimeStamp-0d0h12m30s|%Y-%m-%dT%H:%M:%S%:z|-08:00$##","AC11328 / ALEX A.","ALEX A.","ORGANIZATION 01","","Phone","N","N","N","Auth Failed","Biometric","0cb491","198.51.100.1","TLSv1.3","UI"
+```
+
+### Scenario 3: Administrative Impersonation / Proxy Started (Sandbox Tenant)
+```csv
+"SBX","charlie.admin@example.com / CHARLIE A. on behalf of W99102 / TAYLOR R.: ##$TimeStamp-0d1h00m0s|%Y %m %d %H %M %S %3f %z|-07:00$##","1","##$TimeStamp-0d1h00m0s|%Y-%m-%dT%H:%M:%S%:z|-07:00$##","charlie.admin@example.com / CHARLIE A. on behalf of W99102 / TAYLOR R.","TAYLOR R.","Human Resources","","Desktop","N","Y","N","","Proxy Started","7e2e16","203.0.113.2","TLSv1.3","UI"
+```
+
+### Scenario 4: Direct System Account / Tenant Owner Session
+```csv
+"PROD","wd-tenantowner: ##$TimeStamp-0d2h30m0s|%Y %m %d %H %M %S %3f %z|-08:00$##","1","##$TimeStamp-0d2h30m0s|%Y-%m-%dT%H:%M:%S%:z|-08:00$##","wd-tenantowner","","","","Desktop","Y","N","N","","User Name Password","","198.51.100.2","TLSv1.3","UI"
+```
+
+### Scenario 5: Completed Session with Sign-Off Timestamp
+```csv
+"PROD","L915650 / GABRIEL A.: ##$TimeStamp-0d0h45m0s|%Y %m %d %H %M %S %3f %z|-08:00$##","1","##$TimeStamp-0d0h45m0s|%Y-%m-%dT%H:%M:%S%:z|-08:00$##","L915650 / GABRIEL A.","GABRIEL A.","ORGANIZATION 03","##$TimeStamp-0d0h05m0s|%Y-%m-%dT%H:%M:%S%:z|-08:00$##","Desktop","N","N","N","","SAML","3fb47d","10.20.0.8","TLSv1.3","UI"
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Exact 18-Column Array**:
+   - Parsers depend on exact column indexing. Omitting an empty field (e.g., omitting `""` for `session_end_time` or `failure_reason`) will shift columns and break field mapping.
+2. **Double Quotes Everywhere**:
+   - Every column must be wrapped in `""`. Raw unquoted values like `PROD` or `1` will cause ingestion errors on strict CSV collectors.
+3. **Actor vs. Target Worker Consistency**:
+   - When generating standard user logins, `session_actor` contains `"<ID> / <Name>"` and `target_worker_name` contains `"<Name>"`.
+   - When generating proxy events, `session_actor` follows `"<Admin> on behalf of <Target>"` and `target_worker_name` contains the target's display name.
+   - For system accounts (e.g., `wd-tenantowner`), both `target_worker_name` and `organization_name` must be empty strings `""`.
+4. **Timestamp Synchronization**:
+   - The time components (Year, Month, Day, Hour, Minute, Second) in Field 1 and Field 3 **must match** identically within the same log line. Field 1 adds milliseconds (`%3f`) and uses space separation with `%z` (`-0800`), while Field 3 uses standard ISO 8601 with `%:z` (`-08:00`).

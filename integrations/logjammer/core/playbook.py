@@ -1,4 +1,5 @@
 import re
+import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 try:
@@ -7,6 +8,7 @@ except ImportError:
   types = None
 
 from .config import DEFAULT_GUIDES_DIR, LogJammerConfig, get_genai_client
+from .templates import SUPPORTED_TIME_TAGS_PROMPT, find_unsupported_guide_tags
 from .models import LearnResult
 
 
@@ -26,13 +28,15 @@ Your generated guide must include:
    - Expected status codes, event IDs, action verbs (e.g. ALLOW/DENY, SUCCESS/FAILURE).
 4. **Timestamp & Dynamic Time Templating**:
    - Explain the timestamp format used (e.g. ISO 8601, Epoch seconds, Syslog MMM DD HH:MM:SS).
-   - Explicitly instruct using relative time template tags: `##$TimeStamp-0d2h15m0s$##`, `##$Epoch-0d1h0m0s$##`, `##$SyslogTime-0d0h30m0s$##`.
+   - Explicitly instruct using relative time template tags, and use them in every example in place of literal timestamps.
+   - {SUPPORTED_TIME_TAGS}
+   - If the log's timestamp layout is not ISO 8601, epoch, date-only, or syslog, give the exact `TimeStamp` tag with a format after a pipe that reproduces it.
 5. **Concrete Valid Examples**:
    - Provide 3 to 5 realistic, full log lines representing varied activities (normal user activity, failed login, privilege escalation, firewall block).
 6. **Key Constraints & Pitfalls**:
    - Fields that MUST be present for parsers not to fail.
    - Escaping rules for nested strings or JSON.
-"""
+""".replace("{SUPPORTED_TIME_TAGS}", SUPPORTED_TIME_TAGS_PROMPT)
 
 
 class PlaybookService:
@@ -171,6 +175,15 @@ Generate the comprehensive AI log playbook guide for '{log_type}' following the 
 
     guide_content = response.text or ""
 
+    # A guide that teaches a tag the template engine cannot fill produces logs with placeholders left in them.
+    unsupported_tags = find_unsupported_guide_tags(guide_content)
+    if unsupported_tags:
+      warnings.warn(
+          f"Guide for '{log_type}' uses {len(unsupported_tags)} time template tag(s) that LogJammer cannot fill: "
+          f"{unsupported_tags[:5]}",
+          stacklevel=2,
+      )
+
     # Save to guides directory
     target_dir = output_dir or self.config.guides_dir
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -186,6 +199,7 @@ Generate the comprehensive AI log playbook guide for '{log_type}' following the 
         guide_path=guide_path,
         sample_count=sample_lines,
         files_analyzed=files_count,
+        unsupported_time_tags=unsupported_tags,
     )
 
   def _get_search_dirs(self, guides_dir: Optional[Path] = None) -> List[Path]:

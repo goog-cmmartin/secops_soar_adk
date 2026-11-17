@@ -1,0 +1,212 @@
+# AI Generation Guide (Playbook) — Salesforce Event Monitoring & Audit Logs
+
+---
+
+## 1. Overview & Log Purpose
+
+Salesforce logs capture administrative changes, identity transactions, user page interactions, API usage, and security events across Salesforce environments (Sales Cloud, Service Cloud, Experience Cloud, Lightning Platform). 
+
+These logs originate primarily from:
+- **Salesforce Event Monitoring (Real-Time Event Monitoring / Storage Objects)**: Streaming and storage events for real-time threat detection (e.g., `LoginEvent`, `ApiEvent`, `UriEvent`, `LightningUriEvent`, `IdentityVerificationEvent`, `LoginAsEvent`, `LogoutEvent`, `ListViewEvent`).
+- **Setup Audit Trail (`SetupAuditTrail`)**: Administrative actions including permission set modifications, profile changes, security setting updates, and component deployments.
+- **Login History (`LoginHistory`)**: Detailed authentication logs including cipher suites, client versions, geolocations, and authentication methods.
+- **Event Log Files (`EventLogFile`)**: Hourly and daily batched audit files metadata.
+
+### Security Monitoring Use Cases
+- Detection of **Privilege Escalation** (e.g., assigning administrative permission sets or changing user profiles via Setup Audit Trail).
+- Detection of **Data Exfiltration** (e.g., high-volume SOQL queries via `ApiEvent`, mass record exports via `ListViewEvent`).
+- Detection of **Unauthorized Access / Impersonation** (e.g., abnormal `LoginAsEvent` administrative takeovers).
+- Detection of **Credential Compromise & Impossible Travel** (e.g., rapid geolocation shifts in `LoginEvent` / `LoginHistory` or anomalous user agents).
+- Detection of **MFA Bypass or Abuse** (e.g., repeated `IdentityVerificationEvent` failures).
+
+---
+
+## 2. Format Specification
+
+Salesforce audit and event monitoring logs are structured as **single-line JSON objects** (JSON Lines / NDJSON).
+
+```
++----------------------------------------------------------------------------------------------------+
+| {"attributes": {"type": "<EventType>", "url": "..."}, "CreatedDate": "...", "UserId": "...", ...} |
++----------------------------------------------------------------------------------------------------+
+```
+
+### Formatting Rules & Syntax
+- **Classification**: Pure JSON (`application/json`).
+- **Delimiters**: Comma-separated key-value pairs enclosed in `{}`.
+- **Quoting**: All field names and string values are enclosed in double quotes (`"`). Numeric values (integers, floats) and booleans (`true`/`false`) are unquoted. `null` values are literal `null`.
+- **Stringified JSON Attributes**: Fields such as `Records` in `ApiEvent` or `AdditionalInfo` contain string-escaped JSON (e.g., `"Records": "{\"totalSize\":10,...}"`).
+- **Salesforce Identifiers**: 15-character or 18-character case-insensitive or case-safe alphanumeric strings (Base62). Key prefixes:
+  - `005`: User ID
+  - `00D`: Organization ID
+  - `0Ya`: LoginHistory ID
+  - `0Ym`: SetupAuditTrail ID
+  - `04F`: LoginGeo ID
+  - `0H4`: Connected Application ID
+  - `00B`: ListView ID
+  - `0ATCH`: EventLogFile ID
+  - `0LE`: Auth Service / Identity Provider ID
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Common / Envelope Attributes (Present in Most Events)
+
+| Field Name | Type | Description | Example Values |
+| :--- | :--- | :--- | :--- |
+| `attributes` | Object | Salesforce SObject metadata. | `{"type":"ApiEvent","url":"/services/data/v58.0/sobjects/ApiEvent/000000000000000AAA"}` |
+| `attributes.type` | String | SObject event type name. | `LoginEvent`, `ApiEvent`, `SetupAuditTrail`, `UriEvent`, `LightningUriEvent`, `LoginAsEvent`, `IdentityVerificationEvent` |
+| `attributes.url` | String | REST endpoint URI for the record. | `/services/data/v58.0/sobjects/SetupAuditTrail/0Ym6i00009InuLoNJR` |
+| `Id` | String | Unique 18-character Salesforce Record ID. | `0Ym6i00009InuLoNJR`, `000000000000000AAA` (Synthetic/Event ID) |
+| `CreatedDate` | String | UTC Timestamp when log was written to the bus. | `2024-12-17T15:01:56.000+0000` |
+| `EventDate` | String | UTC Timestamp when action occurred in the app. | `2024-12-17T15:01:52.312+0000` |
+| `EventIdentifier` | String | UUID v4 correlating distributed components. | `ee512abd-9806-0284-4a78-f484745c6dca` |
+| `RelatedEventIdentifier` | String / null | UUID of a parent/correlated event. | `924956f9-8924-3265-5ebe-62c98fd6bbb8` or `null` |
+| `UserId` | String | 15/18-char ID of the acting user (`005...`). | `0051d00000LIjGnOMP` |
+| `Username` | String | Email formatted Salesforce username. | `admin.user@example.com` |
+| `UserType` | String | User licensing category. | `Standard`, `CspLitePortal`, `PowerPartner`, `AutomatedProcess` |
+| `SourceIp` | String | Client IP (IPv4 or IPv6-mapped IPv4 hex). | `198.51.100.1`, `00000000000000000000ffffc6336401` |
+| `SessionKey` | String / null | Unique identifier for the user session. | `/LOnMPs3psKMLDsH`, `jbCPJgj2ord5pHqH` |
+| `LoginKey` | String / null | Unique hash identifying login transaction. | `IJrPQQk3w/A/e1eK`, `AFKjHtqvmxBGdPtu` |
+| `SessionLevel` | String | Security assurance level of the session. | `STANDARD`, `HIGH_ASSURANCE` |
+
+---
+
+### 3.2 Event-Specific Schemas
+
+#### A. `SetupAuditTrail` (Administrative Changes)
+- `Action`: Specific administrative operation (`PermSetAssign`, `PermSetUnassign`, `changedprofileforuser`, `createdLightningWebComponent`, `namedCredentialEncryptedFieldChange`, `passwordReset`, `loginPolicyChanged`).
+- `Section`: Setup area (`Manage Users`, `Custom Objects`, `Security Controls`, `Company Profile`).
+- `Display`: Plain-text human-readable audit message detailing the exact configuration change (e.g., `Changed profile for user John Doe from Standard User to System Administrator`).
+- `CreatedById`: User ID who made the configuration change.
+- `DelegateUser`: Username or ID if executed via delegated admin / login-as.
+- `CreatedByContext`: Execution context (`Test1234`, `System`, or `null`).
+- `ResponsibleNamespacePrefix`: Managed package namespace if applicable (`null` for core org).
+
+#### B. `LoginEvent` & `LoginHistory` (Authentication & Access)
+- `LoginType`: Authentication flow (`Application`, `Remote Access 2.0`, `SAML Sfdc Initiated SSO`, `Other Apex API`, `Third Party SSO`).
+- `LoginSubType`: Specific sub-mechanism (e.g., `OAuth Username-Password`).
+- `Status`: Result status (`Success`, `Failed: Password lockout`, `Failed: Invalid Password`, `Failed: API Only User`).
+- `Application`: Connected App or Interface (`Browser`, `Integration JWT Token`, `Salesforce for Android`, `SetupAuditTrail y LoginHistory`).
+- `Browser`: Client browser / API engine (`Chrome 92`, `Edge 108`, `Java (Salesforce.com)`, `Unknown`).
+- `Platform`: Client OS (`Windows 10`, `macOS`, `Unknown`, `Linux`).
+- `CipherSuite`: Cryptographic suite (`ECDHE-RSA-AES256-GCM-SHA384`, `TLS_AES_256_GCM_SHA384`).
+- `TlsProtocol`: TLS level (`TLS 1.2`, `TLS 1.3`).
+- `LoginGeo` / Geolocation fields: `City`, `Country`, `CountryIso` (2-letter ISO), `Subdivision` (State/Region), `PostalCode`, `LoginLatitude`, `LoginLongitude`.
+- `LoginUrl`: Target endpoint (`company.my.salesforce.com`, `login.salesforce.com`).
+
+#### C. `IdentityVerificationEvent` (MFA / Step-Up Auth)
+- `Activity`: Verification context (`Login`, `ApiAccess`, `DeviceActivation`, `HighAssuranceAction`).
+- `Status`: Outcome (`Succeeded`, `Failed`, `Denied`, `Cancelled`).
+- `VerificationMethod`: MFA mechanism (`SalesforceAuthenticator`, `U2FAuthenticator`, `Totp`, `Sms`, `EmailVerification`).
+- `Policy`: Security rule triggering verification (`TwoFactorAuthentication`, `HighAssuranceSession`).
+- `EventGroup`: Numerical group ID correlating verification steps (`172597203`).
+
+#### D. `LoginAsEvent` (Impersonation / Support Access)
+- `DelegatedOrganizationId`: Organization ID (`00D...`).
+- `DelegatedUsername`: Target username being impersonated.
+- `LoginAsCategory`: Portal / Context type (`Community`, `Partner`, `CustomerService`).
+- `TargetUrl`: Landing URL after impersonation (`/`).
+
+#### E. `ApiEvent` (REST, SOAP, & Bulk API Access)
+- `ApiType`: `REST`, `SOAP Partner`, `SOAP Enterprise`, `Bulk`.
+- `ApiVersion`: Float value (`50.0`, `51.0`, `59.0`).
+- `ConnectedAppId`: 18-character ID of OAuth application (`0H4...`).
+- `Operation`: `Query`, `Retrieve`, `Create`, `Update`, `Delete`.
+- `QueriedEntities`: Target SObject / Entity (`User`, `Account`, `EventLogFile`, `Custom_01__c`).
+- `Query`: Raw SOQL string executed (e.g., `SELECT Id, Username, Email FROM User WHERE IsActive = true`).
+- `Records`: Escaped JSON string summarizing response: `{"totalSize": 10, "done": true, "records": [...]}`.
+- `RowsProcessed`: Float/Number of rows extracted.
+- `ElapsedTime`: Integer millisecond duration of the API call.
+- `UserAgent`: Client user-agent string (`python-requests/2.26.0`, `PostmanRuntime/7.28.4`, `DataLoader/53.0.0`).
+
+#### F. `LightningUriEvent` & `UriEvent` (Page Views & UI Actions)
+- `AppName`: Lightning / Classic app identifier (`siteforce:sampleApp`, `one:one`).
+- `PageUrl`: Relative URI (`/lightning/r/Account/001.../view`, `/s/survey`).
+- `RecordId`: Primary target SObject ID (`a029G...`, `001...`).
+- `Operation`: `Read`, `Create`, `Update`, `Delete`.
+- `OperationStatus`: `Initiated`, `Success`, `Failure`.
+- `Duration` / `EffectivePageTime`: Performance metrics in milliseconds (float).
+- `DevicePlatform`: UI form-factor (`SFX:BROWSER:DESKTOP`, `CUSTOM:BROWSER:DESKTOP`).
+- `DeviceSessionId`: Hash identifying local browser session.
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Salesforce uses standard **ISO 8601 UTC** with a four-digit offset (`+0000` or `Z`) and variable millisecond precision.
+
+### Timestamp Formats
+1. **Extended Millisecond Precision (Most common in RETEM Events)**:
+   `YYYY-MM-DD'T'HH:mm:ss.SSS+0000` (e.g., `2024-12-17T15:01:56.000+0000`, `2021-08-23T19:19:16.999+0000`)
+2. **Setup Audit Trail & Login History Timestamps**:
+   `YYYY-MM-DD'T'HH:mm:ss.000+0000`
+3. **Internal / Derived Unix Timestamps** (in legacy or nested objects):
+   `createdAt`: Integer seconds epoch (`1588501263`)
+   `Timestamp`: String seconds epoch (`"1654739262"`)
+
+### Templating Instructions
+Dynamic generators must replace static date strings with relative time macros:
+- **RETEM / Core Timestamp**: `##$TimeStamp-0d0h5m0s$##` formatted as `yyyy-MM-dd'T'HH:mm:ss.SSS+0000`.
+- **Preceding Execution Timestamp (`EventDate` vs `CreatedDate`)**:
+  - `EventDate`: `##$TimeStamp-0d0h0m5s$##`
+  - `CreatedDate`: `##$TimeStamp-0d0h0m0s$##` (CreatedDate occurs a few seconds after EventDate)
+- **Epoch Timestamps**: `##$Epoch-0d0h5m0s$##`
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Privilege Escalation — Assignment of System Admin Permission Set
+```json
+{"attributes":{"type":"SetupAuditTrail","url":"/services/data/v58.0/sobjects/SetupAuditTrail/0Ym6i00009InuLoNJR"},"Action":"PermSetAssign","CreatedBy":{"attributes":{"type":"User","url":"/services/data/v58.0/sobjects/User/0051d00000LIjGnOMP"},"Email":"secops-admin@example.com","FederationIdentifier":"EMP90412","Name":"Marcus Vance"},"CreatedByContext":null,"CreatedById":"0051d00000LIjGnOMP","CreatedByIssuer":null,"CreatedDate":"##$TimeStamp-0d0h10m0s$##","DelegateUser":null,"Display":"Permission set 'Modify All Data & Admin Access': assigned to user 'Evelyn Reed' (UserID: [0058o00000KPyOd])","Id":"0Ym6i00009InuLoNJR","ResponsibleNamespacePrefix":null,"Section":"Manage Users"}
+```
+
+### Example 2: Sensitive Data Exfiltration via Direct REST API Query
+```json
+{"attributes":{"type":"ApiEvent","url":"/services/data/v58.0/sobjects/ApiEvent/000000000000000AAA"},"AdditionalInfo":"{}","ApiType":"REST","ApiVersion":58.0,"Application":"DataIntegrationTool","Client":null,"ConnectedAppId":"0H4b00000002Sj9FOQ","CreatedDate":"##$TimeStamp-0d0h1m0s$##","ElapsedTime":142,"EvaluationTime":0.0,"EventDate":"##$TimeStamp-0d0h1m2s$##","EventIdentifier":"7700e179-161c-3aa4-8044-5609079afe8d","Id":"000000000000000AAA","LoginHistoryId":"0Ya4I000001TQEKHJ2","LoginKey":"2NegMp3iKSL5eOH3","Operation":"Query","Platform":"Linux","PolicyId":null,"PolicyOutcome":null,"QueriedEntities":"CustomerCreditCard__c","Query":"SELECT Id, CardHolderName__c, CardNumberEncrypted__c, CVV__c, ExpiryDate__c FROM CustomerCreditCard__c","Records":"{\"totalSize\":3,\"done\":true,\"records\":[{\"attributes\":{\"type\":\"CustomerCreditCard__c\"},\"Id\":\"a0X3F0000032ub1EGN\"},{\"attributes\":{\"type\":\"CustomerCreditCard__c\"},\"Id\":\"a0X3F0000032ub2EGN\"},{\"attributes\":{\"type\":\"CustomerCreditCard__c\"},\"Id\":\"a0X3F0000032ub3EGN\"}]}","RelatedEventIdentifier":null,"RowsProcessed":3.0,"SessionKey":"L1QPfqvoPKLfe/Pr","SessionLevel":"HIGH_ASSURANCE","SourceIp":"198.51.100.45","UserAgent":"python-requests/2.28.1","UserId":"005d0000008vPeoEIR","Username":"service.integration@example.com"}
+```
+
+### Example 3: Suspicious Admin Impersonation (`LoginAsEvent`)
+```json
+{"attributes":{"type":"LoginAsEvent","url":"/services/data/v58.0/sobjects/LoginAsEvent/000000000000000AAA"},"Application":"Browser","Browser":"Chrome 114","CreatedDate":"##$TimeStamp-0d0h25m0s$##","DelegatedOrganizationId":"00D3K0000004u2C","DelegatedUsername":"finance.auditor@example.com","EventDate":"##$TimeStamp-0d0h25m4s$##","EventIdentifier":"79f6655a-6ce6-cde5-09c9-0ac8b9922e29","Id":"000000000000000AAA","LoginAsCategory":"CustomerService","LoginHistoryId":"0Ya1J000004wmblFGI","LoginKey":"anD0rQK00+lLMjRh","LoginType":"Application","Platform":"Windows 10","SessionKey":"AFlIQOorvKLgRlHQ","SessionLevel":"HIGH_ASSURANCE","SourceIp":"203.0.113.19","TargetUrl":"/lightning/o/Invoice__c/list","UserId":"0053B000000Jlo2OBD","Username":"admin.john@example.com","UserType":"Standard"}
+```
+
+### Example 4: MFA Identity Verification (Success via Authenticator)
+```json
+{"attributes":{"type":"IdentityVerificationEvent","url":"/services/data/v58.0/sobjects/IdentityVerificationEvent/000000000000000AAA"},"Activity":"Login","City":"Atlanta","Country":"United States","CountryIso":"US","CreatedDate":"##$TimeStamp-0d1h0m0s$##","EventDate":"##$TimeStamp-0d1h0m3s$##","EventGroup":"172597203","EventIdentifier":"bb7ae297-c627-55d9-eb4b-45531f86cb0a","Id":"000000000000000AAA","Latitude":33.749,"LoginHistoryId":"0Ya8D000002PJ0nNMJ","LoginKey":"iljN02MQN1koMOTN","Longitude":-84.388,"Policy":"TwoFactorAuthentication","PostalCode":"30303","Remarks":null,"ResourceId":null,"SessionKey":"MOcl3LK3iX7o0peJ","SessionLevel":"HIGH_ASSURANCE","SourceIp":"198.51.100.100","Status":"Succeeded","Subdivision":"Georgia","UserId":"005o0000004wUkoEIR","Username":"clara.oswald@example.com","VerificationMethod":"SalesforceAuthenticator"}
+```
+
+### Example 5: Failed Authentication / Password Lockout (`LoginHistory`)
+```json
+{"attributes":{"type":"LoginHistory","url":"/services/data/v58.0/sobjects/LoginHistory/0Ya6Q00000hr2mdFGI"},"ApiType":null,"ApiVersion":"N/A","Application":"Browser","AuthenticationServiceId":null,"Browser":"Firefox 118","CipherSuite":"TLS_AES_256_GCM_SHA384","ClientVersion":"N/A","CountryIso":"CN","Id":"0Ya6Q00000hr2mdFGI","LoginGeo":{"attributes":{"type":"LoginGeo","url":"/services/data/v58.0/sobjects/LoginGeo/04F2M00000MMKolFMR"},"City":"Shanghai","Country":"China","Id":"04F2M00000MMKolFMR"},"LoginGeoId":"04F2M00000MMKolFMR","LoginTime":"##$TimeStamp-0d2h30m0s$##","LoginType":"Application","LoginUrl":"company.my.salesforce.com","OptionsIsGet":false,"OptionsIsPost":true,"Platform":"Windows 10","SourceIp":"192.0.2.77","Status":"Failed: Password lockout","TlsProtocol":"TLS 1.3","UserId":"0055B000001pugFCCG"}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **Strict Salesforce ID Formats**:
+   - `UserId` must start with `005` (e.g., `0051N000000TkEhEBL`).
+   - `OrganizationId` must start with `00D` (e.g., `00D8M0000009xFb`).
+   - `LoginHistoryId` must start with `0Ya` (e.g., `0Ya9D000001NKj0NMJ`).
+   - `SetupAuditTrail` IDs must start with `0Ym` (e.g., `0Ym7M000001l1l3FGI`).
+   - Synthetic Event IDs for real-time streams often default to `000000000000000AAA`.
+
+2. **JSON String Escaping**:
+   - If generating `ApiEvent.Records` or `ApiEvent.AdditionalInfo`, remember that these fields contain **JSON serialized as a string**. Double quotes inside must be escaped with `\"`.
+   - Example: `"Records":"{\"totalSize\":0,\"done\":true,\"records\":[]}"`.
+
+3. **Time Ordering Realism**:
+   - `EventDate` is when the action was triggered on the Salesforce server.
+   - `CreatedDate` is when the event was committed to the log bus (typically 1 to 5 seconds *after* `EventDate`).
+   - `CreatedDate` must never be earlier than `EventDate`.
+
+4. **Hex IPv6 vs Standard IPv4**:
+   - Some Salesforce instances render IPv4 addresses mapped to IPv6 hex notation (32 hex characters: `00000000000000000000ffffc6336401` = `198.51.100.1`). Generators should support both formats.
+
+5. **Field Presence Based on Context**:
+   - `LogoutEvent` does not contain `OperationStatus`, `Query`, or `PageUrl`.
+   - `SetupAuditTrail` contains `Display`, `Action`, `Section`, but does not contain `SessionKey` or `SourceIp`.
+   - Never mix fields from `SetupAuditTrail` into `ApiEvent` or vice-versa.

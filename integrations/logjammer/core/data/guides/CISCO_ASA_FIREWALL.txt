@@ -113,10 +113,10 @@ When authoring scenarios for synthetic generation, use the following relative te
 
 | Tag Template | Expected Replacement Output (Example) |
 |---|---|
-| `##$SyslogTime-0d2h15m0s$##` | `Nov 26 2024 04:15:30` |
-| `##$SyslogTimeNoYear-0d0h30m0s$##` | `Nov 26 06:00:30` |
+| `##$TimeStamp-0d2h15m0s|%b %d %Y %H:%M:%S$##` | `Nov 26 2024 04:15:30`. Use this form with the year in the syslog header, or the parser stamps the event with ingestion time |
+| `##$SyslogTime-0d0h30m0s$##` | `Nov 26 06:00:30` |
 | `##$TimeStamp-0d1h0m0s$##` | `2024-11-26T05:30:30Z` |
-| `##$TimeStampIsoOffset-0d0h0m0s$##`| `2024-11-26T06:30:30+00:00` |
+| `##$TimeStamp-0d0h0m0s|%Y-%m-%dT%H:%M:%S%:z$##`| `2024-11-26T06:30:30+00:00` |
 | `##$Epoch-0d0h5m0s$##` | `1732602630` |
 
 ---
@@ -125,14 +125,14 @@ When authoring scenarios for synthetic generation, use the following relative te
 
 ### Scenario 1: Normal Inbound HTTPS Traffic (Build & Teardown)
 ```text
-<166>##$SyslogTime-0d0h10m0s$## fw-edge-01 : %ASA-6-302013: Built inbound TCP connection 894320145 for outside:198.51.100.45/52104 (198.51.100.45/52104) to inside:10.0.10.50/443 (198.51.100.10/443)
-<166>##$SyslogTime-0d0h08m30s$## fw-edge-01 : %ASA-6-302014: Teardown TCP connection 894320145 for outside:198.51.100.45/52104 to inside:10.0.10.50/443 duration 0:01:30 bytes 14852 TCP FINs
+<166>##$TimeStamp-0d0h10m0s|%b %d %Y %H:%M:%S$## fw-edge-01 : %ASA-6-302013: Built inbound TCP connection 894320145 for outside:198.51.100.45/52104 (198.51.100.45/52104) to inside:10.0.10.50/443 (198.51.100.10/443)
+<166>##$TimeStamp-0d0h08m30s|%b %d %Y %H:%M:%S$## fw-edge-01 : %ASA-6-302014: Teardown TCP connection 894320145 for outside:198.51.100.45/52104 to inside:10.0.10.50/443 duration 0:01:30 bytes 14852 TCP FINs
 ```
 
 ### Scenario 2: External Port Scan / Unauthorized Access Denied by ACL
 ```text
-<164>##$SyslogTime-0d1h15m00s$## cisco-asa-core : %ASA-4-106023: Deny tcp src outside:203.0.113.195/48920 dst inside:10.100.4.15/445 by access-group "OUTSIDE_INLINE_ACL" [0xd4e9081a, 0x0]
-<164>##$SyslogTime-0d1h14m59s$## cisco-asa-core : %ASA-4-106023: Deny tcp src outside:203.0.113.195/48921 dst inside:10.100.4.16/3389 by access-group "OUTSIDE_INLINE_ACL" [0xd4e9081a, 0x0]
+<164>##$TimeStamp-0d1h15m00s|%b %d %Y %H:%M:%S$## cisco-asa-core : %ASA-4-106023: Deny tcp src outside:203.0.113.195/48920 dst inside:10.100.4.15/445 by access-group "OUTSIDE_INLINE_ACL" [0xd4e9081a, 0x0]
+<164>##$TimeStamp-0d1h14m59s|%b %d %Y %H:%M:%S$## cisco-asa-core : %ASA-4-106023: Deny tcp src outside:203.0.113.195/48921 dst inside:10.100.4.16/3389 by access-group "OUTSIDE_INLINE_ACL" [0xd4e9081a, 0x0]
 ```
 
 ### Scenario 3: Remote Access VPN (AnyConnect) Successful Authentication & IP Assignment
@@ -144,15 +144,15 @@ When authoring scenarios for synthetic generation, use the following relative te
 
 ### Scenario 4: Unauthorized User VPN Authentication Failure (Brute-Force / Credential Stuffing)
 ```text
-<166>##$SyslogTime-0d0h05m10s$## ciscoasa-dmz : %ASA-6-113015: AAA user authentication Rejected : reason = User was not found : local database : user = ***** : user IP = 192.0.2.140
-<166>##$SyslogTime-0d0h05m08s$## ciscoasa-dmz : %ASA-6-716039: Group <DfltGrpPolicy> User <admin_backup> IP <192.0.2.140> Authentication: rejected, Session Type: WebVPN.
+<166>##$TimeStamp-0d0h05m10s|%b %d %Y %H:%M:%S$## ciscoasa-dmz : %ASA-6-113015: AAA user authentication Rejected : reason = User was not found : local database : user = ***** : user IP = 192.0.2.140
+<166>##$TimeStamp-0d0h05m08s|%b %d %Y %H:%M:%S$## ciscoasa-dmz : %ASA-6-716039: Group <DfltGrpPolicy> User <admin_backup> IP <192.0.2.140> Authentication: rejected, Session Type: WebVPN.
 ```
 
 ### Scenario 5: Administrator Interactive CLI Command Audit
 ```text
-<166>##$SyslogTime-0d3h00m00s$## fw-core-pri : %ASA-6-605005: Login permitted from 10.0.50.22/58120 to management:10.0.50.1/ssh for user "secops_admin"
-<165>##$SyslogTime-0d2h58m20s$## fw-core-pri : %ASA-5-111010: User 'secops_admin', running 'CLI' from IP 10.0.50.22, executed 'access-list OUTSIDE_INLINE_ACL permit tcp host 198.51.100.22 any eq 443'
-<165>##$SyslogTime-0d2h57m10s$## fw-core-pri : %ASA-5-111010: User 'secops_admin', running 'CLI' from IP 10.0.50.22, executed 'write memory'
+<166>##$TimeStamp-0d3h00m00s|%b %d %Y %H:%M:%S$## fw-core-pri : %ASA-6-605005: Login permitted from 10.0.50.22/58120 to management:10.0.50.1/ssh for user "secops_admin"
+<165>##$TimeStamp-0d2h58m20s|%b %d %Y %H:%M:%S$## fw-core-pri : %ASA-5-111010: User 'secops_admin', running 'CLI' from IP 10.0.50.22, executed 'access-list OUTSIDE_INLINE_ACL permit tcp host 198.51.100.22 any eq 443'
+<165>##$TimeStamp-0d2h57m10s|%b %d %Y %H:%M:%S$## fw-core-pri : %ASA-5-111010: User 'secops_admin', running 'CLI' from IP 10.0.50.22, executed 'write memory'
 ```
 
 ---

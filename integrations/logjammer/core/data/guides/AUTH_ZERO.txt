@@ -256,7 +256,7 @@ Auth0 logs contain two distinct time representations:
 When generating synthetic logs, always ensure temporal synchronization between the root ISO string and the nested epoch millisecond timestamps:
 
 * **ISO 8601 String**: `##$TimeStamp-0d0h0m0s$##` (Evaluates to `YYYY-MM-DDTHH:MM:SS.sssZ`)
-* **Epoch Milliseconds**: `##$EpochMs-0d0h0m0s$##` (Evaluates to 13-digit integer, e.g., `1722516274732`)
+* **Epoch Milliseconds**: `##$EpochMS-0d0h0m0s$##` (Evaluates to 13-digit integer, e.g., `1722516274732`)
 * **Epoch Seconds**: `##$Epoch-0d0h0m0s$##` (Evaluates to 10-digit integer, e.g., `1722516274`)
 
 ---
@@ -283,15 +283,15 @@ When generating synthetic logs, always ensure temporal synchronization between t
     "user_name": "alex.chen@example.com",
     "hostname": "auth.example.com",
     "details": {
-      "initiatedAt": ##$EpochMs-0d0h5m15s$##,
-      "completedAt": ##$EpochMs-0d0h5m12s$##,
+      "initiatedAt": ##$EpochMS-0d0h5m15s$##,
+      "completedAt": ##$EpochMS-0d0h5m12s$##,
       "elapsedTime": 3120,
       "session_id": "d4PcPEi3uMQLG8h7bCF2SBrJ1WfZDdII",
       "prompts": [
         {
           "name": "prompt-authenticate-password",
-          "initiatedAt": ##$EpochMs-0d0h5m15s$##,
-          "completedAt": ##$EpochMs-0d0h5m13s$##,
+          "initiatedAt": ##$EpochMS-0d0h5m15s$##,
+          "completedAt": ##$EpochMS-0d0h5m13s$##,
           "connection": "Username-Password-Authentication",
           "connection_id": "con_tNN3WKyz1iWKHAqR",
           "strategy": "auth0",
@@ -301,8 +301,8 @@ When generating synthetic logs, always ensure temporal synchronization between t
         {
           "name": "login",
           "flow": "universal-login",
-          "initiatedAt": ##$EpochMs-0d0h5m15s$##,
-          "completedAt": ##$EpochMs-0d0h5m12s$##,
+          "initiatedAt": ##$EpochMS-0d0h5m15s$##,
+          "completedAt": ##$EpochMS-0d0h5m12s$##,
           "user_id": "auth0|6489b85c7c0b5f1a0ebe8ab7",
           "user_name": "alex.chen@example.com",
           "timers": { "rules": 142 }

@@ -16,6 +16,7 @@ from .playbook import PlaybookService
 from .rule_analyzer import RuleAnalyzer
 from .rules import RuleService
 from .templates import (
+    SUPPORTED_TIME_TAGS_PROMPT,
     TimeTemplateService,
     extract_timestamp_from_text,
     parse_base_timestamp,
@@ -23,7 +24,7 @@ from .templates import (
 )
 
 
-SCENARIO_SYSTEM_PROMPT = """You are an elite Red Team Operator and Security Telemetry Architect.
+SCENARIO_SYSTEM_PROMPT = f"""You are an elite Red Team Operator and Security Telemetry Architect.
 Your task is to generate highly authentic, realistic, multi-source synthetic logs depicting a security scenario.
 
 You will be given:
@@ -38,11 +39,7 @@ CRITICAL RULES:
    - The timeline must progress logically (initial recon/authentication -> delivery/connection -> execution -> persistence/post-exploitation).
 3. **Relative Time Templating (Backdating to Anchor Time)**:
    - Never hardcode static timestamps!
-   - All relative template tags are automatically resolved relative to the Alert's Anchor Base Timestamp (`0d0h0m0s`):
-     * ISO 8601: `##$TimeStamp-0d0h15m0s$##` (e.g. 15 minutes before the alert anchor timestamp)
-     * Unix Epoch (seconds): `##$Epoch-0d0h10m0s$##`
-     * Unix Epoch (milliseconds): `##$EpochMillis-0d0h10m0s$##`
-     * Syslog: `##$SyslogTime-0d0h5m0s$##`
+   - {SUPPORTED_TIME_TAGS_PROMPT}
    - Space events realistically leading up to and immediately surrounding `-0d0h0m0s` (for example from `-0d0h20m0s` to `+0d0h5m0s`).
 4. **Case Triage Summary Reconstruction**:
    - If the input is a SIEM/SOAR Triage Summary that states "no corroborating evidence was found", "transient/blocked", or "no further action is required", IGNORE that benign conclusion!
@@ -50,10 +47,10 @@ CRITICAL RULES:
 5. **Output Format**:
    Return a single valid JSON object with the following structure:
    ```json
-   {
+   {{
      "title": "Short descriptive title of the attack scenario",
      "summary": "2-3 sentence overview of the simulated attack chain",
-     "logs": {
+     "logs": {{
        "<LOG_TYPE_1>": [
          "log line 1 or JSON string",
          "log line 2 or JSON string"
@@ -62,17 +59,17 @@ CRITICAL RULES:
          "log line 1",
          "log line 2"
        ]
-     }
-   }
+     }}
+   }}
    ```
    Do not include any conversational preamble outside the JSON markdown block.
 """
 
-RULE_SYSTEM_PROMPT = """You are an elite Detection Engineer and Security Telemetry Specialist.
-Your task is to reverse-engineer and generate synthetic raw logs that will be parsed by Google SecOps (Chronicle SIEM) and trigger a specific YARA-L 2.0 detection rule, while also synthesizing realistic surrounding multi-source attack telemetry when additional alert context is provided.
+RULE_SYSTEM_PROMPT = f"""You are an elite Detection Engineer and Security Telemetry Specialist.
+Your task is to reverse-engineer and generate synthetic raw logs that will be parsed by Google SecOps (Chronicle SIEM) and trigger one or more specific YARA-L 2.0 detection rules, while also synthesizing realistic surrounding multi-source attack telemetry when additional alert context is provided.
 
 You will be given:
-1. The target YARA-L detection rule (logic, metadata, MITRE techniques).
+1. The target YARA-L detection rule(s) (logic, metadata, MITRE techniques).
 2. The deconstructed UDM constraints (required event types, positive regex/string criteria, negative exclusions to avoid, thresholds, and time windows).
 3. The target log source type(s) and their detailed Schema Guides.
 4. The generation objective: 'fire' (trigger detection), 'evade' (negative test), or 'full-chain' (end-to-end simulation with pre-incident, trigger, and post-incident surrounding logs).
@@ -86,24 +83,21 @@ CRITICAL RULES:
    - If the rule is a multi-event join, bind matching entity fields (e.g. same user, IP, asset_id, or hostname) across the joined events in proper sequence.
 2. **Entity Binding & Case Triage Reconstruction**:
    - When ADDITIONAL USER CONTEXT is provided, you MUST reuse all exact external malicious IP addresses (e.g. `221.194.148.34`), internal IP addresses, AWS EC2 instance IDs (e.g. `i-0942348f80748b397`), hostnames (`ComputerName`), and usernames directly inside BOTH the YARA-L trigger event(s) AND the surrounding logs!
-   - For example, if the rule matches an SSH command line connecting to an external IP (`/ssh.*\s\w+@\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/`) and excludes `127.0.0.1` / RFC1918 private IPs, use `localhost` for the local port forwarding bind and the exact malicious external IP from the alert context as the SSH destination (e.g. `/usr/bin/ssh -N -R 8080:localhost:22 root@221.194.148.34`).
+   - For example, if the rule matches an SSH command line connecting to an external IP (`/ssh.*\\s\\w+@\\d{{1,3}}\\.\\d{{1,3}}\\.\\d{{1,3}}\\.\\d{{1,3}}/`) and excludes `127.0.0.1` / RFC1918 private IPs, use `localhost` for the local port forwarding bind and the exact malicious external IP from the alert context as the SSH destination (e.g. `/usr/bin/ssh -N -R 8080:localhost:22 root@221.194.148.34`).
    - If the input context is a SIEM/SOAR Triage Summary stating "no corroborating evidence was found" or "no further action is required", IGNORE that benign conclusion and synthesize the complete corroborating attack chain!
 3. **Schema Fidelity**:
    - Format each log line strictly according to the Schema Guide for the target log source (e.g. CrowdStrike Falcon EDR `CS_EDR` JSON with all string values and 32-char hex `aid`, Windows Sysmon, AWS VPC Flow, AWS CloudTrail, Linux Syslog).
    - Ensure the fields that Google SecOps parsers use to populate the target UDM attributes (e.g. `CommandLine`, `ImageFileName`, `aid`, `ComputerName`, `UserName`) are realistically placed in the raw log.
 4. **Relative Time Templating (Backdating to Anchor Time)**:
-   - Never hardcode static timestamps! Use relative template tags resolved against the Alert Anchor Timestamp (`0d0h0m0s`):
-     * ISO 8601: `##$TimeStamp-0d0h5m0s$##`
-     * Unix Epoch (seconds): `##$Epoch-0d0h5m0s$##`
-     * Unix Epoch (milliseconds): `##$EpochMillis-0d0h5m0s$##`
-     * Syslog: `##$SyslogTime-0d0h5m0s$##`
+   - Never hardcode static timestamps!
+   - {SUPPORTED_TIME_TAGS_PROMPT}
 5. **Output Format**:
    Return a single valid JSON object:
    ```json
-   {
+   {{
      "title": "Trigger simulation for <RULE_NAME>",
      "summary": "Explanation of how the generated logs satisfy the YARA-L detection logic and surrounding scenario",
-     "logs": {
+     "logs": {{
        "<LOG_TYPE_1>": [
          "log line 1",
          "log line 2"
@@ -111,8 +105,8 @@ CRITICAL RULES:
        "<LOG_TYPE_2>": [
          "log line 1"
        ]
-     }
-   }
+     }}
+   }}
    ```
    Do not include any conversational preamble outside the JSON markdown block.
 """

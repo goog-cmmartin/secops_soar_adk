@@ -1,3 +1,12 @@
+- description: "Synchronized upstream LogJammer core updates: expanded relative time template parser (EpochMS, EpochMicroseconds, EpochNanoseconds, strftime/date-pattern formats, UTC offsets), added Okta, Nozomi Guardian, Salesforce, Winevtlog, and Workday schema guides, parser-validated guide examples, and rule date/precision filters."
+  version: 2.7
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-17"
 - description: "Removed hardcoded tenant fallback defaults so GCP Project ID and SecOps Customer ID are resolved strictly from the SOAR Integration Instance configuration, Workload Identity Email, or environment variables."
   version: 3.0
   item_name: "LogJammer"

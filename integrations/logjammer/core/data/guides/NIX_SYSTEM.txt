@@ -153,8 +153,8 @@ The `NIX_SYSTEM` log type uses distinct timestamp conventions across subsystems.
 | Syslog RFC 3164 (BSD)     | MMM [D|DD] HH:MM:SS              | ##$SyslogTime-0d0h0m0s$##      |
 | Syslog RFC 5424 (ISO 8601)| YYYY-MM-DDTHH:MM:SS.ssssss+ZZ:ZZ | ##$TimeStamp-0d0h0m0s$##       |
 | Auditd Header Timestamp   | Epoch.msec (e.g., 1651565389.241)| ##$Epoch-0d0h0m0s$##.<msec>    |
-| Apache Access Log         | [DD/MMM/YYYY:HH:MM:SS +ZZZZ]     | [##$ApacheTime-0d0h0m0s$##]    |
-| Apache Error Log          | [Day MMM DD HH:MM:SS.uuuuuu YYYY]| [##$ApacheErrTime-0d0h0m0s$##] |
+| Apache Access Log         | [DD/MMM/YYYY:HH:MM:SS +ZZZZ]     | [##$TimeStamp-0d0h0m0s|%d/%b/%Y:%H:%M:%S +0000$##]    |
+| Apache Error Log          | [Day MMM DD HH:MM:SS.uuuuuu YYYY]| [##$TimeStamp-0d0h0m0s|%a %b %d %H:%M:%S.%f %Y$##] |
 | Cloud Ingestion JSON (UTC)| YYYY-MM-DDTHH:MM:SS.sssssssssZ   | ##$TimeStamp-0d0h0m0s$##       |
 +-----------------------------------------------------------------------------------------------+
 ```

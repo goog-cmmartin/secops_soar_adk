@@ -118,7 +118,7 @@ Windows DNS log generators must format timestamps according to the specific tran
 
 | Transport Layer | Timestamp Format | Dynamic Macro Tag |
 | :--- | :--- | :--- |
-| **ETW / JSON Unix Milliseconds** | Epoch in milliseconds (e.g., `1640073312000`) | `##$Epoch-0d0h0m0s$##000` or `##$EpochMs-0d0h0m0s$##` |
+| **ETW / JSON Unix Milliseconds** | Epoch in milliseconds (e.g., `1640073312000`) | `##$Epoch-0d0h0m0s$##000` or `##$EpochMS-0d0h0m0s$##` |
 | **NXLog / Syslog RFC 5424** | ISO 8601 with fractional sec & offset (`YYYY-MM-DDThh:mm:ss.ffffff±hh:mm`) | `##$TimeStamp-0d0h0m0s$##` |
 | **Syslog RFC 3164 Header** | `MMM DD HH:MM:SS` (e.g., `Dec 21 01:47:00`) | `##$SyslogTime-0d0h0m0s$##` |
 | **Native Debug File (`dns.log`)** | `M/D/YYYY H:M:S AM/PM` (e.g., `12/21/2021 8:57:50 AM`) | Custom formatted relative timestamp |
@@ -152,14 +152,14 @@ Windows DNS log generators must format timestamps according to the specific tran
 *Scenario: An endpoint de-registers and deletes its DNS host record via an authenticated Dynamic DNS Update request.*
 
 ```syslog
-<14>1 ##$TimeStamp-0d0h15m22s$## DC01.corp.internal Microsoft-Windows-DNSServer 2184 - [NXLOG@14506 Keywords="4611686018460942336" EventType="INFO" EventID="520" ProviderGuid="{EB79061A-A566-4698-9119-3ED2807060E7}" Version="0" TaskValue="3" OpcodeValue="0" RecordNumber="102914" ExecutionThreadID="4812" Channel="Microsoft-Windows-DNSServer/Audit" Domain="NT AUTHORITY" AccountName="SYSTEM" UserID="S-1-5-18" AccountType="User" Category="DYNAMIC_UPDATE" Opcode="Info" Type="1" NAME="WS-FIN-088" TTL="0" BufferSize="4" RDATA="0A001458" Zone="corp.internal" ZoneScope="Default" Source="10.0.20.88" EventReceivedTime="##$TimeStamp-0d0h15m22s$##" SourceModuleName="DNS_Audit" SourceModuleType="im_msvistalog"] A resource record of type 1, name WS-FIN-088 and RDATA 0x0A001458 was deleted from scope Default of zone corp.internal via dynamic update from IP Address 10.0.20.88.
+<14>1 ##$TimeStamp-0d0h15m22s|%Y-%m-%dT%H:%M:%S.%f%:z$## DC01.corp.internal Microsoft-Windows-DNSServer 2184 - [NXLOG@14506 Keywords="4611686018460942336" EventType="INFO" EventID="520" ProviderGuid="{EB79061A-A566-4698-9119-3ED2807060E7}" Version="0" TaskValue="3" OpcodeValue="0" RecordNumber="102914" ExecutionThreadID="4812" Channel="Microsoft-Windows-DNSServer/Audit" Domain="NT AUTHORITY" AccountName="SYSTEM" UserID="S-1-5-18" AccountType="User" Category="DYNAMIC_UPDATE" Opcode="Info" Type="1" NAME="WS-FIN-088" TTL="0" BufferSize="4" RDATA="0A001458" Zone="corp.internal" ZoneScope="Default" Source="10.0.20.88" EventReceivedTime="##$TimeStamp-0d0h15m22s$##" SourceModuleName="DNS_Audit" SourceModuleType="im_msvistalog"] A resource record of type 1, name WS-FIN-088 and RDATA 0x0A001458 was deleted from scope Default of zone corp.internal via dynamic update from IP Address 10.0.20.88.
 ```
 
 ### Example 5: Native Raw Debug Log Line (Plain Text Packet Trace)
 *Scenario: High-frequency diagnostic debug log recording an incoming TXT lookup used for command and control polling.*
 
 ```text
-##$SyslogTime-0d0h02m10s$## DC01 DNS: {"EventReceivedTime":"##$TimeStamp-0d0h02m10s$##","SourceModuleName":"DNS_IN","SourceModuleType":"im_file","Message":"10/24/2023 2:14:38 PM 150C PACKET  0000004AB7EA4220 UDP Rcv 10.0.20.105    1a4f   Q [0001   D   NOERROR] TXT    (32)a98f12c499e018a38712bc900fae1201(6)c2pool(3)net(0)","SourceName":"DNS","AccountName":"-","AccountType":"-","Domain":"-","Hostname":"DC01"}
+##$SyslogTime-0d0h02m10s$## DC01 DNS: {"EventReceivedTime":"##$TimeStamp-0d0h02m10s$##","SourceModuleName":"DNS_IN","SourceModuleType":"im_file","Message":"##$TimeStamp-0d0h02m10s|%m/%d/%Y %I:%M:%S %p$## 150C PACKET  0000004AB7EA4220 UDP Rcv 10.0.20.105    1a4f   Q [0001   D   NOERROR] TXT    (32)a98f12c499e018a38712bc900fae1201(6)c2pool(3)net(0)","SourceName":"DNS","AccountName":"-","AccountType":"-","Domain":"-","Hostname":"DC01"}
 ```
 
 ---

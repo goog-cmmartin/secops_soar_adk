@@ -1,0 +1,115 @@
+# WORKDAY_USER_ACTIVITY Log Generation Playbook
+
+---
+
+## 1. Overview & Log Purpose
+
+### What Produces This Log
+The `WORKDAY_USER_ACTIVITY` log is produced by the **Workday Enterprise Cloud Platform** (Human Capital Management, Financial Management, and Student Information Systems) via the **Workday Activity Logging API** or audit export subscriptions.
+
+### Recorded Activities
+Workday User Activity logs capture real-time and near-real-time actions taken by users and service accounts within the Workday tenant. This includes:
+- **Interactive UI Navigation**: Page views, search queries, unified inbox checks, and portal navigation.
+- **Data Access & Reads**: Viewing sensitive employee information (compensation, termination reasons, PII/PHI, performance reviews, banking details).
+- **Web Service & API Invocations**: SOAP/REST API calls executed by Integration System Users (ISUs).
+- **Modifications & Transactions**: Submitting business processes, approving requisitions, modifying compensation plans, or initiating termination processes.
+
+---
+
+## 2. Format Specification
+
+| Parameter | Specification |
+| :--- | :--- |
+| **Log Format** | Single-line JSON (NDJSON format) |
+| **Encoding** | UTF-8 |
+| **Quoting Rules** | Standard RFC 8259 JSON quoting; strings enclosed in double quotes (`"`) |
+| **Key Ordering** | Unordered (keys may appear in varying sequences across different tenant configurations and ingestion pipelines) |
+| **Delimiters** | Newline (`\n` or `\r\n`) separates distinct log events |
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Core Event Fields
+
+| Field Name | Type | Required | Description | Realistic Values / Formats |
+| :--- | :--- | :--- | :--- | :--- |
+| `requestTime` | String | **Yes** | UTC timestamp of the user request. | ISO 8601 format with millisecond precision: `YYYY-MM-DDTHH:MM:SS.sssZ` |
+| `systemAccount` | String | **Yes** | Unique identifier for the authenticated user or Integration System User (ISU). | Human Accounts: `E37778`, `M503873`, `jsmith`<br>Integration Accounts: `ISU_Integration_01`, `ISU_Payroll_Service`, `ISU_Workday_Reporting` |
+| `activityAction` | String | **Yes** | The operational action category performed. | `READ`, `WRITE`, `EXECUTE`, `MODIFY`, `DELETE`, `DOWNLOAD`, `SIGNON` |
+| `taskDisplayName` | String | **Yes** | Human-readable name of the Workday task, UI view, or web service executed. | - UI Tasks: `View Worker`, `View Local Termination Reason`, `Unified Inbox Action Items count`<br>- API Views: `feature/properties/view (GET) (v0 -  )`, `peopleExperience/workdaySearch/view (GET) (1 -  )`, `dummy_api (GET) (1 -  )`<br>- Web Services: `Get OMS Session Data (Web Service)`, `Get Workers (Web Service)`, `Put Worker (Web Service)` |
+| `taskId` | String | **Yes** | Unique 32-character hexadecimal identifier for the executed task definition. | 32-char lowercase hex string: `d252e3589e2dda491f60d1db754d3fc6`, `bbbbad028e6a223618e0299c53495e08` |
+| `sessionId` | String | **Yes** | Identifier representing the authenticated user session. | 6-character lowercase hex string: `7bf6da`, `c684b4`, `016402`, `fb340a` |
+| `ipAddress` | String | **Yes** | Client source IP address initiating the HTTP request. | IPv4 (`198.51.100.1`, `10.20.0.3`, `203.0.113.45`) or IPv6 address |
+| `deviceType` | String | **Yes** | Physical or logical client device classification. | `Desktop`, `Mobile`, `Tablet`, `Unknown` |
+| `userAgent` | String | **Yes** | Full HTTP User-Agent string sent by client browser or integration script. | Standard browser UA string (Chrome, Edge, Safari) or HTTP client (`WorkdayStudio/1.0`, `Apache-HttpClient/4.5.13`) |
+| `target` | Object | *Optional* | Target business entity or record modified/accessed. Present during object-level operations; omitted during generic portal navigation. | Nested JSON object containing `descriptor` and `id` |
+
+### Nested Object: `target` (Optional)
+
+| Nested Field | Type | Description | Example Values |
+| :--- | :--- | :--- | :--- |
+| `target.descriptor` | String | Human-readable descriptor of the target entity. | `Company Ending Business`, `Target 01`, `Worker: John Doe`, `Compensation Change Reason: Promotion` |
+| `target.id` | String | 32-character hexadecimal unique identifier of the target object. | `194057acc1fb0813d5273e3df330ca95`, `bbbbad028e6a223618e0299c53495e08` |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Workday User Activity logs utilize strict ISO 8601 formatting with millisecond precision and UTC designation (`Z`).
+
+### Expected Format
+`YYYY-MM-DDTHH:MM:SS.sssZ` (e.g., `2026-05-18T10:56:40.999Z`)
+
+### Dynamic Templating Directives
+When generating synthetic logs across historical, continuous, or threat scenarios, use the relative time template syntax:
+- Primary tag: `##$TimeStamp-<Offset>$##` (resolves to standard ISO 8601 with millisecond precision).
+
+```json
+{"requestTime":"##$TimeStamp-0d0h5m12s$##","systemAccount":"M503873", ...}
+```
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Normal User UI Navigation (Search & Inbox)
+```json
+{"taskDisplayName":"peopleExperience/workdaySearch/view (GET) (1 -  )","deviceType":"Desktop","activityAction":"READ","taskId":"a698b3ba82e472ceb9658982e50bdb2a","requestTime":"##$TimeStamp-0d1h15m0s$##","ipAddress":"198.51.100.15","sessionId":"c684b4","systemAccount":"E49201","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"}
+```
+
+### Example 2: Sensitive HR Record Access (Viewing Termination Data with Target Object)
+```json
+{"taskDisplayName":"View Local Termination Reason","target":{"descriptor":"Company Ending Business","id":"194057acc1fb0813d5273e3df330ca95"},"systemAccount":"M503873","requestTime":"##$TimeStamp-0d0h45m22s$##","taskId":"37299450f43fb739c3a46ae67caeeab8","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36","ipAddress":"198.51.100.22","deviceType":"Desktop","activityAction":"READ","sessionId":"7bf6da"}
+```
+
+### Example 3: Integration System User (ISU) Web Service Extraction
+```json
+{"deviceType":"Desktop","sessionId":"016402","target":{"descriptor":"Integration Extract Job","id":"bbbbad028e6a223618e0299c53495e08"},"ipAddress":"10.20.0.3","taskId":"bbbbad028e6a223618e0299c53495e08","taskDisplayName":"Get OMS Session Data (Web Service)","requestTime":"##$TimeStamp-0d0h20m10s$##","systemAccount":"ISU_Integration_02","activityAction":"READ","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0"}
+```
+
+### Example 4: Sensitive Data Modification (Write Action)
+```json
+{"taskDisplayName":"Change Direct Deposit Details","target":{"descriptor":"Worker: Alice Smith (10482)","id":"8a9f3b145c2e11ec8d3c0242ac130003"},"systemAccount":"E10482","requestTime":"##$TimeStamp-0d0h05m30s$##","taskId":"6f3b0c9a8e2d41b59c7a1029384756ab","userAgent":"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1","ipAddress":"203.0.113.190","deviceType":"Mobile","activityAction":"WRITE","sessionId":"f482a1"}
+```
+
+### Example 5: Suspicious Off-Hours Privileged Security Action
+```json
+{"taskDisplayName":"Edit System Security Policy","target":{"descriptor":"Security Group: Security_Administrator","id":"5f1a8c3d9b2e47a19283746501928374"},"systemAccount":"M503873","requestTime":"##$TimeStamp-0d0h01m15s$##","taskId":"99283746501928374650192837465019","userAgent":"Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0","ipAddress":"192.0.2.77","deviceType":"Desktop","activityAction":"MODIFY","sessionId":"ea41bc"}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+### Mandatory Parsing Rules
+1. **Valid JSON**: Every log line must be a standalone, syntactically valid JSON object. Do not emit trailing commas or wrap records in an outer array `[...]`.
+2. **String ID Constraints**:
+   - `taskId` must be exactly a **32-character lowercase hexadecimal string**.
+   - `sessionId` must be a **6-character hexadecimal string**.
+   - `target.id` (when present) must be a **32-character lowercase hexadecimal string**.
+3. **Optional Target Entity**: The `target` object must **only** be populated when an operation is performed against an identifiable Workday business object (e.g., worker record, compensation change, termination reason, security group). Generic endpoint calls (e.g., inbox count, UI search view) must omit the `target` key entirely.
+4. **Special Characters in `taskDisplayName`**: Workday UI tasks frequently contain special characters, such as forward slashes (`/`), HTTP methods in parentheses `(GET)`, and Unicode whitespace separators (such as U+2005 ` `). Ensure JSON string escaping handles these characters cleanly.
+5. **Account Naming Conventions**:
+   - Standard employees/managers typically follow an alphanumeric ID convention (e.g., `E` or `M` prefix + digits: `E37778`, `M503873`).
+   - Service accounts and background integrations typically follow prefix conventions like `ISU_<Service_Name>`.

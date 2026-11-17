@@ -9,21 +9,21 @@ from .models import RuleAnalysis, SecOpsRule
 
 # Heuristic mapping between UDM event types / fields and Log Jammer playbooks
 UDM_LOG_MAPPING = {
-    "PROCESS_LAUNCH": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "CS_EDR", "AUDITD"],
-    "PROCESS_TERMINATION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "CS_EDR", "AUDITD"],
+    "PROCESS_LAUNCH": ["WINDOWS_SYSMON", "WINEVTLOG", "MICROSOFT_DEFENDER_ENDPOINT", "PAN_CORTEX_XDR_EVENTS", "CS_EDR", "AUDITD"],
+    "PROCESS_TERMINATION": ["WINDOWS_SYSMON", "WINEVTLOG", "MICROSOFT_DEFENDER_ENDPOINT", "PAN_CORTEX_XDR_EVENTS", "CS_EDR", "AUDITD"],
     "PROCESS_OPEN": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "CS_EDR"],
-    "PROCESS_UNCATEGORIZED": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "CS_EDR", "AUDITD"],
+    "PROCESS_UNCATEGORIZED": ["WINDOWS_SYSMON", "WINEVTLOG", "MICROSOFT_DEFENDER_ENDPOINT", "PAN_CORTEX_XDR_EVENTS", "CS_EDR", "AUDITD"],
     "NETWORK_CONNECTION": ["PAN_FIREWALL", "CISCO_ASA_FIREWALL", "FORTINET_FIREWALL", "AWS_VPC_FLOW", "GCP_VPC_FLOW"],
     "NETWORK_FLOW": ["AWS_VPC_FLOW", "GCP_VPC_FLOW"],
     "NETWORK_DNS": ["WINDOWS_DNS", "GCP_DNS", "CLOUDFLARE"],
-    "NETWORK_HTTP": ["ZSCALER_WEBPROXY", "BLUECOAT_WEBPROXY", "CLOUDFLARE"],
-    "USER_LOGIN": ["OKTA", "AZURE_AD", "AUTH_ZERO", "DUO_ACTIVITY", "WORKSPACE_ACTIVITY", "WINDOWS_SYSMON"],
-    "USER_CREATION": ["AZURE_AD_AUDIT", "OKTA", "WORKSPACE_ACTIVITY", "AWS_CLOUDTRAIL"],
-    "USER_CHANGE_PERMISSIONS": ["GCP_CLOUDAUDIT", "AWS_CLOUDTRAIL", "AZURE_AD_AUDIT", "OKTA"],
+    "NETWORK_HTTP": ["CLOUDFLARE", "ZSCALER_WEBPROXY", "BLUECOAT_WEBPROXY"],
+    "USER_LOGIN": ["OKTA", "AZURE_AD", "AUTH_ZERO", "DUO_ACTIVITY", "WORKSPACE_ACTIVITY", "WINEVTLOG", "WINDOWS_SYSMON"],
+    "USER_CREATION": ["AZURE_AD_AUDIT", "OKTA", "WORKSPACE_ACTIVITY", "AWS_CLOUDTRAIL", "WINEVTLOG"],
+    "USER_CHANGE_PERMISSIONS": ["GCP_CLOUDAUDIT", "AWS_CLOUDTRAIL", "AZURE_AD_AUDIT", "OKTA", "WINEVTLOG"],
     "USER_RESOURCE_ACCESS": ["WORKSPACE_ACTIVITY", "OFFICE_365", "AWS_CLOUDTRAIL", "GCP_CLOUDAUDIT"],
-    "FILE_CREATION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "CS_EDR", "AUDITD"],
-    "FILE_MODIFICATION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "CS_EDR"],
-    "FILE_DELETION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "CS_EDR"],
+    "FILE_CREATION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "PAN_CORTEX_XDR_EVENTS", "CS_EDR", "AUDITD"],
+    "FILE_MODIFICATION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "PAN_CORTEX_XDR_EVENTS", "CS_EDR", "AUDITD"],
+    "FILE_DELETION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT", "PAN_CORTEX_XDR_EVENTS", "CS_EDR", "AUDITD"],
     "REGISTRY_MODIFICATION": ["WINDOWS_SYSMON", "MICROSOFT_DEFENDER_ENDPOINT"],
     "EMAIL_TRANSACTION": ["OFFICE_365_MESSAGETRACE", "PROOFPOINT_MAIL", "PROOFPOINT_ON_DEMAND"],
 }
@@ -146,34 +146,57 @@ class RuleAnalyzer:
       event_types.add(et.upper())
 
     # 2. re.regex(...) positive or negative
+    val_pattern = r"(/(?:\\/|[^/\n])+/|\"(?:\\\"|[^\"\n])+\"|`[^`]+`)"
     re_regex_matches = re.findall(
-        r"(!?)\s*re\.regex\s*\(\s*\$[a-zA-Z0-9_]+\.([a-zA-Z0-9_.]+)\s*,\s*([`\"/][^`\"/]+[`\"/])\s*\)",
+        rf"(!?)\s*re\.regex\s*\(\s*\$[a-zA-Z0-9_]+\.([a-zA-Z0-9_.]+)\s*,\s*{val_pattern}\s*\)",
         events_text,
     )
     for is_neg, field_path, val in re_regex_matches:
-      cleaned_val = val.strip("`\"/")
+      cleaned_val = val[1:-1]
       if is_neg:
-        negative.setdefault(field_path, []).append(cleaned_val)
+        if cleaned_val not in negative.setdefault(field_path, []):
+          negative[field_path].append(cleaned_val)
       else:
-        positive.setdefault(field_path, []).append(cleaned_val)
+        if cleaned_val not in positive.setdefault(field_path, []):
+          positive[field_path].append(cleaned_val)
+
+    # Extract `not (...)` blocks first so inner `=` conditions are treated as negative exclusions
+    not_blocks = re.findall(r"\bnot\s*\(([^()]+)\)", events_text, re.IGNORECASE | re.DOTALL)
+    positive_search_text = re.sub(r"\bnot\s*\(([^()]+)\)", "", events_text, flags=re.IGNORECASE | re.DOTALL)
+
+    for block in not_blocks:
+      not_matches = re.findall(
+          rf"\$[a-zA-Z0-9_]+\.([a-zA-Z0-9_.]+)\s*(?:=|=(?:~)?)\s*{val_pattern}(?:\s+nocase)?",
+          block,
+      )
+      for field_path, val in not_matches:
+        if "metadata.event_type" in field_path:
+          continue
+        cleaned_val = val[1:-1]
+        if cleaned_val not in negative.setdefault(field_path, []):
+          negative[field_path].append(cleaned_val)
 
     # 3. Extract positive field conditions: $e.field.subfield = /regex/ or = "val"
     pos_regex = re.findall(
-        r"\$[a-zA-Z0-9_]+\.([a-zA-Z0-9_.]+)\s*(?:=|=(?:~)?)\s*(/[^/]+/|\"[^\"]+\"|`[^`]+`)(?:\s+nocase)?",
-        events_text,
+        rf"\$[a-zA-Z0-9_]+\.([a-zA-Z0-9_.]+)\s*(?:=|=(?:~)?)\s*{val_pattern}(?:\s+nocase)?",
+        positive_search_text,
     )
     for field_path, val in pos_regex:
       if "metadata.event_type" in field_path:
         continue
-      positive.setdefault(field_path, []).append(val.strip("`\"/"))
+      cleaned_val = val[1:-1]
+      if cleaned_val not in positive.setdefault(field_path, []):
+        positive[field_path].append(cleaned_val)
 
     # 4. Extract negative exclusions: $e.field.subfield != /regex/ or != "val"
     neg_regex = re.findall(
-        r"\$[a-zA-Z0-9_]+\.([a-zA-Z0-9_.]+)\s*(?:!=|!(?:~)?)\s*(/[^/]+/|\"[^\"]+\"|`[^`]+`)(?:\s+nocase)?",
+        rf"\$[a-zA-Z0-9_]+\.([a-zA-Z0-9_.]+)\s*(?:!=|!(?:~)?)\s*{val_pattern}(?:\s+nocase)?",
         events_text,
     )
     for field_path, val in neg_regex:
-      negative.setdefault(field_path, []).append(val.strip("`\"/"))
+      cleaned_val = val[1:-1]
+      if cleaned_val not in negative.setdefault(field_path, []):
+        negative[field_path].append(cleaned_val)
 
     return sorted(list(event_types)), positive, negative
 
@@ -191,24 +214,25 @@ class RuleAnalyzer:
     if not cond_text:
       return 1, False
 
-    # Check for count thresholds, e.g. #e > 5 or #e >= 5
-    threshold = 1
+    # Check for count thresholds across all event variables, e.g. #oom >= 5 and #probe >= 20
+    var_thresholds: Dict[str, int] = {}
     is_multi = False
 
-    gt_match = re.search(r"#[a-zA-Z0-9_]+\s*>\s*([0-9]+)", cond_text)
-    if gt_match:
-      threshold = int(gt_match.group(1)) + 1
+    for var_name, val in re.findall(r"#([a-zA-Z0-9_]+)\s*>\s*([0-9]+)", cond_text):
+      var_thresholds[var_name] = max(var_thresholds.get(var_name, 0), int(val) + 1)
       is_multi = True
 
-    gte_match = re.search(r"#[a-zA-Z0-9_]+\s*>=\s*([0-9]+)", cond_text)
-    if gte_match:
-      threshold = max(threshold, int(gte_match.group(1)))
+    for var_name, val in re.findall(r"#([a-zA-Z0-9_]+)\s*>=\s*([0-9]+)", cond_text):
+      var_thresholds[var_name] = max(var_thresholds.get(var_name, 0), int(val))
       is_multi = True
+
+    threshold = sum(var_thresholds.values()) if var_thresholds else 1
 
     # Check for multi-event combinations ($e1 and $e2)
-    if re.search(r"\$[a-zA-Z0-9_]+\s+and\s+\$[a-zA-Z0-9_]+", cond_text, re.IGNORECASE):
+    event_vars = set(re.findall(r"\$([a-zA-Z0-9_]+)", cond_text))
+    if len(event_vars) > 1 or re.search(r"\$[a-zA-Z0-9_]+\s+and\s+\$[a-zA-Z0-9_]+", cond_text, re.IGNORECASE):
       is_multi = True
-      threshold = max(threshold, 2)
+      threshold = max(threshold, len(event_vars), 2)
 
     return threshold, is_multi
 
@@ -222,12 +246,18 @@ class RuleAnalyzer:
     """Infer the best candidate log sources to trigger the rule."""
     candidates = []
     text_lower = text.lower()
+    is_linux = any(k in text_lower for k in ('"linux"', "auditd", "/bin/bash", "/bin/sh", "systemd-coredump", "php-fpm", "/etc/passwd", "/etc/shadow"))
 
     # Direct keyword indicators in rule logic or comments
-    if any(k in text_lower for k in ("powershell", "cmd.exe", "rundll32", "reg.exe", "wmic", "sysmon")):
-      candidates.append("WINDOWS_SYSMON")
-      candidates.append("MICROSOFT_DEFENDER_ENDPOINT")
+    if is_linux:
+      candidates.append("PAN_CORTEX_XDR_EVENTS")
+      candidates.append("AUDITD")
       candidates.append("CS_EDR")
+      candidates.append("NIX_SYSTEM")
+    elif any(k in text_lower for k in ("powershell", "cmd.exe", "rundll32", "reg.exe", "wmic", "sysmon")):
+      candidates.append("WINDOWS_SYSMON")
+      candidates.append("WINEVTLOG")
+      candidates.append("MICROSOFT_DEFENDER_ENDPOINT")
     if any(k in text_lower for k in ("aws.", "iam.amazonaws.com", "s3.amazonaws.com", "cloudtrail")):
       candidates.append("AWS_CLOUDTRAIL")
     if any(k in text_lower for k in ("workspace", "google workspace", "gsuite", "drive.google")):
@@ -239,9 +269,6 @@ class RuleAnalyzer:
     if any(k in text_lower for k in ("dns query", "dns_response")):
       candidates.append("WINDOWS_DNS")
       candidates.append("GCP_DNS")
-    if any(k in text_lower for k in ("auditd", "/bin/bash", "/bin/sh", "linux", "/ssh/")):
-      candidates.append("CS_EDR")
-      candidates.append("AUDITD")
 
     # Prioritize CS_EDR when PROCESS_LAUNCH requires principal.asset_id (CS_EDR populates principal.asset_id="CS:<aid>" on both Linux and Windows)
     if "PROCESS_LAUNCH" in event_types and any("asset_id" in f for f in required_fields):
@@ -255,16 +282,20 @@ class RuleAnalyzer:
     for et in event_types:
       if et in UDM_LOG_MAPPING:
         for lt in UDM_LOG_MAPPING[et]:
+          if is_linux and lt in ("WINDOWS_SYSMON", "WINEVTLOG"):
+            continue
           if lt not in candidates:
             candidates.append(lt)
 
     # Match by UDM field names
     for f in required_fields:
-      if "process" in f and "WINDOWS_SYSMON" not in candidates:
+      if "process" in f and not is_linux and "WINDOWS_SYSMON" not in candidates:
         candidates.append("WINDOWS_SYSMON")
       if ("registry" in f) and "WINDOWS_SYSMON" not in candidates:
         candidates.append("WINDOWS_SYSMON")
-      if "network" in f and "PAN_FIREWALL" not in candidates:
+      if "network.http" in f and "CLOUDFLARE" not in candidates:
+        candidates.append("CLOUDFLARE")
+      elif "network" in f and "PAN_FIREWALL" not in candidates:
         candidates.append("PAN_FIREWALL")
 
     # Deduplicate while preserving priority order

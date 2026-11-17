@@ -1,0 +1,133 @@
+# Workday REST API Worker & Identity Sync Log Generation Playbook
+
+## 1. Overview & Log Purpose
+This log type represents structured data records emitted by the **Workday Human Capital Management (HCM) Cloud Platform**, specifically via the **Workday Core REST API (v1 / Worker API)** and identity synchronization connectors (e.g., identity lifecycle management tools, SIEM ingestion collectors, Enterprise Directory integrations, and collaboration connectors such as Gopher/Slack).
+
+Each log entry captures a point-in-time snapshot or change-event representation of an employee's organizational profile, hierarchy, contact information, role classification, and time-off/absence requests.
+
+### Security & Detection Use Cases
+* **Identity Governance & Lifecycle Monitoring:** Tracking employee promotions, managerial changes (`isManager`), and organizational realignment (`primarySupervisoryOrganization`).
+* **Privilege Creep & Unauthorized Manager Escalation:** Detecting modifications where non-managerial accounts suddenly gain `isManager: true` or acquire `supervisoryOrganizationsManaged` endpoints without an authorized HR business process.
+* **Insider Threat & Activity Correlation:** Correlating anomalous after-hours data access or privileged operations against employee absence/PTO records (`gopher-time-off`).
+* **Suspicious Account State Modifications:** Spotting unauthorized updates to worker profile attributes, such as modification of `primaryWorkEmail` or phone numbers, which could signal business email compromise (BEC) or account takeover.
+
+---
+
+## 2. Format Specification
+* **Format:** Single-line JSON (NDJSON / JSON Lines).
+* **Character Encoding:** UTF-8.
+* **Quoting Rules:** Standard JSON specification (RFC 8259). Double quotes for all keys and string values.
+* **Envelope:** Standalone JSON payload per line with no Syslog headers.
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### 3.1 Top-Level Object Schema
+
+| Field Name | Type | Required | Description / Example |
+| :--- | :--- | :--- | :--- |
+| `id` | String | **Yes** | 32-character lowercase hexadecimal Workday Internal Identifier (WID). Example: `72a9689b01c9d0c3a38a365c59c0de70` |
+| `descriptor` | String | **Yes** | Full worker display name. May include worker type indicator like `[C]` for Contingent/Contractor. Example: `Alex A. [C]`, `Dana A.` |
+| `href` | String | **Yes** | Canonical REST API URI pointing to the worker resource. |
+| `businessTitle` | String | No | Official corporate job title. Example: `Senior Customer Services Representative`, `Associate Consultant` |
+| `isManager` | Boolean | **Yes** | `true` if the worker manages a supervisory organization; otherwise `false`. |
+| `primaryWorkEmail` | String | No | Corporate email address. Example: `alex.a@example.com` |
+| `primaryWorkPhone` | String | No | Formatted telephone number. Example: `+1 (555) 010-0100` |
+| `yearsOfService` | String | No | Tenure as an integer represented as a JSON string. Example: `"4"`, `"7"`, `"12"` |
+| `location` | Object | No | Physical/administrative location reference. |
+| `primarySupervisoryOrganization` | Object | **Yes** | Reference to the primary supervisory unit to which the worker belongs. |
+| `supervisoryOrganizationsManaged` | String | No | REST API endpoint URL listing organizations managed by this worker (typically populated if `isManager: true`). |
+| `gopher-supervisor` | Object | No | Embedded worker object representing the direct reporting manager. |
+| `gopher-history` | Array / Null | No | Worker revision history array or `null`. |
+| `gopher-time-off` | Array / Null | No | Array of active/recent time-off entries or `null`. |
+
+---
+
+### 3.2 Nested Object Schemas
+
+#### Reference Object Structure (`location`, `primarySupervisoryOrganization`, `plan`, `unitOfTime`)
+Standard Workday reference model containing metadata:
+```json
+{
+  "id": "a5922da14d63a47de77d6f263b439d91",
+  "descriptor": "Location 01",
+  "href": "https://services1.myworkday.com/ccx/api/api/v1/<tenant>/locations/a5922da14d63a47de77d6f263b439d91"
+}
+```
+*(Note: `href` is present on supervisory organizations and workers, but sometimes omitted on simple enum-like objects like `plan` or `unitOfTime`).*
+
+#### `gopher-time-off` Array Element
+
+| Field Name | Type | Description / Format |
+| :--- | :--- | :--- |
+| `date` | String | Date of the time-off occurrence (`YYYY-MM-DD`). |
+| `descriptor` | String | Formatted summary: `MM/DD/YYYY - <Units> <UnitDescriptor> (<WorkerDescriptor>)`. |
+| `employee` | Object | Minimal worker reference (`descriptor`, `href`, `id`). |
+| `href` | String | Resource URI for the specific time-off entry. |
+| `id` | String | 32-character hex WID for the entry. |
+| `timeOff` | Object | Time-off classification containing `descriptor` (e.g., `PTO`, `Sick Leave`, `Bereavement`), `href`, `id`, and nested `plan`. |
+| `timeOffRequest` | Object | Associated parent request object (`descriptor`, `href`, `id`, `status`). `status` values: `Successfully Completed`, `Pending Approval`, `Approved`, `Denied`. |
+| `unitOfTime` | Object | Unit of measurement (`descriptor`: `Hours` or `Days`, plus `id`). |
+| `units` | String | Amount of time deducted as a string. Example: `"8"`, `"4"`. |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+In Workday REST payloads:
+* Calendar events inside the `gopher-time-off` array use standard ISO date format: `YYYY-MM-DD`.
+* Corresponding descriptors use US date format: `MM/DD/YYYY`.
+* In SIEM streaming integrations wrapping this API payload, ingestion timestamps use ISO 8601 (`##$TimeStamp-0d0h0m0s$##`) or Unix Epoch seconds (`##$Epoch-0d0h0m0s$##`).
+
+### Dynamic Time Macros for Scenario Generators
+* **ISO-8601 Ingestion Timestamp:** `##$TimeStamp-0d0h0m0s$##` (e.g., `2023-10-25T14:32:10.123Z`)
+* **Relative Epoch Timestamp:** `##$Epoch-0d1h0m0s$##` (e.g., `1698244330`)
+* **Date Substitution Syntax:** Ensure the date component in `date` matches the human-readable date in the `descriptor` string.
+
+---
+
+## 5. Concrete Valid Examples
+
+### Example 1: Standard Individual Contributor Profile Sync (Contingent Worker)
+```json
+{"businessTitle":"Senior Customer Services Representative","descriptor":"Alex A. [C]","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/72a9689b01c9d0c3a38a365c59c0de70","id":"72a9689b01c9d0c3a38a365c59c0de70","isManager":false,"primarySupervisoryOrganization":{"descriptor":"Supervisory Organization 01","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/supervisoryOrganizations/5a58683a3320d7421a37f9e91d51fe5e","id":"5a58683a3320d7421a37f9e91d51fe5e"},"primaryWorkEmail":"alex.a@example.com","primaryWorkPhone":"+1 (555) 010-0100"}
+```
+
+### Example 2: Manager with Supervisor Hierarchy and Reporting Line
+```json
+{"descriptor":"Ariel A.","gopher-history":null,"gopher-supervisor":{"descriptor":"Bola A.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/751598c7ddaa7c7369dec594aac9bfae","id":"751598c7ddaa7c7369dec594aac9bfae","isManager":true,"location":{"descriptor":"Location 01","id":"a5922da14d63a47de77d6f263b439d91"},"primarySupervisoryOrganization":{"descriptor":"Supervisory Organization 03","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/supervisoryOrganizations/b3dced5aefbd0db03cd5a2c875ea5501","id":"b3dced5aefbd0db03cd5a2c875ea5501"},"primaryWorkEmail":"bola.a@example.com","supervisoryOrganizationsManaged":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/751598c7ddaa7c7369dec594aac9bfae/supervisoryOrganizationsManaged","yearsOfService":"12"},"gopher-time-off":null,"href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/23d80e8e2cb668a962d1f28d3e90c532","id":"23d80e8e2cb668a962d1f28d3e90c532","isManager":true,"location":{"descriptor":"Location 01","id":"a5922da14d63a47de77d6f263b439d91"},"primarySupervisoryOrganization":{"descriptor":"Supervisory Organization 04","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/supervisoryOrganizations/f3422566000a5f0e8b7b992970e660c1","id":"f3422566000a5f0e8b7b992970e660c1"},"primaryWorkEmail":"ariel.a@example.com","supervisoryOrganizationsManaged":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/23d80e8e2cb668a962d1f28d3e90c532/supervisoryOrganizationsManaged","yearsOfService":"7"}
+```
+
+### Example 3: Worker with Multi-Day Approved PTO Time-Off Record
+```json
+{"descriptor":"Dani A.","gopher-history":null,"gopher-supervisor":{"descriptor":"Gabriel A.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/4453e512ac853ff44c427a7910252bbc","id":"4453e512ac853ff44c427a7910252bbc","isManager":true,"location":{"descriptor":"Location 01","id":"a5922da14d63a47de77d6f263b439d91"},"primarySupervisoryOrganization":{"descriptor":"Supervisory Organization 07","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/supervisoryOrganizations/f83753b3b1a33321454d5ac7a902391c","id":"f83753b3b1a33321454d5ac7a902391c"},"primaryWorkEmail":"gabriel.a@example.com","supervisoryOrganizationsManaged":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/4453e512ac853ff44c427a7910252bbc/supervisoryOrganizationsManaged","yearsOfService":"7"},"gopher-time-off":[{"date":"2023-11-06","descriptor":"11/06/2023 - 8 Hours (Dani A.)","employee":{"descriptor":"Dani A.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/065fdbd88c462424d27861e294be6989","id":"065fdbd88c462424d27861e294be6989"},"href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/065fdbd88c462424d27861e294be6989/timeOffEntries/29a679e1c56b9e73e96a498644508c7a","id":"29a679e1c56b9e73e96a498644508c7a","timeOff":{"descriptor":"PTO","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/timeOffs/c200b95eb9348da125e0350cb58353f0","id":"c200b95eb9348da125e0350cb58353f0","plan":{"descriptor":"PTO","id":"d7e9b8242df84fb1cd2e4a19e6a18c57"}},"timeOffRequest":{"descriptor":"Absence Request: Dani A.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/timeOffRequest/0177856d35f50e702d81b79fa7d7481b","id":"0177856d35f50e702d81b79fa7d7481b","status":"Successfully Completed"},"unitOfTime":{"descriptor":"Hours","id":"a91249965b35b48725ed5ba40f04be76"},"units":"8"},{"date":"2023-11-07","descriptor":"11/07/2023 - 8 Hours (Dani A.)","employee":{"descriptor":"Dani A.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/065fdbd88c462424d27861e294be6989","id":"065fdbd88c462424d27861e294be6989"},"href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/065fdbd88c462424d27861e294be6989/timeOffEntries/7b64d651491f7c595378e980f1a708eb","id":"7b64d651491f7c595378e980f1a708eb","timeOff":{"descriptor":"PTO","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/timeOffs/c200b95eb9348da125e0350cb58353f0","id":"c200b95eb9348da125e0350cb58353f0","plan":{"descriptor":"PTO","id":"d7e9b8242df84fb1cd2e4a19e6a18c57"}},"timeOffRequest":{"descriptor":"Absence Request: Dani A.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/timeOffRequest/890ef9217beff745177c6d29d65fc44b","id":"890ef9217beff745177c6d29d65fc44b","status":"Successfully Completed"},"unitOfTime":{"descriptor":"Hours","id":"a91249965b35b48725ed5ba40f04be76"},"units":"8"}],"href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/065fdbd88c462424d27861e294be6989","id":"065fdbd88c462424d27861e294be6989","isManager":false,"location":{"descriptor":"Location 01","id":"a5922da14d63a47de77d6f263b439d91"},"primarySupervisoryOrganization":{"descriptor":"Supervisory Organization 08","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/supervisoryOrganizations/60d16eb499eb9769bb7d55c5f0fb54ed","id":"60d16eb499eb9769bb7d55c5f0fb54ed"},"primaryWorkEmail":"dani.a@example.com","supervisoryOrganizationsManaged":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/065fdbd88c462424d27861e294be6989/supervisoryOrganizationsManaged","yearsOfService":"4"}
+```
+
+### Example 4: Newly Promoted Lead with Managed Org Links and Pending Time-Off
+```json
+{"businessTitle":"Principal Systems Architect","descriptor":"Morgan L.","gopher-history":null,"gopher-supervisor":{"descriptor":"Taylor S.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/e1a2b3c4d5e6f708192a3b4c5d6e7f80","id":"e1a2b3c4d5e6f708192a3b4c5d6e7f80","isManager":true,"location":{"descriptor":"Location 02","id":"ea54e0afc972cff5efa73c013a730493"},"primarySupervisoryOrganization":{"descriptor":"Infrastructure Engineering","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/supervisoryOrganizations/c8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3","id":"c8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3"},"primaryWorkEmail":"taylor.s@example.com","supervisoryOrganizationsManaged":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/e1a2b3c4d5e6f708192a3b4c5d6e7f80/supervisoryOrganizationsManaged","yearsOfService":"10"},"gopher-time-off":[{"date":"2023-12-24","descriptor":"12/24/2023 - 4 Hours (Morgan L.)","employee":{"descriptor":"Morgan L.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/9876543210abcdef0123456789abcdef","id":"9876543210abcdef0123456789abcdef"},"href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/9876543210abcdef0123456789abcdef/timeOffEntries/aabbccddeeff00112233445566778899","id":"aabbccddeeff00112233445566778899","timeOff":{"descriptor":"Floating Holiday","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/timeOffs/f0e1d2c3b4a5968778695a4b3c2d1e0f","id":"f0e1d2c3b4a5968778695a4b3c2d1e0f","plan":{"descriptor":"Holiday","id":"1234567890abcdef1234567890abcdef"}},"timeOffRequest":{"descriptor":"Absence Request: Morgan L.","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/timeOffRequest/fedcba0987654321fedcba0987654321","id":"fedcba0987654321fedcba0987654321","status":"Pending Approval"},"unitOfTime":{"descriptor":"Hours","id":"a91249965b35b48725ed5ba40f04be76"},"units":"4"}],"href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/9876543210abcdef0123456789abcdef","id":"9876543210abcdef0123456789abcdef","isManager":true,"location":{"descriptor":"Location 02","id":"ea54e0afc972cff5efa73c013a730493"},"primarySupervisoryOrganization":{"descriptor":"Cloud Architecture & Security","href":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/supervisoryOrganizations/11223344556677889900aabbccddeeff","id":"11223344556677889900aabbccddeeff"},"primaryWorkEmail":"morgan.l@example.com","primaryWorkPhone":"+1 (555) 019-8833","supervisoryOrganizationsManaged":"https://services1.myworkday.com/ccx/api/api/v1/example_tenant/workers/9876543210abcdef0123456789abcdef/supervisoryOrganizationsManaged","yearsOfService":"3"}
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **WID ID Consistency:**
+   * All `id` fields (`id`, `location.id`, `primarySupervisoryOrganization.id`, etc.) MUST be strictly **32-character lowercase hexadecimal strings** (`^[a-f0-9]{32}$`).
+   * The `id` present inside any object's `id` field MUST match the final segment of its corresponding `href` URL.
+
+2. **URI Tenant Consistency:**
+   * Every URL path MUST share the exact same tenant identifier (e.g., `https://services1.myworkday.com/ccx/api/api/v1/<tenant_name>/...`). Do not mix tenant names within a single log entry.
+
+3. **Data Type Strictness:**
+   * `isManager` is strictly a JSON **boolean** literal (`true` or `false`), never a string (`"true"`).
+   * `yearsOfService` and `units` are encoded as **strings** containing digits (e.g., `"8"`, `"12"`), not numeric literals.
+   * `gopher-history` and `gopher-time-off` MUST be explicitly `null` when no data exists (do not use empty strings `""`).
+
+4. **Time-Off Descriptor Coherence:**
+   * In `gopher-time-off` objects, ensure that `date` (`YYYY-MM-DD`), the date prefix in `descriptor` (`MM/DD/YYYY`), the `units` field, and the worker's name in `descriptor` are semantically aligned:
+     * If `date` is `"2023-06-18"`, `units` is `"8"`, and worker is `"Dani A."`, the descriptor MUST be `"06/18/2023 - 8 Hours (Dani A.)"`.
+
+5. **Single-Line Formatting:**
+   * The entire JSON document must reside on a single line without unescaped newlines or pretty-printing indentation.

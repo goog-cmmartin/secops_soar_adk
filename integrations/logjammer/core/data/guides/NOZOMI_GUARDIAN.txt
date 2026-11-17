@@ -1,0 +1,153 @@
+# Nozomi Networks Guardian (N2OS) Log Generation Playbook
+
+## 1. Overview & Log Purpose
+Nozomi Networks Guardian is an Operational Technology (OT), Internet of Medical Things (IoMT), and Industrial Control System (ICS) cybersecurity and anomaly detection platform running the N2OS operating system. Guardian appliances passively inspect industrial network traffic (SPAN/TAP), perform deep packet inspection (DPI) of industrial protocols (e.g., Modbus, EtherNet/IP, DNP3, OPC UA, BACnet, S7comm), monitor asset inventory, track appliance health, and record administrative actions.
+
+Guardian logs generated via its Syslog/CEF Data Integration Endpoint record four primary activity streams:
+1. **AUDIT Logs (`AUDIT:*`)**: Administrative logins, configuration changes, scheduled backup results, session hijacking detection, and host-based intrusion detection system (HIDS/AIDE) file modifications.
+2. **SECURITY & SIGNATURE Incidents (`INCIDENT:*`, `SIGN:*`)**: Detected network scans, protocol anomalies, policy violations, known OT exploit signatures, and MITRE ATT&CK for ICS mappings.
+3. **NETWORK FLOW Logs (`flow`)**: Layer 2 through Layer 7 connection telemetry summarizing transferred bytes, packet counts, protocol classification, and OT device communications.
+4. **HEALTH Logs (`HEALTH`)**: Sensor appliance performance issues, interface oversubscription, link event discards, and diagnostic telemetry.
+
+---
+
+## 2. Format Specification
+
+### Classification
+- **Primary Standard**: Micro Focus ArcSight Common Event Format (CEF:0).
+- **Transport Encapsulation**: Transmitted over UDP/TCP/TLS syslog (RFC 3164-compatible header) or delivered as standalone raw CEF lines.
+
+### Layout Anatomy
+A standard syslog-encapsulated Nozomi Guardian log consists of two primary components:
+```text
+<PRI>SyslogHeader CEF:0|Device Vendor|Device Product|Device Version|Device Event Class ID|Name|Severity|Extension
+```
+
+```text
+|<--- Syslog Header (RFC 3164) --->|<----------------------- CEF Prefix (7 Pipes) ----------------------->|<------- CEF Extension Key-Values ------->|
+<134>Oct 04 2024 09:51:57 guardian01 n2osevents[0]: CEF:0|Nozomi Networks|N2OS|24.4.1|AUDIT:SESSIONS:CREATE|User signed in|0|dvchost=guardian01 cs6=3 ...
+```
+
+### Delimiters & Quoting Rules
+- **Header Delimiter**: Vertical pipe character (`|`). The CEF header strictly contains 7 pipe delimiters separating 8 header fields.
+- **Header Escaping**: Any literal pipe (`|`) or backslash (`\`) within header fields (e.g., in the `Name` or `Device Event Class ID` field) must be escaped with a backslash (`\|`, `\\`).
+- **Extension Delimiter**: Space-separated `key=value` pairs.
+- **Extension Escaping & Equal Signs**: An equal sign (`=`) inside an extension value does not strictly need quotes, but embedded double quotes, backslashes, or control characters must follow CEF standards. Complex `msg` attributes containing JSON/Ruby structures (e.g., `{"N2OS_SMB_PASSWORD"=>"***"}`) or multiple IP chains are formatted as plain strings.
+- **Labels**: Custom extension fields (`cs1` to `cs6`, `flexString1` to `flexString4`) require their respective companion label fields (e.g., `cs1Label`, `flexString1Label`).
+
+---
+
+## 3. Schema Breakdown & Fields
+
+### Syslog Header & Process Identification
+| Field | Type | Description | Realistic Values |
+| :--- | :--- | :--- | :--- |
+| **PRI** | Integer | Facility and Severity enclosed in `< >`. | `<134>` (Facility 16/Local0, Severity 6/Info), `<131>` (Severity 3/Error), `<137>` (Facility 17/Local1, Severity 1/Alert) |
+| **Syslog Timestamp** | Timestamp | RFC 3164 timestamp format (`MMM dd yyyy HH:mm:ss` or `MMM dd HH:mm:ss`). | `Oct 28 2024 16:01:45`, `May 28 2025 03:30:06` |
+| **Syslog Host** | String | Hostname of the Guardian appliance or central console sending the syslog. | `guardian01`, `guardian-val-grd1`, `cym-lab-nozomi01.ot.labs.example.com` |
+| **Process Name & PID** | String | Process identifier generating the event. | `n2osevents[0]:` (Guardian internal event routing daemon) |
+
+---
+
+### CEF Header Fields
+| Header Index | CEF Element | Description | Examples |
+| :--- | :--- | :--- | :--- |
+| `0` | **CEF Version** | Always integer `0`. | `CEF:0` |
+| `1` | **Device Vendor** | Appliance manufacturer. | `Nozomi Networks` |
+| `2` | **Device Product** | Appliance operating system. | `N2OS` |
+| `3` | **Device Version** | Firmware / N2OS release string with build tag. | `23.0.0-04221138_CABC9`, `24.1.0`, `24.4.1-10071452_979BF`, `25.6.0-10271323_CD5F7` |
+| `4` | **Device Event Class ID** | Event classification hierarchy (`Category:Subcategory:Action`). | `AUDIT:DATA_INTEGRATION_ENDPOINTS:SAVE`, `AUDIT:SESSIONS:CREATE`, `AUDIT::`, `INCIDENT:PORT-SCAN`, `SIGN:NETWORK-SCAN`, `SIGN:MODBUS-EXCEPTION`, `HEALTH`, `flow` |
+| `5` | **Name** | Descriptive name of the detected event or flow. | `Saved data integration endpoint 'Common Event Format (CEF)'`, `User signed in`, `HIDS`, `Network Scan`, `Network Flow`, `Health problem`, `Session hijacking detected, closing session` |
+| `6` | **Severity** | Numeric score (`0`-`10`) or text label (`Low`, `Medium`, `High`, `Critical`). | `0` (Audit/Health), `7`, `8` (Security alert), `Low`, `Medium`, `High` |
+
+---
+
+### CEF Extension Fields Dictionary
+| Key | Label Key | Type | Description | Realistic Values |
+| :--- | :--- | :--- | :--- | :--- |
+| `src` | *N/A* | IPv4 / IPv4 List | Source IP address or proxy/client list. | `192.168.1.11`, `10.240.10.20`, `198.51.100.1, 203.0.113.1` |
+| `dst` | *N/A* | IPv4 | Destination IP address (unicast, broadcast, multicast). | `192.168.1.10`, `224.0.0.251`, `224.0.0.252` |
+| `spt` | *N/A* | Integer | Source Layer 4 port. | `54322`, `48552`, `59317`, `5353` |
+| `dpt` | *N/A* | Integer | Destination Layer 4 port (Standard / OT services). | `44818` (EtherNet/IP), `502` (Modbus), `20000` (DNP3), `5353` (mDNS), `5355` (LLMNR), `4840` (OPC UA), `102` (S7) |
+| `smac` | *N/A* | MAC Address | Source Ethernet Hardware MAC. | `02:42:9c:d4:0c:d1`, `02:00:5e:00:00:01` |
+| `dmac` | *N/A* | MAC Address | Destination Ethernet Hardware MAC. | `01:00:5e:00:00:fb`, `00:00:bc:3e:41:10` |
+| `proto` | *N/A* | String | Transport layer protocol. | `TCP`, `UDP`, `ICMP` |
+| `app` | *N/A* | String | Identified application or industrial protocol. | `ETHERNETIP`, `MODBUS`, `DNP3`, `OPCUA`, `BACNET`, `S7COMM`, `LLMNR`, `MDNS`, `HTTPS` |
+| `suser` | *N/A* | String | Username associated with the action or flow. | `alex.a`, `amal.a`, `admin`, `CYMLABS\nur.d` |
+| `dvc` | *N/A* | IPv4 | Guardian sensor IP address that captured the event. | `10.20.0.6`, `10.20.0.9`, `10.240.10.5` |
+| `dvchost` | *N/A* | String | Hostname of the Guardian probe capturing traffic. | `guardian01`, `guardian04`, `cym-lab-nozomi01.ot.labs.cymbalgroup.com` |
+| `externalId` | *N/A* | String | Unique hash or ID tracking a connection session/flow. | `bridge01`, `8192.168.1.11224.0.0.25214eb14eb19f8f6eb748` |
+| `start` | *N/A* | Epoch Milliseconds | Precise event start timestamp (13 digits). | `1727882351315`, `1730131243083` |
+| `msg` | *N/A* | String | Detailed human-readable log details or telemetry payload. | See sample section for complete descriptions. |
+| `cs1` | `cs1Label` | String / Float | Dynamic String 1. Used for `browser` (User-Agent) or `Risk` score. | `Mozilla/5.0...`, `7.5`, `7.0` |
+| `cs2` | `cs2Label` | Boolean String | Dynamic String 2. Commonly `IsSecurity`. | `true`, `false` |
+| `cs3` | `cs3Label` | UUID String | Dynamic String 3. Commonly `Id` (Alert/Incident UUID). | `b4366561-401e-0cf4-5882-311a4241be9b` |
+| `cs4` | `cs4Label` | Integer | Dynamic String 4. Commonly `transferred_packets`. | `3`, `17`, `48`, `63514` |
+| `cs5` | `cs5Label` | JSON Array | Dynamic String 5. Commonly `Parents` (parent alert IDs). | `[]`, `["8c7b2055-6932-4ece-e5db-3f940aebc534"]` |
+| `cs6` | `cs6Label` | Integer | Dynamic String 6. Used for `n2os_schema` version (`3`) or `transferred_bytes`. | `3`, `297`, `6144`, `6795774` |
+| `flexString1` | `flexString1Label`| String | MITRE ATT&CK Technique ID (`Mitre attack techniques`). | `T0846` (Remote System Discovery), `T0814` |
+| `flexString2` | `flexString2Label`| String | MITRE ATT&CK Tactic Name (`Mitre attack tactics`). | `Discovery`, `Initial Access`, `Lateral Movement` |
+| `flexString3` | `flexString3Label`| String | Human-readable alert classification (`Name`). | `Network Scan`, `Unusual CIP Function Code` |
+
+---
+
+## 4. Timestamp & Dynamic Time Templating
+
+Nozomi Guardian CEF logs contain up to two distinct timestamps:
+1. **Syslog Header Timestamp**: Standard Syslog format (`MMM dd yyyy HH:mm:ss` or `MMM dd HH:mm:ss` UTC/Local).
+2. **CEF `start` Extension Field**: Millisecond Epoch timestamp (13 digits, e.g., `1727882351315`).
+
+### Dynamic Generation Placeholders
+When generating dynamic logs, use the following template tags to ensure strict time synchronization across headers and payload extensions:
+
+- `##$TimeStamp-0d0h30m0s|%b %d %Y %H:%M:%S$##` -> Generates the syslog header timestamp with the year (e.g., `Oct 28 2024 16:01:45`). The year is required, or events without a `start=` field are stamped with ingestion time.
+- `##$EpochMillis-0d0h30m0s$##` -> Generates Epoch Milliseconds for the `start=` field (e.g., `1730131243083`).
+- `##$Epoch-0d1h0m0s$##` -> Generates standard 10-digit Epoch seconds (e.g., `1730131243`).
+- `##$TimeStamp-0d2h15m0s$##` -> Generates ISO 8601 timestamps if needed for embedded API traces.
+
+---
+
+## 5. Concrete Valid Examples
+
+### Scenario 1: OT/ICS Reconnaissance (Signature Port Scan Alert with MITRE Mapping)
+*A passive network scan detected across OT assets with associated MITRE ICS tactic/technique metadata.*
+```text
+<137>##$TimeStamp-0d0h10m15s|%b %d %Y %H:%M:%S$## guardian07 n2osevents[0]: CEF:0|Nozomi Networks|N2OS|25.6.0-10271323_CD5F7|SIGN:NETWORK-SCAN|Network Scan|7|dvc=10.20.0.9 dvchost=guardian07 cs1=7.0 cs2=true cs3=8c7b2055-6932-4ece-e5db-3f940aebc534 cs5=[] cs6=3 cs1Label=Risk cs2Label=IsSecurity cs3Label=Id cs5Label=Parents cs6Label=n2os_schema flexString1=T0846 flexString2=Discovery flexString3=Network Scan flexString1Label=Mitre attack techniques flexString2Label=Mitre attack tactics flexString3Label=Name msg=A TCP Port Scan was detected (host 192.168.10.45 sent 101 connection attempts with 2 successful connections in less than 10 seconds) src=192.168.10.45 smac=00:50:56:a1:b2:c3 spt=59317 proto=TCP start=##$EpochMillis-0d0h10m15s$##
+```
+
+### Scenario 2: Industrial Network Flow Telemetry (EtherNet/IP CIP Communication)
+*High-volume Rockwell/Allen-Bradley PLC communication captured on an OT network segment.*
+```text
+CEF:0|Nozomi Networks|N2OS|24.1.0|flow|Network Flow|Low|src=192.168.1.11 dst=192.168.1.10 spt=48552 dpt=44818 proto=TCP app=ETHERNETIP start=##$EpochMillis-0d1h00m00s$## cs4Label=transferred_packets cs4=63514 cs6Label=transferred_bytes cs6=6795774 externalId=8192.168.1.11192.168.1.10bda8af1219f8f6f577a dvc=10.240.10.5 dvchost=cym-lab-nozomi01.ot.labs.cymbalgroup.com smac=02:42:9c:d4:0c:d1 dmac=00:00:bc:3e:41:10
+```
+
+### Scenario 3: Administrative Session Creation / User Sign-in
+*Auditing web UI console authentication from an engineering workstation.*
+```text
+<134>##$TimeStamp-0d2h30m00s|%b %d %Y %H:%M:%S$## guardian01 n2osevents[0]: CEF:0|Nozomi Networks|N2OS|24.4.1-10071452_979BF|AUDIT:SESSIONS:CREATE|User signed in|0|dvchost=guardian01 cs1=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 cs6=3 cs1Label=browser cs6Label=n2os_schema msg=User signed in src=10.100.20.15, 10.100.20.1 suser=elena.v start=##$EpochMillis-0d2h30m00s$##
+```
+
+### Scenario 4: Security Anomaly (Session Hijacking Attempt Detected)
+*The Guardian appliance identifies an in-flight administrative web session originating from an unexpected IP address.*
+```text
+<134>##$TimeStamp-0d0h45m10s|%b %d %Y %H:%M:%S$## guardian01 n2osevents[0]: CEF:0|Nozomi Networks|N2OS|24.4.1-10071452_979BF|AUDIT::|Session hijacking detected, closing session|0|dvchost=guardian01 cs6=3 cs1Label=browser cs6Label=n2os_schema msg=Session hijacking detected, closing session, Session ID: 9a01f83efb1404b2c60caa4a92f25a0b. Remote ip is '198.51.100.50, 203.0.113.1' while session has '192.168.5.20, 203.0.113.1'. Request user agent is 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' while session has 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' src=198.51.100.50, 203.0.113.1 suser=amal.a start=##$EpochMillis-0d0h45m10s$##
+```
+
+### Scenario 5: System Health Warning (High Network Load / Dropped Link Events)
+*Appliance health log alerting that sensor capture buffers are overflowing due to high packet rates.*
+```text
+<131>##$TimeStamp-0d3h12m00s|%b %d %Y %H:%M:%S$## guardian01 n2osevents[0]: CEF:0|Nozomi Networks|N2OS|23.0.0-04221138_CABC9|HEALTH|Health problem|0|dvchost=guardian03 cs6=3 cs6Label=n2os_schema msg=Start discarding link events because of high network load
+```
+
+---
+
+## 6. Key Constraints & Pitfalls
+
+1. **CEF Pipe Balance**: The prefix strictly demands 7 pipe separators (`|`). Even if a field is empty (such as subcategories in `AUDIT::`), both colons and pipes must be retained correctly: `CEF:0|Nozomi Networks|N2OS|<Version>|AUDIT::|<Name>|<Severity>|<Extension>`.
+2. **Label Field Coupling**: Any custom field (`cs1`..`cs6`, `flexString1`..`flexString4`) **must** be accompanied by its corresponding label definition (`cs1Label`, `flexString1Label`). Note that in Guardian logs, the position of labels can appear after the value (e.g., `cs1=7.0 ... cs1Label=Risk`).
+3. **Dual Schema for `cs6`**: 
+   - In Audit and Incident logs, `cs6=3` with `cs6Label=n2os_schema`.
+   - In Network Flow logs (`flow`), `cs6` represents bytes transferred (`cs6Label=transferred_bytes cs6=6144`), while `cs4` represents packet count (`cs4Label=transferred_packets cs4=48`).
+4. **Millisecond Timestamping (`start`)**: The `start=` timestamp in Nozomi Guardian is a **13-digit Unix Epoch Millisecond** timestamp (e.g., `1730131243083`), not a standard 10-digit epoch second. Parsers relying on millisecond precision will fail or calculate year 1970 if truncated to 10 digits.
+5. **Multi-IP `src` Field**: When web requests pass through proxies or reverse load balancers, Nozomi records all hops comma-separated in the `src=` field (e.g., `src=198.51.100.1, 203.0.113.1`). Generators must emulate this multi-IP format for UI audit logs.
+6. **No Space Around Equals**: Ensure there are no spaces immediately before or after the `=` sign in the extension key-value pairs (`key=value`, never `key = value`).
