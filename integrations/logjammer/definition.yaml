@@ -6,7 +6,7 @@ categories:
   - "Simulation"
   - "Threat Intelligence"
 author: "Christopher Martin"
-version: 3.0
+version: 3.1
 python_version: "3.11"
 is_custom: true
 svg_logo_path: resources/logo.svg

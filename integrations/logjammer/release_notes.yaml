@@ -1,5 +1,5 @@
 - description: "Synchronized upstream LogJammer core updates: expanded relative time template parser (EpochMS, EpochMicroseconds, EpochNanoseconds, strftime/date-pattern formats, UTC offsets), added Okta, Nozomi Guardian, Salesforce, Winevtlog, and Workday schema guides, parser-validated guide examples, and rule date/precision filters."
-  version: 2.7
+  version: 3.1
   item_name: "LogJammer"
   item_type: "Integration"
   new: false

@@ -203,14 +203,19 @@ Generate the complete attack scenario logs as specified."""
 
     try:
       from google.genai import types as genai_types
+      is_gemini4 = self.config.model.strip().lower().startswith("gemini-4")
+      if is_gemini4:
+        thinking_cfg = genai_types.ThinkingConfig(thinking_level="HIGH")
+      else:
+        thinking_cfg = genai_types.ThinkingConfig(
+            thinking_budget=self.config.thinking_budget,
+        )
       gen_config = genai_types.GenerateContentConfig(
           system_instruction=system_instruction,
           temperature=self.config.temperature,
           top_p=self.config.top_p,
           response_mime_type="application/json",
-          thinking_config=genai_types.ThinkingConfig(
-              thinking_budget=self.config.thinking_budget,
-          ),
+          thinking_config=thinking_cfg,
       )
     except (ImportError, AttributeError):
       gen_config = None
