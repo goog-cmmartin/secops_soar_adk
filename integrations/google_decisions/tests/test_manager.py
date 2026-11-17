@@ -142,8 +142,8 @@ def test_wif_auto_discovers_api_key_from_gcp(mock_get):
     mock_get.side_effect = [list_resp, ks_resp]
 
     mgr = GoogleDecisionsManager(
-        workload_identity_email="sa-vertex-ai@sdl-preview-americas.iam.gserviceaccount.com",
-        project_id="sdl-preview-americas",
+        workload_identity_email="sa-vertex-ai@example-gcp-project.iam.gserviceaccount.com",
+        project_id="example-gcp-project",
     )
     fake_creds = MagicMock()
     fake_creds.token = "ya29.mock_wif_oauth_token"
