@@ -1,0 +1,1756 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google SecOps UDM Entity Pivot</title>
+  <style>
+    /* ==========================================================================
+       Google SecOps SOAR Unified Theme Variables (Self-contained, zero CDN deps)
+       Matches SecOpsSDKEngine & GoogleADK Light/Dark Adaptive Widget Suite
+       ========================================================================== */
+    :root,
+    [data-theme="light"],
+    body.light {
+      --soar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Rubik", Helvetica, Arial, sans-serif;
+      --soar-font-mono: ui-monospace, SFMono-Regular, "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+      --soar-bg-page: #ffffff;
+      --soar-bg-card: #ffffff;
+      --soar-bg-subtle: rgba(0, 0, 0, 0.04);
+      --soar-bg-hover: rgba(37, 99, 235, 0.05);
+      --soar-border: #e5e7eb;
+      --soar-border-strong: #d1d5db;
+      --soar-text-primary: #111827;
+      --soar-text-secondary: #4b5563;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #2563eb;
+      --soar-accent-hover: #1d4ed8;
+      --soar-accent-subtle: rgba(37, 99, 235, 0.1);
+
+      /* Action Buttons */
+      --btn-udm-bg: #059669;
+      --btn-udm-hover: #047857;
+      --btn-rls-bg: #2563eb;
+      --btn-rls-hover: #1d4ed8;
+
+      /* Adaptive Semantic Badges */
+      --badge-suspicious-bg: #fee2e2;
+      --badge-suspicious-text: #dc2626;
+      --badge-suspicious-border: #fca5a5;
+
+      --badge-pivot-bg: #fffbeb;
+      --badge-pivot-text: #d97706;
+      --badge-pivot-border: #fde68a;
+
+      --badge-internal-bg: #eff6ff;
+      --badge-internal-text: #2563eb;
+      --badge-internal-border: #bfdbfe;
+
+      --badge-manual-bg: #f3f4f6;
+      --badge-manual-text: #4b5563;
+      --badge-manual-border: #d1d5db;
+    }
+
+    [data-theme="dark"],
+    body.dark {
+      --soar-bg-page: #161626;
+      --soar-bg-card: #161626;
+      --soar-bg-subtle: rgba(255, 255, 255, 0.05);
+      --soar-bg-hover: rgba(59, 130, 246, 0.12);
+      --soar-border: #293140;
+      --soar-border-strong: #384357;
+      --soar-text-primary: #f3f4f6;
+      --soar-text-secondary: #9ca3af;
+      --soar-text-muted: #6b7280;
+      --soar-accent: #3b82f6;
+      --soar-accent-hover: #60a5fa;
+      --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+
+      --btn-udm-bg: #059669;
+      --btn-udm-hover: #10b981;
+      --btn-rls-bg: #2563eb;
+      --btn-rls-hover: #3b82f6;
+
+      --badge-suspicious-bg: #3b191d;
+      --badge-suspicious-text: #ff8589;
+      --badge-suspicious-border: #8c1d28;
+
+      --badge-pivot-bg: #451a03;
+      --badge-pivot-text: #fbbf24;
+      --badge-pivot-border: #78350f;
+
+      --badge-internal-bg: #172554;
+      --badge-internal-text: #93c5fd;
+      --badge-internal-border: #1e40af;
+
+      --badge-manual-bg: #1f2937;
+      --badge-manual-text: #9ca3af;
+      --badge-manual-border: #374151;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background-color: var(--soar-bg-page);
+      background: var(--soar-bg-page);
+      font-family: var(--soar-font);
+      color: var(--soar-text-primary);
+      padding: 0.75rem;
+      line-height: 1.5;
+      font-size: 0.8125rem;
+      width: 100%;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .widget-container {
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    /* Header Card */
+    .header-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.8rem 1.1rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      border-left: 4px solid var(--soar-accent);
+    }
+
+    .header-title-group {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+    }
+
+    .header-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-size: 0.96rem;
+      font-weight: 700;
+      color: var(--soar-text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .header-subtitle {
+      font-size: 0.72rem;
+      color: var(--soar-text-secondary);
+    }
+
+    /* Controls & Entity Type Filter Bar */
+    .controls-bar {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.6rem 0.95rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    .controls-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.65rem;
+    }
+
+    .controls-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .control-label {
+      font-size: 0.73rem;
+      font-weight: 600;
+      color: var(--soar-text-secondary);
+    }
+
+    .soar-select,
+    .soar-input {
+      background: var(--soar-bg-page);
+      color: var(--soar-text-primary);
+      border: 1px solid var(--soar-border-strong);
+      border-radius: 6px;
+      padding: 0.3rem 0.55rem;
+      font-size: 0.74rem;
+      font-family: var(--soar-font);
+      font-weight: 600;
+      outline: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .soar-input {
+      font-weight: 400;
+      min-width: 175px;
+    }
+
+    .soar-select:focus,
+    .soar-input:focus {
+      border-color: var(--soar-accent);
+    }
+
+    /* Entity Type Filter Chip Bar */
+    .type-filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem;
+      padding-top: 0.45rem;
+      border-top: 1px solid var(--soar-border);
+    }
+
+    .type-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 9999px;
+      font-size: 0.69rem;
+      font-weight: 600;
+      font-family: var(--soar-font-mono);
+      cursor: pointer;
+      user-select: none;
+      border: 1px solid var(--soar-border-strong);
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-muted);
+      transition: all 0.12s ease;
+      opacity: 0.6;
+    }
+
+    .type-chip:hover {
+      opacity: 0.9;
+      border-color: var(--soar-accent);
+    }
+
+    .type-chip.active {
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      border-color: var(--soar-accent);
+      opacity: 1;
+    }
+
+    /* Semantic Tag Filter Chip Variants when Active */
+    .tag-chip-suspicious.active {
+      background: var(--badge-suspicious-bg);
+      color: var(--badge-suspicious-text);
+      border-color: var(--badge-suspicious-border);
+      opacity: 1;
+    }
+    .tag-chip-pivot.active {
+      background: var(--badge-pivot-bg);
+      color: var(--badge-pivot-text);
+      border-color: var(--badge-pivot-border);
+      opacity: 1;
+    }
+    .tag-chip-internal.active {
+      background: var(--badge-internal-bg);
+      color: var(--badge-internal-text);
+      border-color: var(--badge-internal-border);
+      opacity: 1;
+    }
+    .tag-chip-manual.active {
+      background: var(--badge-manual-bg);
+      color: var(--badge-manual-text);
+      border-color: var(--badge-manual-border);
+      opacity: 1;
+    }
+    .tag-chip-untagged.active {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-primary);
+      border-color: var(--soar-border-strong);
+      opacity: 1;
+    }
+
+    .type-chip-count {
+      font-size: 0.63rem;
+      padding: 0.02rem 0.32rem;
+      border-radius: 9999px;
+      background: rgba(0, 0, 0, 0.08);
+      color: inherit;
+    }
+
+    [data-theme="dark"] .type-chip-count,
+    body.dark .type-chip-count {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .type-chip-action {
+      font-family: var(--soar-font);
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--soar-text-secondary);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 0.1rem 0.35rem;
+      text-decoration: underline;
+    }
+    .type-chip-action:hover {
+      color: var(--soar-accent);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0.34rem 0.68rem;
+      border-radius: 6px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      font-family: var(--soar-font);
+    }
+
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-udm {
+      background: var(--btn-udm-bg);
+      color: #ffffff;
+    }
+    .btn-udm:hover:not(:disabled) {
+      background: var(--btn-udm-hover);
+    }
+
+    .btn-rls {
+      background: var(--btn-rls-bg);
+      color: #ffffff;
+    }
+    .btn-rls:hover:not(:disabled) {
+      background: var(--btn-rls-hover);
+    }
+
+    .btn-secondary {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-primary);
+      border-color: var(--soar-border-strong);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    .btn-icon-only {
+      padding: 0.28rem 0.42rem;
+    }
+
+    /* Query Preview Box */
+    .query-preview-bar {
+      background: var(--soar-bg-subtle);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      padding: 0.5rem 0.85rem;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .query-preview-bar.visible {
+      display: flex;
+    }
+    .query-preview-code {
+      font-family: var(--soar-font-mono);
+      font-size: 0.72rem;
+      color: var(--soar-text-primary);
+      overflow-x: auto;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    /* Table */
+    .table-card {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+      width: 100%;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.78rem;
+    }
+
+    thead {
+      background: var(--soar-bg-subtle);
+      border-bottom: 1px solid var(--soar-border);
+    }
+
+    th {
+      padding: 0.58rem 0.85rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--soar-text-secondary);
+      user-select: none;
+    }
+
+    th.sortable {
+      cursor: pointer;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+    th.sortable:hover {
+      background: var(--soar-bg-hover);
+      color: var(--soar-text-primary);
+    }
+    th.sortable.sort-active {
+      color: var(--soar-accent);
+      background: var(--soar-accent-subtle);
+    }
+
+    .th-inner {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.38rem;
+    }
+
+    .sort-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.68rem;
+      min-width: 14px;
+      height: 16px;
+      padding: 0 0.2rem;
+      border-radius: 3px;
+      opacity: 0.65;
+      transition: opacity 0.12s ease, transform 0.12s ease;
+    }
+    th.sortable:hover .sort-icon,
+    th.sortable.sort-active .sort-icon {
+      opacity: 1;
+    }
+    th.sortable.sort-active .sort-icon {
+      background: rgba(59, 130, 246, 0.18);
+      color: var(--soar-accent);
+      font-weight: 800;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--soar-border);
+      transition: background-color 0.12s ease;
+    }
+    tbody tr:last-child {
+      border-bottom: none;
+    }
+    tbody tr:hover {
+      background: var(--soar-bg-hover);
+    }
+    tbody tr.row-selected {
+      background: var(--soar-accent-subtle);
+    }
+
+    td {
+      padding: 0.55rem 0.85rem;
+      vertical-align: middle;
+    }
+
+    .entity-id-cell {
+      font-family: var(--soar-font-mono);
+      font-size: 0.76rem;
+      font-weight: 600;
+      color: var(--soar-text-primary);
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      max-width: 340px;
+    }
+
+    .entity-id-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Badges */
+    .type-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.15rem 0.52rem;
+      border-radius: 9999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border-strong);
+      font-family: var(--soar-font-mono);
+    }
+
+    .type-inferred-hint {
+      font-size: 0.63rem;
+      color: var(--soar-accent);
+      font-weight: 600;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.14rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.67rem;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+    .badge-suspicious {
+      background: var(--badge-suspicious-bg);
+      color: var(--badge-suspicious-text);
+      border-color: var(--badge-suspicious-border);
+    }
+    .badge-pivot {
+      background: var(--badge-pivot-bg);
+      color: var(--badge-pivot-text);
+      border-color: var(--badge-pivot-border);
+    }
+    .badge-internal {
+      background: var(--badge-internal-bg);
+      color: var(--badge-internal-text);
+      border-color: var(--badge-internal-border);
+    }
+    .badge-manual {
+      background: var(--badge-manual-bg);
+      color: var(--badge-manual-text);
+      border-color: var(--badge-manual-border);
+    }
+
+    .selection-pill {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--soar-accent);
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      background: var(--soar-accent-subtle);
+    }
+
+    .empty-state {
+      padding: 1.8rem 1rem;
+      text-align: center;
+      color: var(--soar-text-muted);
+      font-size: 0.78rem;
+    }
+
+    /* Help Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgba(0, 0, 0, 0.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .modal-backdrop.open {
+      display: flex;
+    }
+    .modal-card {
+      background: var(--soar-bg-card);
+      color: var(--soar-text-primary);
+      border: 1px solid var(--soar-border-strong);
+      border-radius: 10px;
+      max-width: 540px;
+      width: 100%;
+      padding: 1.25rem;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.55rem;
+      border-bottom: 1px solid var(--soar-border);
+    }
+    .modal-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+    .modal-body {
+      font-size: 0.78rem;
+      color: var(--soar-text-secondary);
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    .modal-body ul {
+      padding-left: 1.15rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .modal-body code {
+      font-family: var(--soar-font-mono);
+      background: var(--soar-bg-subtle);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      color: var(--soar-text-primary);
+    }
+  </style>
+</head>
+<body class="dark">
+  <div class="widget-container">
+    <!-- Header -->
+    <div class="header-card">
+      <div class="header-title-group">
+        <span class="header-icon">
+          <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>
+        </span>
+        <div>
+          <div class="header-title">UDM &amp; Raw Log Entity Pivot</div>
+          <div class="header-subtitle" id="entity-summary-subtitle">Chronicle SIEM Entity Search Explorer</div>
+        </div>
+      </div>
+
+      <div class="controls-group">
+        <input type="text" id="entity-filter-input" class="soar-input" placeholder="Search entity identifier..." />
+        <button type="button" id="help-button" class="btn btn-secondary">
+          Help
+        </button>
+      </div>
+    </div>
+
+    <!-- Controls & Entity Type Filter Bar -->
+    <div class="controls-bar">
+      <div class="controls-row">
+        <div class="controls-group">
+          <span class="control-label" title="Combine multiple selected entities into a single UDM query">Compound Operator:</span>
+          <select id="logic-select" class="soar-select" aria-label="Compound Operator">
+            <option value="AND">AND</option>
+            <option value="OR" selected>OR</option>
+          </select>
+
+          <span class="control-label" title="Time window around the alert timestamp">Window:</span>
+          <select id="window-select" class="soar-select" aria-label="Search Time Window">
+            <option value="6">±6 Hours</option>
+            <option value="24" selected>±24 Hours</option>
+            <option value="72">±3 Days</option>
+            <option value="168">±7 Days</option>
+          </select>
+
+          <button type="button" id="run-compound-btn" class="btn btn-udm" disabled>
+            Run Compound UDM
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.444 17.444H6.555V6.556H12V5H6.555C5.692 5 5 5.7 5 6.556v10.888C5 18.3 5.692 19 6.555 19h10.889c.855 0 1.555-.7 1.555-1.556V12h-1.555v5.444z"/><path d="M13.556 5v1.556h2.792L8.703 14.2l1.096 1.097 7.646-7.646v2.792H19V5h-5.444z"/></svg>
+          </button>
+
+          <button type="button" id="copy-compound-btn" class="btn btn-secondary" disabled title="Copy combined UDM query to clipboard">
+            Copy UDM Query
+          </button>
+
+          <span id="selection-counter" class="selection-pill" style="display: none;">0 selected</span>
+        </div>
+      </div>
+
+      <!-- Interactive Entity Type Filter Chips -->
+      <div class="type-filter-row" id="type-filter-bar">
+        <span class="control-label">Entity Types:</span>
+        <div class="controls-group" id="type-chips-container"></div>
+        <button type="button" id="type-filter-all-btn" class="type-chip-action" title="Enable all entity types">All</button>
+        <button type="button" id="type-filter-default-btn" class="type-chip-action" title="Reset to default (hide noisy types like PROCESS, THREATACTOR, THREAT)">Default</button>
+      </div>
+
+      <!-- Interactive Entity Tag Filter Chips -->
+      <div class="type-filter-row" id="tag-filter-bar">
+        <span class="control-label">Entity Tags:</span>
+        <div class="controls-group" id="tag-chips-container"></div>
+        <button type="button" id="tag-filter-all-btn" class="type-chip-action" title="Enable all tag filters (including Untagged)">All</button>
+        <button type="button" id="tag-filter-tagged-btn" class="type-chip-action" title="Show only entities that have a tag (Internal, Suspicious, Pivot, Manual)">Tagged Only</button>
+      </div>
+    </div>
+
+    <!-- Live Query Preview Bar -->
+    <div id="query-preview-bar" class="query-preview-bar">
+      <span class="control-label">UDM Preview:</span>
+      <code id="query-preview-code" class="query-preview-code"></code>
+    </div>
+
+    <!-- Table Card -->
+    <div class="table-card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 38px;">
+                <input type="checkbox" id="select-all-checkbox" />
+              </th>
+              <th class="sortable" data-sort-by="EntityCards.Identifier" tabindex="0" role="button" aria-sort="none" title="Click to sort by Identifier (A-Z / Z-A)">
+                <span class="th-inner">Identifier <span class="sort-icon">⇅</span></span>
+              </th>
+              <th class="sortable" data-sort-by="EntityCards.EffectiveType" tabindex="0" role="button" aria-sort="none" title="Click to sort by Entity Type (A-Z / Z-A)">
+                <span class="th-inner">Type <span class="sort-icon">⇅</span></span>
+              </th>
+              <th style="text-align: center;" title="Pivot to Chronicle UDM Search">UDM Search</th>
+              <th style="text-align: center;" title="Pivot to Chronicle Raw Log Search">Raw Log (RLS)</th>
+              <th class="sortable" data-sort-by="EntityCards.TagSortKey" tabindex="0" role="button" aria-sort="none" title="Click to sort by Entity Tags">
+                <span class="th-inner">Tags <span class="sort-icon">⇅</span></span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="entity-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help Modal -->
+  <div id="help-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">How to Use UDM &amp; Raw Log Entity Pivot</div>
+        <button type="button" id="close-modal-button" class="btn btn-secondary btn-icon-only">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>This widget extracts case/alert entities, automatically infers Chronicle UDM field groups, and pivots directly into Chronicle SIEM Search.</p>
+        <ul>
+          <li><b>Entity Type &amp; Tag Filter Bars:</b> Click any entity type chip or tag chip (<code>Suspicious</code>, <code>Pivot</code>, <code>Internal</code>, <code>Manual</code>, <code>Untagged</code>) to show or hide matching entities. Click <b>Tagged Only</b> to hide untagged entities in one click.</li>
+          <li><b>Sortable Columns:</b> Click the <b>Identifier</b>, <b>Type</b>, or <b>Tags</b> column headers to sort ascending (<code>▲</code>), descending (<code>▼</code>), or reset to case order (<code>⇅</code>).</li>
+          <li><b>UDM &amp; RLS Buttons:</b> Click <b>UDM</b> for a structured field-group search (expanding emails to short usernames and FQDNs to short hostnames) or <b>RLS</b> for a regex raw log scan.</li>
+          <li><b>Copy Query (📋):</b> Click the copy icon next to any entity or in the toolbar to copy the generated UDM query to your clipboard.</li>
+          <li><b>Compound Search:</b> Select 2 or more entities, choose <code>AND</code> or <code>OR</code>, select a time window (<code>±6h</code> to <code>±7d</code>), and click <b>Run Compound UDM</b>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 0. Native SOAR Placeholders (Declared first so SOAR template parser never
+    //    collides with JS regexes or array brackets later in the script)
+    // =========================================================================
+    const SOAR_RAW_IDENTIFIERS = String.raw`[Entity.Identifier]`;
+    const SOAR_RAW_TYPES = "[Entity.Type]";
+    const SOAR_RAW_INTERNAL = "[Entity.IsInternalAsset]";
+    const SOAR_RAW_SUSPICIOUS = "[Entity.IsSuspicious]";
+    const SOAR_RAW_PIVOT = "[Entity.IsPivot]";
+    const SOAR_RAW_MANUAL = "[Entity.IsManuallyCreated]";
+    const SOAR_RAW_HOST_URL = "[General.HostUrl]";
+    const SOAR_RAW_ALERT_TIME = "[Alert.CreationTime]";
+
+    // =========================================================================
+    // 1. Google SecOps SOAR Theme Synchronization Bridge
+    // =========================================================================
+    const SOAR_PALETTES = {
+      dark: {
+        theme: 'dark',
+        '--soar-bg-page': '#161626',
+        '--soar-bg-card': '#161626',
+        '--soar-border': '#293140',
+        '--soar-border-strong': '#384357',
+        '--soar-text-primary': '#f3f4f6',
+        '--soar-text-secondary': '#9ca3af',
+        '--soar-text-muted': '#6b7280'
+      },
+      light: {
+        theme: 'light',
+        '--soar-bg-page': '#ffffff',
+        '--soar-bg-card': '#ffffff',
+        '--soar-border': '#e5e7eb',
+        '--soar-border-strong': '#d1d5db',
+        '--soar-text-primary': '#111827',
+        '--soar-text-secondary': '#4b5563',
+        '--soar-text-muted': '#6b7280'
+      }
+    };
+
+    function isColorDark(color) {
+      if (!color) return false;
+      let r = 255, g = 255, b = 255;
+      color = String(color).trim();
+      if (color.startsWith('#')) {
+        let hex = color.replace('#', '');
+        if (hex.length === 3) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        if (hex.length >= 6) {
+          r = parseInt(hex.substring(0, 2), 16);
+          g = parseInt(hex.substring(2, 4), 16);
+          b = parseInt(hex.substring(4, 6), 16);
+        }
+      } else if (color.startsWith('rgb')) {
+        const parts = color.match(/\d+/g);
+        if (parts && parts.length >= 3) {
+          r = parseInt(parts[0], 10);
+          g = parseInt(parts[1], 10);
+          b = parseInt(parts[2], 10);
+        }
+      }
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+      return luminance < 140;
+    }
+
+    function applySoarTheme(themeKeyOrObj) {
+      const mode = typeof themeKeyOrObj === 'string' ? themeKeyOrObj : (themeKeyOrObj.theme || 'dark');
+      document.documentElement.setAttribute('data-theme', mode);
+      document.body.className = mode;
+
+      const palette = typeof themeKeyOrObj === 'object' ? themeKeyOrObj : (SOAR_PALETTES[mode] || SOAR_PALETTES.dark);
+      for (const [key, value] of Object.entries(palette)) {
+        if (key.startsWith('--')) {
+          document.documentElement.style.setProperty(key, value);
+          document.body.style.setProperty(key, value);
+        }
+      }
+      document.body.style.backgroundColor = palette['--soar-bg-page'] || (mode === 'dark' ? '#161626' : '#ffffff');
+    }
+
+    window.addEventListener('message', evt => {
+      if (evt && evt.data && evt.data.background) {
+        const isDark = isColorDark(evt.data.background);
+        applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+      }
+    });
+
+    onmessage = evt => {
+      if (evt && evt.data && evt.data.background) {
+        const isDark = isColorDark(evt.data.background);
+        applySoarTheme(isDark ? SOAR_PALETTES.dark : SOAR_PALETTES.light);
+      }
+    };
+
+    // =========================================================================
+    // 2. Smart SOAR -> Chronicle UDM Entity Inference & Query Builder
+    // =========================================================================
+    const DEFAULT_EXCLUDED_TYPES = new Set([
+      'PROCESS',
+      'THREATACTOR',
+      'THREAT',
+      'THREATSIGNATURE',
+      'EMAILSUBJECT',
+      'DEPLOYMENT',
+      'PHONENUMBER'
+    ]);
+
+    const FILE_EXTENSION_REGEX = /\.(?:exe|dll|sys|bat|cmd|ps1|vbs|msi|scr|pif|elf|bin|dmp|cab|zip|rar|7z|tar|gz|iso|img|lnk|doc|docx|xls|xlsx|ppt|pptx|pdf|txt|csv|log|ini|cfg|conf|xml|json|yaml|yml|db|sqlite)$/i;
+
+    function isLikelyFilePathOrFileName(id) {
+      if (!id) return false;
+      // Windows drive path (e.g. C:\Windows\System32\notepad.exe) or UNC/root backslash path
+      if (/^[A-Za-z]:\\/.test(id) || /^\\/.test(id)) return true;
+      // Path with 2+ backslashes
+      if ((id.match(/\\/g) || []).length >= 2) return true;
+      // Unix file path starting with /
+      if (/^\/[^\s]*[A-Za-z0-9._-]/.test(id)) return true;
+      // Single token or path ending with an explicit file/executable extension (and not a URL/email)
+      if (!/^https?:\/\//i.test(id) && !id.includes('@') && FILE_EXTENSION_REGEX.test(id)) return true;
+      return false;
+    }
+
+    function isLikelyDomainUser(id) {
+      // DOMAIN\username (exactly one backslash, no drive colon, no spaces, not ending in file extension)
+      if (!id || id.includes(':') || /\s/.test(id) || FILE_EXTENSION_REGEX.test(id)) return false;
+      return /^[A-Za-z0-9._-]{2,32}\\[A-Za-z0-9._$-]{2,64}$/.test(id);
+    }
+
+    function inferEffectiveEntityType(identifier, rawType) {
+      const id = String(identifier || '').trim();
+      const t = String(rawType || '').trim().toUpperCase();
+
+      const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+      const ipv6Regex = /^[0-9a-fA-F:]+:[0-9a-fA-F:]+$/;
+      const macRegex = /^(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/;
+      const hashRegex = /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/;
+      const urlRegex = /^https?:\/\//i;
+      const emailRegex = /^[^\s@]+@[^\s@]+$/;
+      const arnRegex = /^arn:aws[-a-z0-9]*:/i;
+      const emailSubjectPrefixRegex = /^(?:RE|FW|FWD|URGENT|ACTION REQUIRED|WIRE|INVOICE|CONFIDENTIAL)\s*:/i;
+      const validHostnameRegex = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+
+      if (ipv4Regex.test(id) || ipv6Regex.test(id)) return 'ADDRESS';
+      if (macRegex.test(id)) return 'MACADDRESS';
+      if (urlRegex.test(id)) return 'DESTINATIONURL';
+      if (emailRegex.test(id) || arnRegex.test(id) || isLikelyDomainUser(id)) return 'USERUNIQNAME';
+      if (hashRegex.test(id)) return 'FILEHASH';
+      if (emailSubjectPrefixRegex.test(id)) return 'EMAILSUBJECT';
+
+      // File paths and executable/document filenames (e.g., "C:\WINDOWS\SYSTEM32\NOTEPAD.EXE")
+      if (isLikelyFilePathOrFileName(id)) {
+        if (t === 'PROCESS' && /\s/.test(id)) return 'PROCESS';
+        if (t === 'FILEPATH') return 'FILEPATH';
+        return 'FILENAME';
+      }
+
+      // Guard against index-shifted rawTypes that contradict the identifier's syntax
+      if (t === 'FILEHASH' || t === 'HASH') {
+        return hashRegex.test(id) ? 'FILEHASH' : 'GENERICENTITY';
+      }
+      if (t === 'ADDRESS' || t === 'IP' || t === 'IPADDRESS' || t === 'SRCIP' || t === 'DSTIP') {
+        return (ipv4Regex.test(id) || ipv6Regex.test(id)) ? 'ADDRESS' : 'GENERICENTITY';
+      }
+      if (t === 'DESTINATIONURL' || t === 'URL' || t === 'URI') {
+        return urlRegex.test(id) ? 'DESTINATIONURL' : 'GENERICENTITY';
+      }
+      if (t === 'FILENAME' || t === 'FILEPATH' || t === 'FILE') {
+        if (isLikelyFilePathOrFileName(id) || (!/\s/.test(id) && id.includes('.'))) {
+          return t === 'FILEPATH' ? 'FILEPATH' : 'FILENAME';
+        }
+        return 'GENERICENTITY';
+      }
+      if (t === 'USERUNIQNAME' || t === 'USER' || t === 'USERNAME' || t === 'EMAIL') {
+        // Usernames/identities do not contain whitespace, parentheses, brackets, or file paths
+        if (/\s/.test(id) || id.includes('(') || id.includes(')') || id.includes('[') || id.includes(']') || id.includes(':') || /^\d+$/.test(id)) {
+          return 'GENERICENTITY';
+        }
+        return 'USERUNIQNAME';
+      }
+      if (t === 'HOST' || t === 'ASSET' || t === 'HOSTNAME' || t === 'DOMAIN') {
+        if (!validHostnameRegex.test(id) || FILE_EXTENSION_REGEX.test(id) || /^\d+$/.test(id)) {
+          return 'GENERICENTITY';
+        }
+        return t === 'DOMAIN' ? 'DOMAIN' : 'HOSTNAME';
+      }
+
+      if (t === 'GENERICENTITY' || !t) {
+        // Detect corporate username formats like BOLA.E (letters.initial) or standard admin/service accounts when SOAR rawType is GenericEntity
+        if (/^[A-Za-z]{2,20}\.[A-Za-z]{1,2}$/.test(id) && !/\.(sh|py|js|ts|go|rb|pl|md|db|gz|xz|7z|so)$/i.test(id)) {
+          return 'USERUNIQNAME';
+        }
+        if (/^(?:admin|administrator|root|svc[-_][a-z0-9_.-]+|sa[-_][a-z0-9_.-]+)$/i.test(id)) {
+          return 'USERUNIQNAME';
+        }
+      }
+      return t || 'GENERICENTITY';
+    }
+
+    function buildUdmQuery(identifier, effectiveType) {
+      const id = String(identifier || '').trim();
+      if (!id) return null;
+      const qId = JSON.stringify(id);
+      const t = String(effectiveType || '').toUpperCase();
+
+      switch (t) {
+        case 'ADDRESS':
+          return `ip = ${qId} nocase`;
+        case 'DOMAIN':
+          return `domain = ${qId} nocase`;
+        case 'HOSTNAME': {
+          if (id.includes('.') && !/^[^\s@]+@/.test(id)) {
+            const shortHost = id.split('.')[0].trim();
+            if (shortHost && shortHost.length >= 3) {
+              return `(hostname = ${qId} nocase OR hostname = ${JSON.stringify(shortHost)} nocase)`;
+            }
+          }
+          return `hostname = ${qId} nocase`;
+        }
+        case 'USERUNIQNAME': {
+          if (id.includes('@')) {
+            const localUser = id.split('@')[0].trim();
+            if (localUser && localUser.length >= 2) {
+              return `(user = ${qId} nocase OR email = ${qId} nocase OR user = ${JSON.stringify(localUser)} nocase)`;
+            }
+          }
+          return `(user = ${qId} nocase OR email = ${qId} nocase)`;
+        }
+        case 'PROCESS':
+          return `(process_id = ${qId} nocase OR target.process.command_line = ${qId} nocase)`;
+        case 'FILENAME':
+        case 'FILEPATH':
+          return `file_path = ${qId} nocase`;
+        case 'FILEHASH':
+          return `hash = ${qId} nocase`;
+        case 'DESTINATIONURL':
+          return `target.url = ${qId} nocase`;
+        case 'MACADDRESS':
+          return `mac = ${qId} nocase`;
+        default:
+          return `raw = ${qId} nocase`;
+      }
+    }
+
+    function computeTimeWindow(baseEpochMs, windowHours) {
+      const hrs = Number(windowHours) || 24;
+      const deltaMs = hrs * 3600 * 1000;
+      const now = Date.now();
+      const base = (typeof baseEpochMs === 'number' && !isNaN(baseEpochMs)) ? baseEpochMs : now;
+      const startIso = new Date(base - deltaMs).toISOString();
+      const endMs = Math.min(base + deltaMs, now + 15 * 60 * 1000);
+      const endIso = new Date(endMs).toISOString();
+      return { startTimeIso: startIso, endTimeIso: endIso };
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = String(str ?? '');
+      return div.innerHTML;
+    }
+
+    // =========================================================================
+    // 3. Data Extraction (Comma Reconstruction + Bidirectional Type Alignment)
+    // =========================================================================
+    function countChar(str, ch) {
+      let c = 0;
+      for (let i = 0; i < str.length; i++) {
+        if (str[i] === ch) c++;
+      }
+      return c;
+    }
+
+    function reconstructCommaSplitIdentifiers(rawTokens) {
+      if (!Array.isArray(rawTokens) || rawTokens.length <= 1) return rawTokens || [];
+      const result = [];
+      let i = 0;
+      while (i < rawTokens.length) {
+        let acc = String(rawTokens[i] ?? '');
+        let openParens = countChar(acc, '(') - countChar(acc, ')');
+        let openQuotes = countChar(acc, '"') % 2;
+
+        while (i + 1 < rawTokens.length) {
+          const nextTok = String(rawTokens[i + 1] ?? '');
+          // 1. Numeric thousands separator across comma (e.g. "$1" + "," + "850" + "," + "000) [DB1117]")
+          const isThousandsSplit = /(?:\$|\b)\d{1,3}$/.test(acc.trim()) && /^\d{3}(?!\d)/.test(nextTok.trim());
+          // 2. Unclosed parenthesis that gets closed within the next 3 tokens
+          let closesParenSoon = false;
+          if (openParens > 0) {
+            let tempParens = openParens;
+            for (let look = i + 1; look <= Math.min(rawTokens.length - 1, i + 3); look++) {
+              tempParens += countChar(String(rawTokens[look] ?? ''), '(') - countChar(String(rawTokens[look] ?? ''), ')');
+              if (tempParens <= 0) {
+                closesParenSoon = true;
+                break;
+              }
+            }
+          }
+          // 3. Prose comma continuation starting with leading space (SOAR delimiter is "," with no space)
+          const isProseContinuation = /^\s+\S/.test(nextTok);
+
+          if (isThousandsSplit || closesParenSoon || openQuotes === 1 || isProseContinuation) {
+            acc = acc + ',' + nextTok;
+            openParens = countChar(acc, '(') - countChar(acc, ')');
+            openQuotes = countChar(acc, '"') % 2;
+            i++;
+          } else {
+            break;
+          }
+        }
+        result.push(acc);
+        i++;
+      }
+      return result;
+    }
+
+    function scoreTokenTypeMatch(rawSlice, rawType) {
+      const spanLength = rawSlice.length;
+      const candidateId = rawSlice.join(',');
+      const id = String(candidateId || '').trim();
+      const t = String(rawType || '').trim().toUpperCase();
+      if (!id) return -80;
+
+      const startsWithSpace = /^\s+/.test(String(rawSlice[0] || ''));
+      let internalCommaBonus = 0;
+      for (let k = 1; k < spanLength; k++) {
+        const prev = String(rawSlice[k - 1] || '').trim();
+        const curr = String(rawSlice[k] || '');
+        if (/^\s+/.test(curr) || (/(?:\$|\b)\d{1,3}$/.test(prev) && /^\d{3}(?!\d)/.test(curr.trim()))) {
+          internalCommaBonus += 25;
+        } else {
+          internalCommaBonus -= 10;
+        }
+      }
+
+      const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+      const ipv6Regex = /^[0-9a-fA-F:]+:[0-9a-fA-F:]+$/;
+      const hashRegex = /^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/;
+      const urlRegex = /^https?:\/\//i;
+      const emailRegex = /^[^\s@]+@[^\s@]+$/;
+      const arnRegex = /^arn:aws[-a-z0-9]*:/i;
+      const dottedUserRegex = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+      const emailSubjectPrefixRegex = /^(?:RE|FW|FWD|URGENT|ACTION REQUIRED|WIRE|INVOICE|CONFIDENTIAL)\s*:/i;
+      const hasSpaces = /\s/.test(id);
+
+      const isIp = ipv4Regex.test(id) || ipv6Regex.test(id);
+      const isHash = hashRegex.test(id);
+      const isEmailOrArn = emailRegex.test(id) || arnRegex.test(id) || isLikelyDomainUser(id);
+      const isUrl = urlRegex.test(id);
+      const isEmailSubject = emailSubjectPrefixRegex.test(id);
+      const isFile = isLikelyFilePathOrFileName(id);
+      const isValidHostname = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(id) && !isFile && !/^\d+$/.test(id);
+
+      const strictSingleTypes = new Set([
+        'ADDRESS', 'IP', 'IPADDRESS', 'SRCIP', 'DSTIP',
+        'FILEHASH', 'HASH',
+        'USERUNIQNAME', 'USER', 'USERNAME', 'EMAIL',
+        'HOSTNAME', 'HOST', 'ASSET', 'DOMAIN', 'MACADDRESS',
+        'FILENAME', 'FILEPATH', 'FILE'
+      ]);
+      if (spanLength > 1 && strictSingleTypes.has(t)) {
+        return -200 * spanLength;
+      }
+
+      const leadingSpacePenalty = startsWithSpace ? -35 : 0;
+
+      if (t === 'ADDRESS' || t === 'IP' || t === 'IPADDRESS') {
+        return (isIp ? 60 : -120) + leadingSpacePenalty;
+      }
+      if (t === 'FILEHASH' || t === 'HASH') {
+        return (isHash ? 60 : -120) + leadingSpacePenalty;
+      }
+      if (t === 'FILENAME' || t === 'FILEPATH' || t === 'FILE') {
+        if (isIp || isHash || isEmailOrArn || isEmailSubject || isUrl) return -120;
+        if (isFile) return 60 + leadingSpacePenalty;
+        if (!hasSpaces && id.includes('.')) return 25 + leadingSpacePenalty;
+        return -80 + leadingSpacePenalty;
+      }
+      if (t === 'EMAILSUBJECT') {
+        if (isIp || isHash || isEmailOrArn || isFile) return -100;
+        if (isEmailSubject) return 60 + internalCommaBonus + leadingSpacePenalty;
+        if (hasSpaces) return 25 + internalCommaBonus + leadingSpacePenalty;
+        return -20 + leadingSpacePenalty;
+      }
+      if (t === 'DESTINATIONURL' || t === 'URL' || t === 'URI') {
+        return (isUrl ? 60 : -60) + leadingSpacePenalty + internalCommaBonus;
+      }
+      if (t === 'USERUNIQNAME' || t === 'USER' || t === 'USERNAME' || t === 'EMAIL') {
+        if (isIp || isHash || isEmailSubject || isFile || isUrl) return -120;
+        if (isEmailOrArn) return 55 + leadingSpacePenalty;
+        if (!hasSpaces && dottedUserRegex.test(id)) return 40 + leadingSpacePenalty;
+        if (!hasSpaces && id.length <= 64 && !/^\d+$/.test(id) && !id.includes(':')) return 25 + leadingSpacePenalty;
+        return -80 + leadingSpacePenalty;
+      }
+      if (t === 'HOSTNAME' || t === 'HOST' || t === 'ASSET' || t === 'DOMAIN') {
+        if (isIp || isHash || isEmailOrArn || isEmailSubject || isFile || isUrl) return -120;
+        if (isValidHostname) return 35 + leadingSpacePenalty;
+        return -100 + leadingSpacePenalty;
+      }
+      // Free-text types (GENERICENTITY, PROCESS, THREATSIGNATURE, etc.)
+      if (isIp || isHash || isEmailOrArn || isEmailSubject) {
+        return -15 + leadingSpacePenalty;
+      }
+      if (isFile && t !== 'PROCESS') {
+        return -10 + leadingSpacePenalty;
+      }
+      if (spanLength > 1) {
+        return 15 + internalCommaBonus + leadingSpacePenalty;
+      }
+      return 20 + leadingSpacePenalty;
+    }
+
+    function alignEntitiesWithTypes(rawIdTokens, rawTypes) {
+      const preMergedIds = reconstructCommaSplitIdentifiers(rawIdTokens);
+      const n = preMergedIds.length;
+      const m = rawTypes.length;
+      if (n === 0) return [];
+      if (m === 0) {
+        return preMergedIds.map((id, idx) => ({ id, typeIdx: idx }));
+      }
+      if (n > 200 || m > 250) {
+        return preMergedIds.map((id, idx) => ({ id, typeIdx: Math.min(idx, m - 1) }));
+      }
+
+      // Bidirectional DP alignment after pre-merging internal commas:
+      // - If n > m, allows merging consecutive tokens in preMergedIds (up to n - m merges)
+      // - If m > n, allows skipping duplicate alert-level type entries in rawTypes (up to m - n skips)
+      if (n === m) {
+        return preMergedIds.map((id, idx) => ({ id, typeIdx: idx }));
+      }
+      const maxMerges = Math.max(0, n - m);
+      const maxTypeSkips = Math.max(0, m - n);
+      const memo = new Map();
+
+      function solve(i, j, mergesLeft, skipsLeft) {
+        if (i === n && j === m) return { score: 0, items: [] };
+        if (i === n) {
+          if (m - j <= skipsLeft) return { score: -2 * (m - j), items: [] };
+          return { score: -1e9, items: null };
+        }
+        if (j === m) return { score: -1e9, items: null };
+
+        const key = `${i}:${j}:${mergesLeft}:${skipsLeft}`;
+        if (memo.has(key)) return memo.get(key);
+
+        let best = { score: -1e9, items: null };
+
+        // Option A: Match preMergedIds[i .. i + span - 1] with rawTypes[j]
+        const maxSpan = Math.min(n - i, mergesLeft + 1);
+        for (let span = 1; span <= maxSpan; span++) {
+          const slice = preMergedIds.slice(i, i + span);
+          const sc = scoreTokenTypeMatch(slice, rawTypes[j]);
+          const sub = solve(i + span, j + 1, mergesLeft - (span - 1), skipsLeft);
+          if (sub.items !== null && sc + sub.score > best.score) {
+            best = {
+              score: sc + sub.score,
+              items: [{ id: slice.join(','), typeIdx: j }, ...sub.items]
+            };
+          }
+        }
+
+        // Option B: Skip rawTypes[j] (when rawTypes has duplicate alert-level entries not repeated in Identifier)
+        if (skipsLeft > 0) {
+          const subSkip = solve(i, j + 1, mergesLeft, skipsLeft - 1);
+          if (subSkip.items !== null && subSkip.score - 2 > best.score) {
+            best = { score: subSkip.score - 2, items: subSkip.items };
+          }
+        }
+
+        memo.set(key, best);
+        return best;
+      }
+
+      const res = solve(0, 0, maxMerges, maxTypeSkips);
+      if (res && res.items && res.items.length > 0) {
+        return res.items;
+      }
+      return preMergedIds.map((id, idx) => ({ id, typeIdx: Math.min(idx, m - 1) }));
+    }
+
+    function resolveSecOpsBaseUrl() {
+      const DEFAULT_SECOPS_URL = "https://go-preview-americas-sdl.backstory.chronicle.security";
+      try {
+        if (document.referrer) {
+          const refOrigin = new URL(document.referrer).origin;
+          if (refOrigin && !refOrigin.includes(".scf.usercontent.goog") && refOrigin.startsWith("https://")) {
+            return refOrigin;
+          }
+        }
+      } catch (e) {}
+      const hostPlaceholder = SOAR_RAW_HOST_URL.slice(0, -1);
+      if (
+        hostPlaceholder &&
+        hostPlaceholder.startsWith("https://") &&
+        !hostPlaceholder.includes("preview-americas-sdl.backstory.chronicle.security")
+      ) {
+        return hostPlaceholder;
+      }
+      return DEFAULT_SECOPS_URL;
+    }
+
+    function buildEntityRecords() {
+      const rawEntitiesIdentifier = SOAR_RAW_IDENTIFIERS.split(",");
+      const entitiesType = SOAR_RAW_TYPES.split(",");
+      const entitiesInternal = SOAR_RAW_INTERNAL.split(",");
+      const entitiesSuspicious = SOAR_RAW_SUSPICIOUS.split(",");
+      const entitiesPivot = SOAR_RAW_PIVOT.split(",");
+      const entitiesManual = SOAR_RAW_MANUAL.split(",");
+      const secopsUrl = resolveSecOpsBaseUrl();
+
+      const alignedRecords = alignEntitiesWithTypes(rawEntitiesIdentifier, entitiesType);
+
+      const rawAlertTime = SOAR_RAW_ALERT_TIME;
+      let creationTimeMs = Date.now();
+      if (rawAlertTime && /^\d+$/.test(rawAlertTime.trim())) {
+        const num = Number(rawAlertTime.trim());
+        creationTimeMs = num < 1e11 ? num * 1000 : num;
+      } else if (rawAlertTime) {
+        const parsed = new Date(rawAlertTime).getTime();
+        if (!isNaN(parsed)) creationTimeMs = parsed;
+      }
+
+      const toBool = val => String(val || '').trim().toLowerCase() === 'true';
+      const dedupMap = new Map();
+
+      alignedRecords.forEach(({ id: rawId, typeIdx }) => {
+        const cleanId = String(rawId || '').trim();
+        if (!cleanId) return;
+        const origType = String(entitiesType[typeIdx] || 'GENERICENTITY').trim();
+        const effectiveType = inferEffectiveEntityType(cleanId, origType);
+
+        const key = `${cleanId.toUpperCase()}::${effectiveType}`;
+        const existing = dedupMap.get(key);
+        const isInternal = toBool(entitiesInternal[typeIdx]) || (existing ? existing.EntityCards.IsInternalAsset : false);
+        const isPivot = toBool(entitiesPivot[typeIdx]) || (existing ? existing.EntityCards.IsPivot : false);
+        const isSuspicious = toBool(entitiesSuspicious[typeIdx]) || (existing ? existing.EntityCards.IsSuspicious : false);
+        const isManual = toBool(entitiesManual[typeIdx]) || (existing ? existing.EntityCards.IsManuallyCreated : false);
+
+        const tagNames = [];
+        if (isSuspicious) tagNames.push('Suspicious');
+        if (isPivot) tagNames.push('Pivot');
+        if (isInternal) tagNames.push('Internal');
+        if (isManual) tagNames.push('Manual');
+        const effectiveTags = tagNames.length > 0 ? tagNames : ['Untagged'];
+
+        const card = {
+          Identifier: cleanId,
+          Type: origType,
+          EffectiveType: effectiveType,
+          IsInternalAsset: isInternal,
+          IsPivot: isPivot,
+          IsSuspicious: isSuspicious,
+          IsManuallyCreated: isManual,
+          Tags: effectiveTags,
+          TagSortKey: tagNames.length > 0 ? tagNames.join(', ') : 'zzz_untagged',
+          SourceSystemUrl: secopsUrl
+        };
+        dedupMap.set(key, { EntityCards: card, CreationTime: creationTimeMs });
+      });
+
+      return Array.from(dedupMap.values());
+    }
+
+    // =========================================================================
+    // 4. Main Application Controller
+    // =========================================================================
+    document.addEventListener('DOMContentLoaded', () => {
+      const allData = buildEntityRecords();
+      let filteredData = [];
+      let currentSort = { key: null, direction: 'none' };
+      const selectedKeys = new Set();
+
+      const typeCounts = new Map();
+      const tagCounts = new Map();
+      const CANONICAL_TAG_ORDER = ['Suspicious', 'Pivot', 'Internal', 'Manual', 'Untagged'];
+
+      allData.forEach(item => {
+        const t = item.EntityCards.EffectiveType;
+        typeCounts.set(t, (typeCounts.get(t) || 0) + 1);
+        (item.EntityCards.Tags || ['Untagged']).forEach(tag => {
+          tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+        });
+      });
+
+      const activeTypes = new Set();
+      function resetDefaultTypeFilter() {
+        activeTypes.clear();
+        for (const t of typeCounts.keys()) {
+          if (!DEFAULT_EXCLUDED_TYPES.has(t.toUpperCase())) {
+            activeTypes.add(t);
+          }
+        }
+        if (activeTypes.size === 0) {
+          for (const t of typeCounts.keys()) activeTypes.add(t);
+        }
+      }
+      resetDefaultTypeFilter();
+
+      const activeTags = new Set();
+      function resetAllTagFilter() {
+        activeTags.clear();
+        for (const tag of tagCounts.keys()) {
+          activeTags.add(tag);
+        }
+      }
+      function applyTaggedOnlyFilter() {
+        activeTags.clear();
+        for (const tag of tagCounts.keys()) {
+          if (tag !== 'Untagged') activeTags.add(tag);
+        }
+        if (activeTags.size === 0) {
+          for (const tag of tagCounts.keys()) activeTags.add(tag);
+        }
+      }
+      resetAllTagFilter();
+
+      const tableBody = document.getElementById('entity-table-body');
+      const subtitleEl = document.getElementById('entity-summary-subtitle');
+      const filterInput = document.getElementById('entity-filter-input');
+      const logicSelect = document.getElementById('logic-select');
+      const windowSelect = document.getElementById('window-select');
+      const runCompoundBtn = document.getElementById('run-compound-btn');
+      const copyCompoundBtn = document.getElementById('copy-compound-btn');
+      const selectAllCheckbox = document.getElementById('select-all-checkbox');
+      const selectionCounter = document.getElementById('selection-counter');
+      const previewBar = document.getElementById('query-preview-bar');
+      const previewCode = document.getElementById('query-preview-code');
+      const typeChipsContainer = document.getElementById('type-chips-container');
+      const typeFilterAllBtn = document.getElementById('type-filter-all-btn');
+      const typeFilterDefaultBtn = document.getElementById('type-filter-default-btn');
+      const tagChipsContainer = document.getElementById('tag-chips-container');
+      const tagFilterAllBtn = document.getElementById('tag-filter-all-btn');
+      const tagFilterTaggedBtn = document.getElementById('tag-filter-tagged-btn');
+      const helpButton = document.getElementById('help-button');
+      const helpModal = document.getElementById('help-modal');
+      const closeModalButton = document.getElementById('close-modal-button');
+
+      const sortIcons = { asc: '▲', desc: '▼', none: '⇅' };
+      const externalIconSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M17.444 17.444H6.555V6.556H12V5H6.555C5.692 5 5 5.7 5 6.556v10.888C5 18.3 5.692 19 6.555 19h10.889c.855 0 1.555-.7 1.555-1.556V12h-1.555v5.444z"/><path d="M13.556 5v1.556h2.792L8.703 14.2l1.096 1.097 7.646-7.646v2.792H19V5h-5.444z"/></svg>`;
+
+      function rowKey(row) {
+        return `${row.EntityCards.Identifier.toUpperCase()}::${row.EntityCards.EffectiveType}`;
+      }
+
+      function getNestedValue(obj, path) {
+        return path.split('.').reduce((acc, part) => acc && acc[part], obj);
+      }
+
+      function renderTypeChips() {
+        typeChipsContainer.innerHTML = '';
+        const sortedTypes = Array.from(typeCounts.keys()).sort();
+        sortedTypes.forEach(typeName => {
+          const count = typeCounts.get(typeName) || 0;
+          const isActive = activeTypes.has(typeName);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `type-chip ${isActive ? 'active' : ''}`;
+          btn.dataset.type = typeName;
+          btn.title = isActive
+            ? `Click to hide ${typeName} entities`
+            : `Click to show ${typeName} entities`;
+          btn.innerHTML = `
+            <span>${escapeHtml(typeName)}</span>
+            <span class="type-chip-count">${count}</span>
+          `;
+          typeChipsContainer.appendChild(btn);
+        });
+      }
+
+      function renderTagChips() {
+        tagChipsContainer.innerHTML = '';
+        const availableTags = CANONICAL_TAG_ORDER.filter(tag => (tagCounts.get(tag) || 0) > 0);
+        availableTags.forEach(tagName => {
+          const count = tagCounts.get(tagName) || 0;
+          const isActive = activeTags.has(tagName);
+          const tagCls = `tag-chip-${tagName.toLowerCase()}`;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `type-chip tag-chip ${tagCls} ${isActive ? 'active' : ''}`;
+          btn.dataset.tag = tagName;
+          btn.title = isActive
+            ? `Click to hide ${tagName} entities`
+            : `Click to show ${tagName} entities`;
+          btn.innerHTML = `
+            <span>${escapeHtml(tagName)}</span>
+            <span class="type-chip-count">${count}</span>
+          `;
+          tagChipsContainer.appendChild(btn);
+        });
+      }
+
+      function applyFilterAndSort() {
+        const q = filterInput.value.trim().toLowerCase();
+        filteredData = allData.filter(item => {
+          if (!activeTypes.has(item.EntityCards.EffectiveType)) return false;
+          const itemTags = item.EntityCards.Tags || ['Untagged'];
+          if (!itemTags.some(tag => activeTags.has(tag))) return false;
+          if (!q) return true;
+          return (
+            item.EntityCards.Identifier.toLowerCase().includes(q) ||
+            item.EntityCards.EffectiveType.toLowerCase().includes(q) ||
+            item.EntityCards.Type.toLowerCase().includes(q) ||
+            itemTags.some(tag => tag.toLowerCase().includes(q))
+          );
+        });
+
+        const { key, direction } = currentSort;
+        if (key && direction !== 'none') {
+          const mult = direction === 'asc' ? 1 : -1;
+          filteredData.sort((a, b) => {
+            const valA = String(getNestedValue(a, key) || '').trim();
+            const valB = String(getNestedValue(b, key) || '').trim();
+            const primaryCmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+            if (primaryCmp !== 0) return primaryCmp * mult;
+            // Secondary sort by Identifier for deterministic ordering within same Type or Tag
+            const idA = String(a.EntityCards.Identifier || '').trim();
+            const idB = String(b.EntityCards.Identifier || '').trim();
+            return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+          });
+        }
+      }
+
+      function buildSearchUrl(sourceUrl, query, creationTimeMs) {
+        const { startTimeIso, endTimeIso } = computeTimeWindow(creationTimeMs, windowSelect.value);
+        return `${sourceUrl}/search?query=${encodeURIComponent(query)}&startTime=${startTimeIso}&endTime=${endTimeIso}`;
+      }
+
+      function getSelectedRows() {
+        return allData.filter(r => selectedKeys.has(rowKey(r)));
+      }
+
+      function getCompoundQueryString() {
+        const selected = getSelectedRows();
+        const clauses = selected
+          .map(r => buildUdmQuery(r.EntityCards.Identifier, r.EntityCards.EffectiveType))
+          .filter(Boolean);
+        if (clauses.length === 0) return '';
+        if (clauses.length === 1) return clauses[0];
+        return clauses.join(` ${logicSelect.value} `);
+      }
+
+      function updateCompoundControls() {
+        const selected = getSelectedRows();
+        const count = selected.length;
+        runCompoundBtn.disabled = count < 2;
+        copyCompoundBtn.disabled = count < 1;
+
+        if (count > 0) {
+          selectionCounter.style.display = 'inline-flex';
+          selectionCounter.textContent = `${count} selected`;
+          const combined = getCompoundQueryString();
+          previewCode.textContent = combined;
+          previewBar.classList.add('visible');
+        } else {
+          selectionCounter.style.display = 'none';
+          previewBar.classList.remove('visible');
+        }
+
+        const visibleKeys = filteredData.map(rowKey);
+        selectAllCheckbox.checked = visibleKeys.length > 0 && visibleKeys.every(k => selectedKeys.has(k));
+      }
+
+      function updateSortIcons() {
+        document.querySelectorAll('th.sortable').forEach(th => {
+          const key = th.dataset.sortBy;
+          const span = th.querySelector('.sort-icon');
+          const isSorted = key === currentSort.key && currentSort.direction !== 'none';
+          const dir = isSorted ? currentSort.direction : 'none';
+          if (span) span.textContent = sortIcons[dir];
+          th.classList.toggle('sort-active', isSorted);
+          th.setAttribute('aria-sort', isSorted ? (dir === 'asc' ? 'ascending' : 'descending') : 'none');
+        });
+      }
+
+      function renderTable() {
+        renderTypeChips();
+        renderTagChips();
+        applyFilterAndSort();
+        const hiddenCount = allData.length - filteredData.length;
+        subtitleEl.textContent = hiddenCount > 0
+          ? `Showing ${filteredData.length} of ${allData.length} entities (${hiddenCount} filtered by type/tag/search)`
+          : `Showing all ${allData.length} unique case entities`;
+        tableBody.innerHTML = '';
+
+        if (filteredData.length === 0) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td colspan="6" class="empty-state">No entities match the active type or tag filters. Click a type or tag chip above to enable it.</td>`;
+          tableBody.appendChild(tr);
+          updateCompoundControls();
+          updateSortIcons();
+          return;
+        }
+
+        filteredData.forEach(rowData => {
+          const { Identifier, Type, EffectiveType, SourceSystemUrl, IsSuspicious, IsPivot, IsInternalAsset, IsManuallyCreated } = rowData.EntityCards;
+          const key = rowKey(rowData);
+          const isChecked = selectedKeys.has(key);
+
+          const udmQuery = buildUdmQuery(Identifier, EffectiveType);
+          const rlsQuery = `raw = /${JSON.stringify(Identifier).slice(1, -1).replace(/\\/g, '\\\\')}/ nocase`;
+
+          const udmUrl = buildSearchUrl(SourceSystemUrl, udmQuery, rowData.CreationTime);
+          const rlsUrl = buildSearchUrl(SourceSystemUrl, rlsQuery, rowData.CreationTime);
+
+          const tags = [
+            IsSuspicious && { text: 'Suspicious', cls: 'badge-suspicious' },
+            IsPivot && { text: 'Pivot', cls: 'badge-pivot' },
+            IsInternalAsset && { text: 'Internal', cls: 'badge-internal' },
+            IsManuallyCreated && { text: 'Manual', cls: 'badge-manual' }
+          ].filter(Boolean);
+
+          const typeChanged = Type.toUpperCase() !== EffectiveType.toUpperCase();
+
+          const tr = document.createElement('tr');
+          if (isChecked) tr.classList.add('row-selected');
+
+          tr.innerHTML = `
+            <td>
+              <input type="checkbox" class="row-checkbox" data-key="${escapeHtml(key)}" ${isChecked ? 'checked' : ''} />
+            </td>
+            <td>
+              <div class="entity-id-cell">
+                <span class="entity-id-text" title="${escapeHtml(Identifier)}">${escapeHtml(Identifier)}</span>
+                <button type="button" class="btn btn-secondary btn-icon-only copy-row-query" data-query="${escapeHtml(udmQuery)}" title="Copy UDM Query: ${escapeHtml(udmQuery)}">📋</button>
+              </div>
+            </td>
+            <td>
+              <span class="type-pill" title="SOAR Raw Type: ${escapeHtml(Type)}">
+                ${escapeHtml(EffectiveType)}
+                ${typeChanged ? `<span class="type-inferred-hint" title="Auto-inferred from ${escapeHtml(Type)}">✦</span>` : ''}
+              </span>
+            </td>
+            <td style="text-align: center;">
+              <a href="${escapeHtml(udmUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-udm" title="${escapeHtml(udmQuery)}">
+                UDM ${externalIconSvg}
+              </a>
+            </td>
+            <td style="text-align: center;">
+              <a href="${escapeHtml(rlsUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-rls" title="${escapeHtml(rlsQuery)}">
+                RLS ${externalIconSvg}
+              </a>
+            </td>
+            <td>
+              <div class="tag-list">
+                ${tags.length > 0 ? tags.map(t => `<span class="badge ${t.cls} row-tag-badge" data-tag="${escapeHtml(t.text)}" style="cursor: pointer;" title="Click to filter by ${escapeHtml(t.text)} tag">${escapeHtml(t.text)}</span>`).join('') : '<span style="color: var(--soar-text-muted); font-size: 0.7rem;">—</span>'}
+              </div>
+            </td>
+          `;
+          tableBody.appendChild(tr);
+        });
+
+        updateCompoundControls();
+        updateSortIcons();
+      }
+
+      // Event Listeners
+      typeChipsContainer.addEventListener('click', e => {
+        const chip = e.target.closest('.type-chip');
+        if (!chip) return;
+        const t = chip.dataset.type;
+        if (activeTypes.has(t)) activeTypes.delete(t);
+        else activeTypes.add(t);
+        renderTable();
+      });
+
+      typeFilterAllBtn.addEventListener('click', () => {
+        for (const t of typeCounts.keys()) activeTypes.add(t);
+        renderTable();
+      });
+
+      typeFilterDefaultBtn.addEventListener('click', () => {
+        resetDefaultTypeFilter();
+        renderTable();
+      });
+
+      tagChipsContainer.addEventListener('click', e => {
+        const chip = e.target.closest('.tag-chip');
+        if (!chip) return;
+        const tag = chip.dataset.tag;
+        if (activeTags.has(tag)) activeTags.delete(tag);
+        else activeTags.add(tag);
+        renderTable();
+      });
+
+      tagFilterAllBtn.addEventListener('click', () => {
+        resetAllTagFilter();
+        renderTable();
+      });
+
+      tagFilterTaggedBtn.addEventListener('click', () => {
+        applyTaggedOnlyFilter();
+        renderTable();
+      });
+
+      tableBody.addEventListener('change', e => {
+        if (e.target.classList.contains('row-checkbox')) {
+          const key = e.target.dataset.key;
+          if (e.target.checked) selectedKeys.add(key);
+          else selectedKeys.delete(key);
+          renderTable();
+        }
+      });
+
+      tableBody.addEventListener('click', e => {
+        const copyBtn = e.target.closest('.copy-row-query');
+        if (copyBtn) {
+          const q = copyBtn.dataset.query;
+          navigator.clipboard?.writeText(q);
+          const orig = copyBtn.textContent;
+          copyBtn.textContent = '✓';
+          setTimeout(() => { copyBtn.textContent = orig; }, 1200);
+          return;
+        }
+        const tagBadge = e.target.closest('.row-tag-badge');
+        if (tagBadge && tagBadge.dataset.tag) {
+          const clickedTag = tagBadge.dataset.tag;
+          // If all tags or multiple tags are active, isolate the clicked tag; if already isolated, reset to all tags
+          if (activeTags.size === 1 && activeTags.has(clickedTag)) {
+            resetAllTagFilter();
+          } else {
+            activeTags.clear();
+            activeTags.add(clickedTag);
+          }
+          renderTable();
+        }
+      });
+
+      selectAllCheckbox.addEventListener('change', e => {
+        filteredData.forEach(r => {
+          const k = rowKey(r);
+          if (e.target.checked) selectedKeys.add(k);
+          else selectedKeys.delete(k);
+        });
+        renderTable();
+      });
+
+      filterInput.addEventListener('input', () => renderTable());
+      logicSelect.addEventListener('change', () => updateCompoundControls());
+      windowSelect.addEventListener('change', () => renderTable());
+
+      runCompoundBtn.addEventListener('click', () => {
+        const selected = getSelectedRows();
+        if (selected.length < 2) return;
+        const combinedQuery = getCompoundQueryString();
+        const { CreationTime, EntityCards: { SourceSystemUrl } } = selected[0];
+        const url = buildSearchUrl(SourceSystemUrl, combinedQuery, CreationTime);
+        window.open(url, '_blank');
+      });
+
+      copyCompoundBtn.addEventListener('click', () => {
+        const combinedQuery = getCompoundQueryString();
+        if (!combinedQuery) return;
+        navigator.clipboard?.writeText(combinedQuery);
+        const orig = copyCompoundBtn.textContent;
+        copyCompoundBtn.textContent = 'Copied!';
+        setTimeout(() => { copyCompoundBtn.textContent = orig; }, 1200);
+      });
+
+      function handleColumnSort(headerEl) {
+        if (!headerEl) return;
+        const key = headerEl.dataset.sortBy;
+        if (!key) return;
+        if (currentSort.key === key) {
+          if (currentSort.direction === 'asc') {
+            currentSort.direction = 'desc';
+          } else if (currentSort.direction === 'desc') {
+            currentSort.key = null;
+            currentSort.direction = 'none';
+          } else {
+            currentSort.direction = 'asc';
+          }
+        } else {
+          currentSort.key = key;
+          currentSort.direction = 'asc';
+        }
+        renderTable();
+      }
+
+      document.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', () => handleColumnSort(th));
+        th.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleColumnSort(th);
+          }
+        });
+      });
+
+      helpButton.addEventListener('click', () => helpModal.classList.add('open'));
+      closeModalButton.addEventListener('click', () => helpModal.classList.remove('open'));
+      helpModal.addEventListener('click', e => {
+        if (e.target === helpModal) helpModal.classList.remove('open');
+      });
+
+      renderTable();
+    });
+  </script>
+</body>
+</html>

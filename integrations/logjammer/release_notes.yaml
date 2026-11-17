@@ -1,3 +1,12 @@
+- description: "Removed hardcoded tenant fallback defaults so GCP Project ID and SecOps Customer ID are resolved strictly from the SOAR Integration Instance configuration, Workload Identity Email, or environment variables."
+  version: 3.0
+  item_name: "LogJammer"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-17"
 - description: "Added AUTO_PRECISE Curated Detection Rule auto-selection and relevance ranking, Precision filter on Search Curated Rules, CS_EDR primary log source prioritization for PROCESS_LAUNCH + principal.asset_id rules, and combined trigger + multi-source surrounding telemetry synthesis in full-chain mode."
   version: 2.9
   item_name: "LogJammer"

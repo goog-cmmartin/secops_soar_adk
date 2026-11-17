@@ -60,8 +60,10 @@ class AuditDataTableHealthWorkflow:
 
         # Step 2: Correlate Rule References if requested
         table_to_rules_map: Dict[str, Set[str]] = {}
+        lineage_available = True
+        lineage_error: Optional[str] = None
         if correlate_rules:
-            table_to_rules_map = self._build_rule_lineage_index()
+            table_to_rules_map, lineage_available, lineage_error = self._build_rule_lineage_index()
 
         findings: List[DataTableHealthFinding] = []
         healthy_count = 0
@@ -71,6 +73,7 @@ class AuditDataTableHealthWorkflow:
         recently_modified_count = 0
         stale_count = 0
         schema_issue_count = 0
+        unknown_count = 0
 
         for table in tables:
             finding = self._evaluate_table(
@@ -79,6 +82,8 @@ class AuditDataTableHealthWorkflow:
                 lookback_days=lookback_days,
                 stale_days=stale_days,
                 now_utc=now_utc,
+                lineage_available=lineage_available,
+                lineage_error=lineage_error,
             )
             findings.append(finding)
 
@@ -96,6 +101,8 @@ class AuditDataTableHealthWorkflow:
                 schema_issue_count += 1
             elif finding.status == DataTableHealthStatus.STALE:
                 stale_count += 1
+            elif finding.status == DataTableHealthStatus.UNKNOWN:
+                unknown_count += 1
 
         return DataTableHealthReport(
             total_tables_audited=len(tables),
@@ -107,10 +114,13 @@ class AuditDataTableHealthWorkflow:
             stale_count=stale_count,
             schema_issue_count=schema_issue_count,
             findings=findings,
+            unknown_count=unknown_count,
+            lineage_available=lineage_available,
+            lineage_error=lineage_error,
             generated_at=now_utc,
         )
 
-    def _build_rule_lineage_index(self) -> Dict[str, Set[str]]:
+    def _build_rule_lineage_index(self) -> Tuple[Dict[str, Set[str]], bool, Optional[str]]:
         """Scans detection rules to find YARA-L references to Data Tables (%table_name%)."""
         lineage: Dict[str, Set[str]] = {}
         try:
@@ -128,8 +138,10 @@ class AuditDataTableHealthWorkflow:
                         lineage[ref_key] = set()
                     lineage[ref_key].add(rule_name)
         except Exception as e:
-            logger.debug(f"Rule lineage correlation scan encountered an issue: {e}")
-        return lineage
+            err_msg = f"{type(e).__name__}: {e}"
+            logger.warning("Rule lineage correlation scan failed: %s", e)
+            return lineage, False, err_msg
+        return lineage, True, None
 
     def _evaluate_table(
         self,
@@ -138,6 +150,8 @@ class AuditDataTableHealthWorkflow:
         lookback_days: int,
         stale_days: int,
         now_utc: datetime,
+        lineage_available: bool = True,
+        lineage_error: Optional[str] = None,
     ) -> DataTableHealthFinding:
         """Evaluates health, lineage, and lifecycle status for a single Data Table."""
         # Calculate recency
@@ -196,6 +210,13 @@ class AuditDataTableHealthWorkflow:
             status = DataTableHealthStatus.SCHEMA_ISSUE
             details = f"Table has {len(table.column_info)} columns but no key column designated for fast indexing."
             remediations.append("Update table schema definition to designate at least one primary key column.")
+        elif rule_associations_count == 0 and not lineage_available:
+            status = DataTableHealthStatus.UNKNOWN
+            details = (
+                f"Rule lineage correlation unavailable ({lineage_error}); cannot verify whether "
+                f"detection rules reference '%{table.display_name or table.id}%'."
+            )
+            remediations.append("Restore detection rule read access and re-run lineage correlation before archiving or deleting this table.")
         elif rule_associations_count == 0 and (row_count == 0 or row_count is None) and is_stale:
             status = DataTableHealthStatus.ORPHAN
             details = (

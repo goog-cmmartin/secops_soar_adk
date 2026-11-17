@@ -23,7 +23,7 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 if TYPE_CHECKING:
     from adapters.google_secops import GoogleSecOpsAdapter
@@ -252,11 +252,13 @@ def fetch_security_community_topics(
 
 def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]:
     """Queries live tenant operational metrics from Chronicle SIEM & SOAR for the Homepage Dashboard."""
+    telemetry_errors: Dict[str, str] = {}
     snapshot: Dict[str, Any] = {
         "project_id": getattr(adapter, "project_id", "") or getattr(adapter, "project_number", ""),
         "location": getattr(adapter, "location", "us"),
         "customer_id": getattr(adapter, "customer_id", ""),
         "udm_events_24h": 0,
+        "udm_telemetry_available": True,
         "active_udm_log_types_24h": 0,
         "active_ingestion_log_types_24h": 0,
         "detections_7d": 0,
@@ -270,6 +272,8 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
         "feed_log_types": [],
         "data_tables_count": 0,
         "key_data_tables": [],
+        "telemetry_complete": True,
+        "telemetry_errors": telemetry_errors,
     }
 
     # 1. 24h UDM Event Count & Active UDM Log Types
@@ -285,6 +289,8 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
             snapshot["udm_events_24h"] = int(r_udm.rows[0].get("event_count") or 0)
             snapshot["active_udm_log_types_24h"] = int(r_udm.rows[0].get("log_types") or 0)
     except Exception as exc:
+        snapshot["udm_telemetry_available"] = False
+        telemetry_errors["udm_24h"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health UDM query failed: %s", exc)
 
     # 2. 24h Ingestion Metrics Log Types
@@ -298,6 +304,7 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
         if r_ing.rows:
             snapshot["active_ingestion_log_types_24h"] = int(r_ing.rows[0].get("log_types") or 0)
     except Exception as exc:
+        telemetry_errors["ingestion_24h"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health ingestion query failed: %s", exc)
 
     # 3. 7d Rule Detections Volume & Top Noisy Rules (Alerting vs Silent)
@@ -311,6 +318,7 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
         if r_det.rows:
             snapshot["detections_7d"] = int(r_det.rows[0].get("detection_count") or 0)
     except Exception as exc:
+        telemetry_errors["detections_7d"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health total detections query failed: %s", exc)
 
     try:
@@ -339,6 +347,7 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
             for r in silent_rules[:3]
         ]
     except Exception as exc:
+        telemetry_errors["noisy_rules_7d"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health noisy rules query failed: %s", exc)
 
     # 4. Open SOAR Cases Queue
@@ -366,6 +375,7 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
         snapshot["case_priorities"] = prio_counts
         snapshot["recent_open_cases"] = recent_cases
     except Exception as exc:
+        telemetry_errors["open_cases"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health SOAR cases query failed: %s", exc)
 
     # 5. Custom Detection Rules Inventory
@@ -374,6 +384,7 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
         rules_list = rules_res.get("rules", []) if isinstance(rules_res, dict) else []
         snapshot["custom_rules_sampled"] = len(rules_list)
     except Exception as exc:
+        telemetry_errors["custom_rules"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health rules list failed: %s", exc)
 
     # 6. Data Feeds & Data Tables
@@ -391,6 +402,7 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
                     feed_types.append(clean_lt)
         snapshot["feed_log_types"] = feed_types[:6]
     except Exception as exc:
+        telemetry_errors["feeds"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health feeds query failed: %s", exc)
 
     try:
@@ -405,8 +417,10 @@ def fetch_tenant_health_snapshot(adapter: GoogleSecOpsAdapter) -> Dict[str, Any]
                     key_tables.append(t_name)
         snapshot["key_data_tables"] = key_tables[:5]
     except Exception as exc:
+        telemetry_errors["data_tables"] = f"{type(exc).__name__}: {exc}"
         logger.warning("Tenant health data tables query failed: %s", exc)
 
+    snapshot["telemetry_complete"] = not bool(telemetry_errors)
     return snapshot
 
 
@@ -425,7 +439,7 @@ def _format_header_markdown(
         if active_incidents_count == 0
         else f"🚨 **[{active_incidents_count} ACTIVE SERVICE DISRUPTION(S)]**"
     )
-    proj = tenant_health.get("project_id") or "sdl-preview-americas"
+    proj = tenant_health.get("project_id") or "UNKNOWN"
     loc = (tenant_health.get("location") or "us").upper()
     return (
         f"# 🛡️ {dashboard_title}\n"
@@ -476,11 +490,21 @@ def _format_ai_executive_summary_markdown(
 
     # 1. Service Status Correlation
     lines.append("### 1. Cloud Security Status ↔ Tenant Telemetry Correlation")
+    udm_available = bool(tenant_health.get("udm_telemetry_available", True))
+    tel_errors = tenant_health.get("telemetry_errors") or {}
+    proj_label = tenant_health.get("project_id") or "UNKNOWN"
     if active_incidents:
         inc = active_incidents[0]
         lines.append(
             f"- 🚨 **[ACTIVE DISRUPTION]** **[{inc.service_name}]({inc.public_url})** — {inc.external_desc} "
-            f"**Action:** Monitor forwarder buffering and ingestion latency on tenant `{tenant_health.get('project_id', 'sdl-preview-americas')}`."
+            f"**Action:** Monitor forwarder buffering and ingestion latency on tenant `{proj_label}`."
+        )
+    elif not udm_available:
+        udm_err = tel_errors.get("udm_24h", "UDM telemetry query failed")
+        lines.append(
+            f"- ⚠️ **[TELEMETRY UNAVAILABLE]** External Google SecOps status feeds report **Operational**, "
+            f"but live 24h UDM telemetry query failed on tenant `{proj_label}` (`{udm_err}`). "
+            f"Ingestion volume cannot be verified until query access recovers."
         )
     else:
         lines.append(
@@ -552,9 +576,11 @@ def _format_tenant_health_markdown(
     tenant_health: Dict[str, Any],
     refreshed_at_str: str,
 ) -> str:
-    proj = tenant_health.get("project_id") or "sdl-preview-americas"
+    proj = tenant_health.get("project_id") or "UNKNOWN"
     loc = (tenant_health.get("location") or "us").upper()
     udm_24h = int(tenant_health.get("udm_events_24h") or 0)
+    udm_available = bool(tenant_health.get("udm_telemetry_available", True))
+    tel_errors: Dict[str, str] = tenant_health.get("telemetry_errors") or {}
     udm_types = int(tenant_health.get("active_udm_log_types_24h") or 0)
     ing_types = int(tenant_health.get("active_ingestion_log_types_24h") or 0)
     det_7d = int(tenant_health.get("detections_7d") or 0)
@@ -574,15 +600,20 @@ def _format_tenant_health_markdown(
     med_cnt = prio_map.get("MEDIUM", 0)
     low_cnt = prio_map.get("LOW", 0)
 
+    udm_line = (
+        f"- **24h Normalized UDM Volume:** **{udm_24h:,} events** across **{udm_types} active UDM log types** "
+        f"(**{ing_types}** raw ingestion sources)"
+        if udm_available
+        else f"- **24h Normalized UDM Volume:** **Unavailable** (`{tel_errors.get('udm_24h', 'query failed')}`)"
+    )
+
     lines: List[str] = [
         f"## 📊 Live Tenant Health & Operations Pulse (`{proj}` • **{loc}**)",
-        f"**Telemetry Posture:** Real-time SIEM & SOAR snapshot sampled at **{refreshed_at_str}**",
+        f"**Telemetry Posture:** Real-time SIEM & SOAR snapshot sampled at **{refreshed_at_str}**"
+        + (f" *(⚠️ {len(tel_errors)} query error(s))*" if tel_errors else ""),
         "",
         "### ⚡ Telemetry & Ingestion Vital Signs",
-        (
-            f"- **24h Normalized UDM Volume:** **{udm_24h:,} events** across **{udm_types} active UDM log types** "
-            f"(**{ing_types}** raw ingestion sources)"
-        ),
+        udm_line,
         (
             f"- **Active Data Feeds:** **{feeds_cnt} feeds** ({', '.join(f'`{t}`' for t in feed_types[:5]) or 'configured'}) &nbsp;|&nbsp; "
             f"**Data Tables:** **{dt_cnt} tables** ({', '.join(f'`{t}`' for t in key_dts[:3])})"
@@ -810,6 +841,7 @@ class SyncSecOpsHomepageDashboardWorkflow:
         include_tenant_health: bool = True,
         ai_executive_summary: Optional[str] = None,
         dashboard_name: Optional[str] = None,
+        ai_summary_generator: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Optional[str]]] = None,
     ) -> Dict[str, Any]:
         """Fetches live Status, Release Notes, Community feeds, and Tenant Health and syncs the Homepage Native Dashboard."""
         if dashboard_name and str(dashboard_name).strip():
@@ -839,6 +871,35 @@ class SyncSecOpsHomepageDashboardWorkflow:
         latest_rn_date = release_notes[0]["title"] if release_notes else "N/A"
         applied_filters = community_data.get("filters_applied", DEFAULT_COMMUNITY_CATEGORIES)
 
+        feeds_summary_payload = {
+            "status_active_incidents": len(active_incidents),
+            "status_recent_incidents": len(incidents),
+            "release_notes_entries": len(release_notes),
+            "latest_release_date": latest_rn_date,
+            "community_posts_matched": len(community_data.get("items", [])),
+            "community_filters": applied_filters,
+        }
+        tenant_health_summary_payload = {
+            "udm_events_24h": tenant_health.get("udm_events_24h", 0),
+            "udm_telemetry_available": tenant_health.get("udm_telemetry_available", True),
+            "active_udm_log_types_24h": tenant_health.get("active_udm_log_types_24h", 0),
+            "active_ingestion_log_types_24h": tenant_health.get("active_ingestion_log_types_24h", 0),
+            "detections_7d": tenant_health.get("detections_7d", 0),
+            "open_cases_sampled": tenant_health.get("open_cases_sampled", 0),
+            "case_priorities": tenant_health.get("case_priorities", {}),
+            "active_feeds_count": tenant_health.get("active_feeds_count", 0),
+            "data_tables_count": tenant_health.get("data_tables_count", 0),
+            "telemetry_complete": tenant_health.get("telemetry_complete", True),
+            "telemetry_errors": tenant_health.get("telemetry_errors", {}),
+        }
+
+        effective_ai_summary = ai_executive_summary
+        if effective_ai_summary is None and callable(ai_summary_generator):
+            effective_ai_summary = ai_summary_generator(
+                feeds_summary_payload,
+                tenant_health_summary_payload,
+            )
+
         # 2. Build Markdown contents for the 6 Markdown tiles
         header_md = _format_header_markdown(
             dashboard_title=dashboard_title,
@@ -856,7 +917,7 @@ class SyncSecOpsHomepageDashboardWorkflow:
             community_data=community_data,
             tenant_health=tenant_health,
             refreshed_at_str=refreshed_at_str,
-            custom_ai_summary=ai_executive_summary,
+            custom_ai_summary=effective_ai_summary,
         )
         tenant_health_md = _format_tenant_health_markdown(
             tenant_health=tenant_health,
@@ -1211,6 +1272,7 @@ class SyncSecOpsHomepageDashboardWorkflow:
             },
             "tenant_health_summary": {
                 "udm_events_24h": tenant_health.get("udm_events_24h", 0),
+                "udm_telemetry_available": tenant_health.get("udm_telemetry_available", True),
                 "active_udm_log_types_24h": tenant_health.get("active_udm_log_types_24h", 0),
                 "active_ingestion_log_types_24h": tenant_health.get("active_ingestion_log_types_24h", 0),
                 "detections_7d": tenant_health.get("detections_7d", 0),
@@ -1218,6 +1280,8 @@ class SyncSecOpsHomepageDashboardWorkflow:
                 "case_priorities": tenant_health.get("case_priorities", {}),
                 "active_feeds_count": tenant_health.get("active_feeds_count", 0),
                 "data_tables_count": tenant_health.get("data_tables_count", 0),
+                "telemetry_complete": tenant_health.get("telemetry_complete", True),
+                "telemetry_errors": tenant_health.get("telemetry_errors", {}),
             },
             "tiles": synced_tiles,
         }

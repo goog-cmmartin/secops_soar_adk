@@ -43,6 +43,67 @@ VALID_CARDINALITIES = frozenset({"single", "bounded", "unbounded"})
 # The agent-policy key the contract suite looks for on unbounded capabilities.
 REQUIRE_FILTER_POLICY_KEY = "require_filter_for_unbounded_query"
 
+# Side effects that only update local SDK caches / vector stores rather than
+# mutating live Google SecOps (SIEM/SOAR) tenant state.
+LOCAL_CACHE_SIDE_EFFECTS = frozenset({
+    "write_rule_cache",
+    "write_embedding_cache",
+})
+
+
+def has_tenant_side_effects(capability_or_effects: object) -> bool:
+    """Return True if a capability (or side_effects iterable) mutates live tenant state."""
+    effects = getattr(capability_or_effects, "side_effects", capability_or_effects)
+    if not effects:
+        return False
+    return any(str(eff) not in LOCAL_CACHE_SIDE_EFFECTS for eff in effects)
+
+
+def is_tenant_read_only_capability(
+    cap: object,
+    registry: object = None,
+    _visited: Optional[set[str]] = None,
+) -> bool:
+    """Return True iff ``cap`` performs no live tenant mutations directly or transitively.
+
+    Rules (fail-closed):
+      1. Any side effect outside ``LOCAL_CACHE_SIDE_EFFECTS`` is mutating -> False.
+      2. ``kind == 'primitive'`` is mutating unless it explicitly declares non-empty
+         ``side_effects`` strictly within ``LOCAL_CACHE_SIDE_EFFECTS``.
+      3. ``kind == 'query'`` (side-effect-free by construction) -> True.
+      4. Composed workflows walk ``cap.uses`` transitively; missing ``registry`` or
+         unresolved ``uses`` targets fail closed -> False.
+    """
+    if has_tenant_side_effects(cap):
+        return False
+
+    kind = getattr(cap, "kind", None)
+    effects = list(getattr(cap, "side_effects", None) or [])
+    if kind == "primitive":
+        return bool(effects) and all(str(eff) in LOCAL_CACHE_SIDE_EFFECTS for eff in effects)
+    if kind == "query":
+        return True
+
+    uses = tuple(getattr(cap, "uses", None) or ())
+    if not uses:
+        return True
+    if registry is None or not hasattr(registry, "get"):
+        return False
+
+    visited = set() if _visited is None else _visited
+    cid = str(getattr(cap, "capability_id", ""))
+    if cid in visited:
+        return True
+    visited.add(cid)
+
+    for dep_id in uses:
+        dep_cap = registry.get(dep_id)
+        if dep_cap is None:
+            return False
+        if not is_tenant_read_only_capability(dep_cap, registry, visited):
+            return False
+    return True
+
 # Terminal verbs that return a single addressed resource.
 SINGLE_RESULT_VERBS = frozenset({
     "get",

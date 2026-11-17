@@ -122,23 +122,47 @@ class AssignCaseWorkflow:
             raise ValueError("assignee must be a non-empty string.")
 
         target = assignee.strip()
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in target):
+            raise ValueError("assignee contains invalid control characters.")
 
-        # If user passed an email or plain username without @ prefix, check if it's a known user
+        # If user passed an email address without a leading role '@', resolve the SOAR user GUID unambiguously.
         if not target.startswith("@") and "@" in target:
-            # Check by email lookup
-            try:
-                users_res = self.adapter.list_soar_users(
-                    filter=f"mail = '{target}' or email = '{target}' or displayName = '{target}'",
-                    page_size=5,
+            esc_target = target.replace("\\", "\\\\").replace("'", "\\'")
+            users_res = self.adapter.list_soar_users(
+                filter=f"mail = '{esc_target}' or email = '{esc_target}' or displayName = '{esc_target}'",
+                page_size=10,
+            )
+            users = users_res.get("legacySoarUsers", []) if isinstance(users_res, dict) else []
+            q_lower = target.lower()
+            exact_matches = [
+                u for u in users
+                if isinstance(u, dict)
+                and q_lower in {
+                    str(u.get("mail") or "").strip().lower(),
+                    str(u.get("email") or "").strip().lower(),
+                    str(u.get("displayName") or "").strip().lower(),
+                    str(u.get("loginName") or "").strip().lower(),
+                }
+            ]
+            if len(exact_matches) == 1:
+                chosen = exact_matches[0]
+            elif len(exact_matches) > 1:
+                raise ValueError(
+                    f"Ambiguous SOAR user match for '{target}': {len(exact_matches)} users matched."
                 )
-                users = users_res.get("legacySoarUsers", [])
-                if users:
-                    u0 = users[0]
-                    # displayName on legacySoarUsers is typically the user's GUID
-                    guid = u0.get("displayName") or u0.get("id") or target
-                    target = guid
-            except Exception:
-                pass
+            elif len(users) == 1 and isinstance(users[0], dict):
+                chosen = users[0]
+            elif len(users) > 1:
+                raise ValueError(
+                    f"Ambiguous SOAR user match for '{target}': {len(users)} candidate users returned."
+                )
+            else:
+                raise ValueError(f"No SOAR user found matching '{target}'.")
+
+            guid = chosen.get("displayName") or chosen.get("id")
+            if not guid:
+                raise RuntimeError(f"Resolved SOAR user record for '{target}' has no displayName or id.")
+            target = str(guid)
 
         return self.update_workflow.execute(
             case_id=case_id,
@@ -245,7 +269,12 @@ class UpdateCaseAlertWorkflow:
             masks.append("priority")
 
         if status is not None:
-            payload["status"] = status.strip().upper()
+            s = status.strip().upper()
+            if s in ("CLOSED", "CLOSE"):
+                s = "CLOSE"
+            elif s in ("OPENED", "OPEN"):
+                s = "OPEN"
+            payload["status"] = s
             masks.append("status")
 
         if not payload:

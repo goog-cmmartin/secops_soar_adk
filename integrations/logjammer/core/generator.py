@@ -446,9 +446,21 @@ Return ONLY the JSON array."""
       else:
         log_types = analysis.suggested_log_types[:2] if analysis.suggested_log_types else ["WINDOWS_SYSMON"]
     else:
-      # Ensure the rule's primary trigger log type is always included first
-      if primary_trigger_type not in [lt.upper() for lt in log_types]:
-        log_types = [primary_trigger_type] + list(log_types)
+      requested_upper = [lt.strip().upper() for lt in log_types if lt and lt.strip()]
+      matching_triggers = [
+          lt.upper()
+          for lt in (analysis.suggested_log_types or [])
+          if lt.upper() in requested_upper
+      ]
+      if matching_triggers:
+        primary_trigger_type = matching_triggers[0]
+      elif "CS_EDR" in requested_upper:
+        primary_trigger_type = "CS_EDR"
+      elif requested_upper:
+        primary_trigger_type = requested_upper[0]
+      log_types = [primary_trigger_type] + [
+          lt for lt in requested_upper if lt != primary_trigger_type
+      ]
 
     # Target event count
     target_count = max(count or 1, analysis.threshold_count, 1)

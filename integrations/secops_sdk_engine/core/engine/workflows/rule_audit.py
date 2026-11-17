@@ -58,8 +58,9 @@ class AuditRulesWorkflow:
             self.store = store
         else:
             try:
-                from agents.core.evidence_store import get_evidence_store
-                self.store = get_evidence_store()
+                from engine.ports import resolve_evidence_store
+
+                self.store = resolve_evidence_store(required=False)
             except Exception as e:
                 logger.warning("Could not initialize EvidenceFabricStore for AuditRulesWorkflow: %s", e)
                 self.store = None
@@ -100,6 +101,8 @@ class AuditRulesWorkflow:
         # Phase 2: Inventory & Deployments
         deployment_map: Dict[str, Any] = {}
         archived_rule_ids: Set[str] = set()
+        deployments_available = True
+        deployments_error: Optional[str] = None
         try:
             dep_wf = ListRuleDeploymentsWorkflow(self.adapter)
             dep_res = dep_wf.execute(page_size=page_size)
@@ -120,6 +123,8 @@ class AuditRulesWorkflow:
                     if raw_name:
                         archived_rule_ids.add(raw_name.split("/")[-1])
         except Exception as ex:
+            deployments_available = False
+            deployments_error = f"{type(ex).__name__}: {ex}"
             logger.warning("Could not fetch rule deployments for audit: %s", ex)
 
         # Customer Rules
@@ -138,6 +143,8 @@ class AuditRulesWorkflow:
 
         # Phase 3: Runtime Execution Errors
         errors_by_rule: Dict[str, List[Any]] = {}
+        errors_available = True
+        errors_error: Optional[str] = None
         try:
             list_errors_wf = ListRuleErrorsWorkflow(self.adapter)
             errors_res = list_errors_wf.execute(page_size=100)
@@ -152,14 +159,20 @@ class AuditRulesWorkflow:
                     if base_key != r_key:
                         errors_by_rule.setdefault(base_key, []).append(err)
         except Exception as ex:
+            errors_available = False
+            errors_error = f"{type(ex).__name__}: {ex}"
             logger.warning("Could not fetch rule execution errors for audit: %s", ex)
 
         # Phase 4: 90-Day Telemetry & Decay Evaluation
         telemetry_map: Dict[str, int] = {}
+        telemetry_available = True
+        telemetry_error: Optional[str] = None
         try:
             telemetry_wf = QueryRuleDetectionCountsWorkflow(self.adapter)
             telemetry_map = telemetry_wf.execute(lookback_days=lookback_days)
         except Exception as ex:
+            telemetry_available = False
+            telemetry_error = f"{type(ex).__name__}: {ex}"
             logger.warning("Could not fetch 90-day telemetry counts for audit: %s", ex)
 
         # Phase 5: Evaluate Findings for Customer Rules
@@ -169,6 +182,7 @@ class AuditRulesWorkflow:
         failing_count = 0
         misconfigured_count = 0
         disabled_count = 0
+        unknown_count = 0
         conflict_count = 0
         shadowed_by_curated_count = 0
         total_detections_90d = 0
@@ -256,6 +270,12 @@ class AuditRulesWorkflow:
                 status = RuleHealthStatus.MISCONFIGURED_ALERTING
                 misconfigured_count += 1
                 remediation.append("Rule is actively executing but alerting is disabled. Enable alerting in Rule Deployments.")
+            elif enabled and not telemetry_available:
+                status = RuleHealthStatus.UNKNOWN
+                unknown_count += 1
+                remediation.append(
+                    f"90-day detection telemetry unavailable ({telemetry_error}); silent decay could not be verified."
+                )
             elif enabled and detections_90d == 0:
                 status = RuleHealthStatus.SILENT_DECAY
                 silent_decay_count += 1
@@ -277,7 +297,7 @@ class AuditRulesWorkflow:
             dps_score = 100.0
             if error_count > 0:
                 dps_score -= 40.0
-            if detections_90d == 0:
+            if telemetry_available and detections_90d == 0:
                 dps_score -= 35.0
             if not alerting and enabled:
                 dps_score -= 20.0
@@ -285,7 +305,10 @@ class AuditRulesWorkflow:
                 dps_score -= 15.0
             dps_score = max(0.0, round(dps_score, 1))
 
-            decay_status = "HEALTHY" if detections_90d > 0 else "SILENT"
+            if not telemetry_available:
+                decay_status = "UNKNOWN"
+            else:
+                decay_status = "HEALTHY" if detections_90d > 0 else "SILENT"
 
             finding = RuleAuditFinding(
                 rule_id=rid,
@@ -408,6 +431,13 @@ class AuditRulesWorkflow:
             conflict_count=conflict_count,
             shadowed_by_curated_count=shadowed_by_curated_count,
             total_detections_90d=total_detections_90d,
+            unknown_count=unknown_count,
+            telemetry_available=telemetry_available,
+            telemetry_error=telemetry_error,
+            deployments_available=deployments_available,
+            deployments_error=deployments_error,
+            errors_available=errors_available,
+            errors_error=errors_error,
             generated_at=datetime.now(timezone.utc),
             provenance=Provenance(
                 source="GoogleSecOpsAdapter",

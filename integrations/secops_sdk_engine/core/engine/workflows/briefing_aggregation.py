@@ -28,13 +28,14 @@ from engine.domain import (
     SubjectRef,
 )
 
-# agents.core.* imports engine.domain, and engine/__init__ imports this module via
-# engine.facade. Importing agents.core at module load creates an import cycle, so
-# runtime imports are deferred to call time (see _resolve_backends).
-if TYPE_CHECKING:
-    from agents.core.knowledge_store import BaseKnowledgeStore
-    from agents.core.materializer import IssueMaterializer
-    from agents.core.work_queue import BaseWorkQueue
+from engine.ports import (
+    KnowledgeStorePort as BaseKnowledgeStore,
+    MaterializerPort as IssueMaterializer,
+    WorkQueuePort as BaseWorkQueue,
+    resolve_knowledge_store,
+    resolve_materializer,
+    resolve_work_queue,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,19 +46,10 @@ def _resolve_backends(
     materializer: Optional[IssueMaterializer],
 ) -> Tuple[BaseWorkQueue, BaseKnowledgeStore, IssueMaterializer]:
     """Returns supplied backends, lazily constructing defaults for any that are None."""
-    if work_queue is None:
-        from agents.core.work_queue import get_work_queue
-
-        work_queue = get_work_queue()
-    if knowledge_store is None:
-        from agents.core.knowledge_store import get_knowledge_store
-
-        knowledge_store = get_knowledge_store()
-    if materializer is None:
-        from agents.core.materializer import IssueMaterializer
-
-        materializer = IssueMaterializer()
-    return work_queue, knowledge_store, materializer
+    resolved_wq = resolve_work_queue(work_queue)
+    resolved_ks = resolve_knowledge_store(knowledge_store)
+    resolved_mat = resolve_materializer(materializer)
+    return resolved_wq, resolved_ks, resolved_mat
 
 
 def compute_shift_delta(

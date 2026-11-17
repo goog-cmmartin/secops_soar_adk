@@ -53,3 +53,8 @@ parameters:
   is_mandatory: false
   name: Enrich with Google TI
   type: boolean
+- default_value: Per Unique Rule in Case
+  description: Deduplication scope within a SOAR Case to prevent multiple alerts from triggering runaway LogJammer simulations ('Per Unique Rule in Case', 'Once Per Case', or 'Disabled'). Tracked via SOAR Case Context ('logjammer_processed_rules'), Case Tag ('LogJammer:Simulated'), and an atomic per-case lock.
+  is_mandatory: false
+  name: Deduplication Scope
+  type: string

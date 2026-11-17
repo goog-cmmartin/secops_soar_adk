@@ -1,0 +1,65 @@
+creator: Christopher Martin
+description: Scans open SOAR cases within a configurable lookback and grouping timeframe (default 24h) scoped by SOAR Environment (default 'Default Environment'), extracts high-signal alert entities (HOSTNAME, IP, non-generic USER, non-generic FILEHASH), enforces multi-host magnet guardrails, and either outputs a Dry-Run merge plan or executes native SOAR case merges (:merge) with optional ADK Agent correlation commentary and Case Overview widget refresh.
+integration: GoogleADK
+name: Auto Group Cases by Entity Job
+parameters:
+  - default_value: Default Environment
+    description: Comma-separated SOAR environment names to filter by (defaults to 'Default Environment'). Leave blank for all environments (cases are still strictly grouped within their own environment).
+    is_mandatory: false
+    name: Environment Filter
+    type: string
+  - default_value: true
+    description: If true (default), performs a safe Dry Run logging all identified high-signal entity overlaps and proposed merge clusters without modifying cases. Set to false to execute POST .../cases:merge.
+    is_mandatory: false
+    name: Dry Run
+    type: boolean
+  - default_value: '24'
+    description: Lookback window in hours for scanning open SOAR cases (status = OPENED).
+    is_mandatory: false
+    name: Lookback Hours
+    type: string
+  - default_value: '24'
+    description: Maximum time delta in hours allowed between open cases to group them into the same merge cluster (default 24 hours).
+    is_mandatory: false
+    name: Grouping Window Hours
+    type: string
+  - default_value: '1'
+    description: Minimum number of shared high-signal entities (HOSTNAME, IP, non-generic USER, non-generic FILEHASH) required to group two cases.
+    is_mandatory: false
+    name: Min Shared High-Signal Entities
+    type: string
+  - default_value: '1'
+    description: Maximum distinct HOSTNAME entities allowed on a single case before the Multi-Host Magnet Guardrail excludes it from transitive bridging (default 1 = strict single-host clustering).
+    is_mandatory: false
+    name: Max Distinct Hosts Per Case
+    type: string
+  - default_value: '100'
+    description: Maximum number of open cases to evaluate per job run (1-500).
+    is_mandatory: false
+    name: Max Cases Per Run
+    type: string
+  - default_value: false
+    description: If false (default), only evaluates original alert-extracted entities (manuallyCreated=false) and ignores post-ingestion enrichment entities.
+    is_mandatory: false
+    name: Include Enriched Entities
+    type: boolean
+  - default_value: true
+    description: When Dry Run is false, posts a structured Markdown audit comment on the surviving target case wall documenting the merged child cases and shared entities.
+    is_mandatory: false
+    name: Post Merge Summary to Target Case Wall
+    type: boolean
+  - default_value: true
+    description: When Dry Run is false, attaches the 'Run_Case_Correlation' tag to the surviving target case after merging so Case Correlate Case Entities refreshes the Case Overview widgets.
+    is_mandatory: false
+    name: Trigger Case Correlation Tag After Merge
+    type: boolean
+  - default_value: false
+    description: If enabled, runs the Google ADK Gemini Agent to synthesize a brief multi-stage correlation narrative for each merge cluster.
+    is_mandatory: false
+    name: Generate AI Merge Narrative via ADK Agent
+    type: boolean
+  - default_value: ''
+    description: Optional comma-separated SOAR Case IDs to evaluate explicitly (leave blank to scan open cases in Environment Filter).
+    is_mandatory: false
+    name: Target Case IDs
+    type: string

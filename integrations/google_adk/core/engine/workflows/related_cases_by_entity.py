@@ -20,6 +20,9 @@ from engine.workflows.case_actions import AddCaseCommentWorkflow
 from engine.workflows.case_investigation import InvestigateCaseWorkflow
 from engine.workflows.case_search import SearchCasesWorkflow
 from engine.workflows.correlate_silent_detections import (
+    GENERIC_BINARIES,
+    GENERIC_BINARY_PATH_SUBSTRINGS,
+    ParsedEntityFilter,
     _clean_case_id,
     is_noisy_entity,
 )
@@ -98,6 +101,7 @@ class RelatedCasesByEntityWorkflow:
         max_entities_to_search: int = 25,
         include_threat_actors: bool = False,
         entity_filter: Optional[List[str]] = None,
+        entity_filter_mode: str = "AUTO",
         post_wall_comment: bool = False,
         secops_ui_base_url: str = "",
     ) -> RelatedCasesByEntityResult:
@@ -111,7 +115,8 @@ class RelatedCasesByEntityWorkflow:
             max_related_cases: Maximum number of related cases to return (default: 50).
             max_entities_to_search: Maximum number of distinct case entities to query (default: 25).
             include_threat_actors: If True, includes THREATACTOR/MALWARE entity types in the search.
-            entity_filter: Optional explicit list of entity identifiers to search/filter.
+            entity_filter: Optional list of entity types (e.g. DESTINATIONURL, FILENAME, PROCESS) or identifiers.
+            entity_filter_mode: Filter mode ('AUTO', 'EXCLUDE'/'Filter Out (Exclude)', or 'INCLUDE'/'Filter In (Include)').
             post_wall_comment: If True, posts a Markdown summary table to the Case Wall.
             secops_ui_base_url: Optional base URL for constructing full SecOps case links.
 
@@ -125,6 +130,7 @@ class RelatedCasesByEntityWorkflow:
         max_entities_to_search = max(1, int(max_entities_to_search or 25))
         scope_norm = str(case_status_scope or "ALL").strip().upper().replace(" ", "_")
         base_url_clean = str(secops_ui_base_url or "").strip().rstrip("/")
+        parsed_filter = ParsedEntityFilter(entity_filter=entity_filter, entity_filter_mode=entity_filter_mode)
 
         # 1. Investigate the source case to extract metadata and involved entities
         investigation = self.investigate_workflow.execute(case_id=clean_case_id)
@@ -141,28 +147,49 @@ class RelatedCasesByEntityWorkflow:
         )
 
         # 2. Collect and sanitize candidate entities
-        filter_set: Optional[Set[str]] = None
-        if entity_filter:
-            filter_set = {str(x).strip().upper() for x in entity_filter if str(x).strip()}
-
         candidate_entities: List[Dict[str, Any]] = []
         seen_identifiers: Set[str] = set()
+        prev_was_generic_binary = False
+        prev_alert_id: Optional[str] = None
 
         for ent in investigation.entities:
             ident = str(ent.identifier or "").strip()
             if not ident:
                 continue
+            ent_raw = ent.raw if isinstance(getattr(ent, "raw", None), dict) else {}
+            alert_id = str(ent_raw.get("alertIdentifier") or "GLOBAL").strip()
+            if alert_id != prev_alert_id:
+                prev_was_generic_binary = False
+                prev_alert_id = alert_id
+
+            ident_lower = ident.lower()
             ident_upper = ident.upper()
             etype = str(ent.entity_type or "UNKNOWN").strip().upper()
 
-            if filter_set is not None and ident_upper not in filter_set:
+            is_gen_bin = any(
+                ident_lower == b or ident_lower.endswith("\\" + b) or ident_lower.endswith("/" + b)
+                for b in GENERIC_BINARIES
+            ) or any(sub in ident_lower for sub in GENERIC_BINARY_PATH_SUBSTRINGS)
+            if is_gen_bin:
+                prev_was_generic_binary = True
+                continue
+
+            is_hash_entity = etype in ("FILEHASH", "HASH", "SHA256", "MD5", "SHA1") or (
+                len(ident_lower) in (32, 40, 64) and all(c in "0123456789abcdef" for c in ident_lower)
+            )
+            if is_hash_entity and prev_was_generic_binary:
+                continue
+            if not is_hash_entity:
+                prev_was_generic_binary = False
+
+            if not parsed_filter.matches(ident, etype):
                 continue
 
             if etype in NON_OBSERVABLE_ENTITY_TYPES:
                 continue
             if not include_threat_actors and etype in THREAT_ACTOR_ENTITY_TYPES:
                 continue
-            if is_noisy_entity(ident) or ident_upper in ("OUTCOME", "UNKNOWN", "TRUE", "FALSE", "NONE", "NULL"):
+            if is_noisy_entity(ident, etype) or ident_upper in ("OUTCOME", "UNKNOWN", "TRUE", "FALSE", "NONE", "NULL"):
                 continue
 
             if ident_upper not in seen_identifiers:
@@ -177,24 +204,23 @@ class RelatedCasesByEntityWorkflow:
                     }
                 )
 
-        # If explicit entity_filter entries were provided that weren't on the case, include them too
-        if entity_filter:
-            for raw_ent in entity_filter:
-                ident = str(raw_ent or "").strip()
-                if not ident:
-                    continue
-                ident_upper = ident.upper()
-                if ident_upper not in seen_identifiers and not is_noisy_entity(ident):
-                    seen_identifiers.add(ident_upper)
-                    candidate_entities.append(
-                        {
-                            "identifier": ident,
-                            "entity_type": "CUSTOM",
-                            "display_name": ident,
-                            "role": None,
-                            "is_suspicious": False,
-                        }
-                    )
+        # If explicit entity identifier inclusions were provided that weren't on the case, include them too
+        for raw_ent in parsed_filter.explicit_include_id_values:
+            ident = str(raw_ent or "").strip()
+            if not ident:
+                continue
+            ident_upper = ident.upper()
+            if ident_upper not in seen_identifiers and not is_noisy_entity(ident):
+                seen_identifiers.add(ident_upper)
+                candidate_entities.append(
+                    {
+                        "identifier": ident,
+                        "entity_type": "CUSTOM",
+                        "display_name": ident,
+                        "role": None,
+                        "is_suspicious": False,
+                    }
+                )
 
         # Prioritize suspicious entities and high-signal observable types first
         def _entity_sort_key(e: Dict[str, Any]):

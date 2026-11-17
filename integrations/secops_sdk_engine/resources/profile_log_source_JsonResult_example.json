@@ -1,0 +1,18 @@
+{
+  "partition_key": "CS_EDR:PROCESS_LAUNCH",
+  "log_type": "CS_EDR",
+  "event_type": "PROCESS_LAUNCH",
+  "raw_samples_count": 20,
+  "udm_events_count": 200,
+  "total_raw_keys_discovered": 65,
+  "qualified_raw_keys": {
+    "aid": 1.0,
+    "ProcessGroupId": 1.0,
+    "ConfigStateHash": 1.0,
+    "MD5HashData": 0.95
+  },
+  "critical_udm_fields": {
+    "target.process.file.sha256": 1.0,
+    "principal.process.commandLine": 0.95
+  }
+}

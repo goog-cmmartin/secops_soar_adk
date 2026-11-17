@@ -1,5 +1,7 @@
+import json
 import os
 import sys
+import time
 import unicodedata
 
 # Ensure core directory is on sys.path for SOAR runtime
@@ -132,6 +134,92 @@ def main():
             logger=siemplify.LOGGER,
         )
 
+        # Idempotency & multi-alert fan-in cooldown guard:
+        # Preserves full cached JsonResult so Case Overview HTML widgets are never blanked out by duplicate queued runs.
+        cache_file = f"/tmp/soar_action_cache_related_cases_{case_id}.json"
+        current_alert_count = 0
+        try:
+            existing_case = manager.adapter.get_case(str(case_id), expand="tags")
+            raw_tags = (
+                getattr(existing_case, "tags", None)
+                or (existing_case.get("tags") if isinstance(existing_case, dict) else None)
+                or []
+            )
+            existing_tags = []
+            for rt in raw_tags:
+                if isinstance(rt, dict):
+                    dn = rt.get("displayName") or rt.get("tag")
+                    if dn and str(dn).strip():
+                        existing_tags.append(str(dn).strip())
+                elif str(rt).strip():
+                    existing_tags.append(str(rt).strip())
+
+            current_alert_count = int(
+                getattr(existing_case, "alert_count", 0)
+                or (
+                    (existing_case.get("alertCount") or existing_case.get("alertsCount"))
+                    if isinstance(existing_case, dict)
+                    else 0
+                )
+                or 0
+            )
+            cached_entry = None
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, "r", encoding="utf-8") as cf:
+                        cached_entry = json.load(cf)
+                except Exception:
+                    cached_entry = None
+            if not isinstance(cached_entry, dict):
+                try:
+                    raw_ctx = None
+                    if hasattr(siemplify, "get_case_context_property"):
+                        raw_ctx = siemplify.get_case_context_property("RELATED_CASES_CACHED_RESULT")
+                    elif hasattr(siemplify, "get_context_property"):
+                        raw_ctx = siemplify.get_context_property(1, str(case_id), "RELATED_CASES_CACHED_RESULT")
+                    if isinstance(raw_ctx, dict):
+                        cached_entry = raw_ctx
+                    elif isinstance(raw_ctx, str) and raw_ctx.strip().startswith("{"):
+                        cached_entry = json.loads(raw_ctx.strip())
+                except Exception:
+                    cached_entry = None
+
+            cache_age = (time.time() - float(cached_entry.get("timestamp", 0))) if isinstance(cached_entry, dict) else 999999.0
+            cached_payload = cached_entry.get("json_payload") if isinstance(cached_entry, dict) else None
+            logjammer_newly_simulated = (
+                "LogJammer:Simulated" in existing_tags
+                and not (isinstance(cached_entry, dict) and bool(cached_entry.get("has_logjammer_simulated")))
+            )
+            is_recent_same_alerts = (
+                isinstance(cached_payload, dict)
+                and not logjammer_newly_simulated
+                and cache_age < 180.0
+                and int(cached_entry.get("alert_count", -1)) == current_alert_count
+            )
+
+            if (
+                (("Tier1:Triaged" in existing_tags and not logjammer_newly_simulated) or is_recent_same_alerts)
+                and isinstance(cached_payload, dict)
+            ):
+                skip_reason = (
+                    f"already carries 'Tier1:Triaged' tag ({existing_tags})"
+                    if "Tier1:Triaged" in existing_tags
+                    else f"already searched related cases {cache_age:.1f}s ago with unchanged alert count ({current_alert_count})"
+                )
+                output_message = (
+                    f"Case '{case_id}' {skip_reason}; "
+                    f"reusing cached Related Cases payload to preserve Case Overview widget."
+                )
+                siemplify.LOGGER.info(output_message)
+                payload_out = dict(cached_payload)
+                payload_out["reused_cached_result"] = True
+                payload_out["existing_tags"] = existing_tags
+                siemplify.result.add_result_json(payload_out)
+                siemplify.end(output_message, bool(payload_out.get("has_related_cases", False)), EXECUTION_STATE_COMPLETED)
+                return
+        except Exception as tag_check_err:
+            siemplify.LOGGER.info(f"Pre-flight tag/cache check skipped: {tag_check_err}")
+
         res = manager.related_cases_by_entity(
             case_id=case_id,
             lookback_days=lookback_days,
@@ -171,6 +259,27 @@ def main():
             "provenance": res.provenance,
         }
 
+        cache_entry_to_save = {
+            "timestamp": time.time(),
+            "alert_count": current_alert_count,
+            "has_logjammer_simulated": (
+                "LogJammer:Simulated" in (existing_tags if "existing_tags" in locals() else [])
+            ),
+            "json_payload": json_payload,
+        }
+        try:
+            if hasattr(siemplify, "set_case_context_property"):
+                siemplify.set_case_context_property("RELATED_CASES_CACHED_RESULT", json.dumps(cache_entry_to_save))
+            elif hasattr(siemplify, "set_context_property"):
+                siemplify.set_context_property(1, str(case_id), "RELATED_CASES_CACHED_RESULT", json.dumps(cache_entry_to_save))
+        except Exception:
+            pass
+        try:
+            with open(cache_file, "w", encoding="utf-8") as cf:
+                json.dump(cache_entry_to_save, cf)
+        except Exception:
+            pass
+
         siemplify.result.add_result_json(json_payload)
         result_value = bool(res.has_related_cases)
 
@@ -183,6 +292,11 @@ def main():
         siemplify.LOGGER.info(output_message)
 
     except Exception as e:
+        try:
+            if "manager" in locals() and "case_id" in locals() and case_id:
+                manager.engine.remove_case_tag(str(case_id), "Run_Case_Correlation")
+        except Exception:
+            pass
         normalized = unicodedata.normalize("NFKD", str(e))
         clean_msg = normalized.encode("ascii", "ignore").decode("ascii")
         output_message = f"Failed to search related cases by entity: {clean_msg}"

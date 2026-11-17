@@ -351,7 +351,12 @@ class UpdateJobWorkflow:
             payload["parameters"] = parameters
             mask_fields.append("parameters")
 
-        final_mask = update_mask or ",".join(mask_fields) or "script"
+        if not payload:
+            raise ValueError(
+                "At least one job field (script, description, enabled, or parameters) must be provided to update."
+            )
+
+        final_mask = update_mask or ",".join(mask_fields)
         updated_job = self.adapter.update_job(
             integration=integration,
             job_id=job_id,
@@ -423,7 +428,12 @@ class UpdateJobInstanceWorkflow:
             payload["advancedConfig"] = advanced_config
             mask_fields.append("advancedConfig")
 
-        final_mask = update_mask or ",".join(mask_fields) or "script"
+        if not payload:
+            raise ValueError(
+                "At least one job instance field (script, enabled, interval_seconds, parameters, or advanced_config) must be provided to update."
+            )
+
+        final_mask = update_mask or ",".join(mask_fields)
         return self.adapter.update_job_instance(
             integration=integration,
             job_id=job_id,

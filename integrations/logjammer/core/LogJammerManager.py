@@ -119,13 +119,13 @@ class LogJammerManager:
             or os.environ.get("GCP_PROJECT_NUMBER")
             or os.environ.get("GOOGLE_CLOUD_PROJECT")
             or os.environ.get("GCP_PROJECT_ID")
-            or "37679061640"
+            or ""
         )
         self.secops_customer_id = (
             secops_customer_id
             or os.environ.get("SECOPS_CUSTOMER_ID")
             or os.environ.get("CHRONICLE_CUSTOMER_ID")
-            or "a556547c-1cff-43ef-a2e4-cf5b12a865df"
+            or ""
         )
         self.secops_region = (secops_region or os.environ.get("CHRONICLE_REGION") or "us").lower()
 

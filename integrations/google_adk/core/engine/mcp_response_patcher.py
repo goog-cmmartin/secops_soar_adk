@@ -6,6 +6,9 @@ that cause Gemini / Vertex AI timeouts and 500 INTERNAL:
 'Limits exceeded while trying to flatten schema. Schema is too complex to process.'
 """
 
+from dataclasses import is_dataclass
+from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
 
@@ -19,12 +22,24 @@ def prune_deep_object(
     """Recursively bounds object depth and list length to prevent schema recursion blowups."""
     if obj is None:
         return None
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, datetime):
+        return obj.isoformat()
     if isinstance(obj, (int, float, bool)):
         return obj
     if isinstance(obj, str):
         if len(obj) > max_str_len:
             return obj[:max_str_len] + "... [truncated]"
         return obj
+
+    if hasattr(obj, "to_dict") and callable(getattr(obj, "to_dict")):
+        try:
+            obj = obj.to_dict()
+        except Exception:
+            pass
+    elif is_dataclass(obj) and not isinstance(obj, type):
+        obj = {k: v for k, v in obj.__dict__.items() if k != "raw"}
 
     if current_depth >= max_depth:
         if isinstance(obj, list):

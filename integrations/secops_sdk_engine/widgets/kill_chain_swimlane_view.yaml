@@ -1,0 +1,17 @@
+action_identifier: Build Kill Chain Timeline
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 700
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: full_width
+description: Renders an interactive multi-mode MITRE ATT&CK Kill-Chain Swimlane storyboard with Y-axis switching (Kill-Chain Stage, Detection Pipeline, Affected Entity), segmented UTC time-axis with dwell-time break indicators, burst cluster badges, and 1-click Chronicle UDM Search deep-links.
+scope: alert
+title: Case Kill-Chain Swimlane
+type: html

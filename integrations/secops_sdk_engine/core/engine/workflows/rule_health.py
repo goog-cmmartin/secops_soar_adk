@@ -192,7 +192,7 @@ class AuditRuleHealthWorkflow:
         elif rule.run_frequency or rule.raw.get("executionState"):
             # Legacy fallback (no deployment record): infer from the rule's own fields.
             is_enabled = bool(
-                rule.run_frequency in ("LIVE", "HOURLY", "DAILY")
+                rule.run_frequency in ("LIVE", "HOURLY", "HOURLY_CUSTOMIZABLE", "DAILY")
                 or rule.raw.get("executionState") == "ACTIVE"
             )
             is_alerting = bool(rule.raw.get("alerting", True))

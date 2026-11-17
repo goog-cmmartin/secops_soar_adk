@@ -1,0 +1,35 @@
+creator: Christopher Martin
+description: Sweeps recent SOAR cases tagged Verdict:FP, Disp:Benign*, Tune:Candidate, or Tune:Approve alongside the top noisy SIEM rules, synthesizes compiler-verified multi-factor exclusions into the asoc_detection_tuning Data Table with a 30-day TTL, and refreshes the Detection Tuning & FP Reduction Command Center Native Dashboard.
+integration: SecOpsSDKEngine
+name: Sync Detection Tuning Dashboard Job
+parameters:
+  - default_value: 'Detection Tuning & FP Reduction Command Center'
+    description: Display name for the Google SecOps Native Dashboard.
+    is_mandatory: false
+    name: Dashboard Title
+    type: string
+  - default_value: ''
+    description: Optional existing Chronicle Native Dashboard ID to update in-place. Leave blank to auto-discover by title or create a new dashboard.
+    is_mandatory: false
+    name: Dashboard ID
+    type: string
+  - default_value: '7'
+    description: Lookback window in days for querying top noisy detection rules and retrospective blast-radius calculations.
+    is_mandatory: false
+    name: Lookback Days
+    type: string
+  - default_value: '30'
+    description: Expiration Time-To-Live (TTL) in days recorded in asoc_detection_tuning for governance review.
+    is_mandatory: false
+    name: TTL Days
+    type: string
+  - default_value: 'true'
+    description: Whether to sweep recent SOAR cases carrying Verdict:FP, Tune:Candidate, or Tune:Approve tags and synthesize tuning proposals for them.
+    is_mandatory: false
+    name: Sweep FP Cases
+    type: boolean
+  - default_value: 'false'
+    description: Whether to automatically apply Curated Rule Findings Refinements when Tune:Approve is present on a case.
+    is_mandatory: false
+    name: Auto Apply Approved Cases
+    type: boolean

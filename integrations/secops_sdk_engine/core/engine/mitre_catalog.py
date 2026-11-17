@@ -27,7 +27,17 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).resolve().parent / "data" / "mitre"
+def _resolve_default_data_dir() -> Path:
+    here = Path(__file__).resolve().parent
+    nested = here / "data" / "mitre"
+    if (nested / "enterprise_matrix.json").is_file():
+        return nested
+    if (here / "enterprise_matrix.json").is_file():
+        return here
+    return nested
+
+
+DATA_DIR = _resolve_default_data_dir()
 TECHNIQUE_REGEX = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b", re.IGNORECASE)
 
 

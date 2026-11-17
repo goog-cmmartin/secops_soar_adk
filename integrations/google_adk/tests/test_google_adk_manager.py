@@ -137,6 +137,100 @@ class TestGoogleADKManager(unittest.TestCase):
                 ai_executive_summary=None,
             )
 
+    def test_tier1_triage_tools_exposed_and_wired(self):
+        from unittest.mock import MagicMock, patch
+        tools = self.manager.init_secops_engine_toolset(
+            customer_id="a556547c-1cff-43ef-a2e4-cf5b12a865df",
+            project_id="sdl-preview-americas",
+            region="us",
+        )
+        tool_map = {t.__name__: t for t in tools}
+        for expected_tool in [
+            "validate_udm_sql",
+            "query_udm_sql",
+            "update_case_alert",
+            "add_soar_case_tag",
+            "remove_soar_case_tag",
+        ]:
+            self.assertIn(expected_tool, tool_map)
+
+        with patch("adapters.google_secops.GoogleSecOpsAdapter.validate_query") as mock_val, \
+             patch("adapters.google_secops.GoogleSecOpsAdapter.execute_dashboard_query") as mock_exec:
+            mock_val.return_value = MagicMock(
+                valid=True,
+                dialect="DIALECT_SQL",
+                raw_query_type="QUERY_TYPE_STRUCTURAL_CONVERSION",
+                error_text=None,
+                error_type=None,
+            )
+            v_res = tool_map["validate_udm_sql"]("FROM events |> LIMIT 5")
+            self.assertTrue(v_res["valid"])
+            mock_val.assert_called_with("FROM events |> LIMIT 5", dialect="DIALECT_SQL")
+
+            mock_exec.return_value = MagicMock(
+                columns=["event_type", "cnt"],
+                rows=[{"event_type": "PROCESS_LAUNCH", "cnt": "10"}],
+                total_rows=1,
+                time_window={"relativeTime": {"timeUnit": "DAY", "startTimeVal": "1"}},
+            )
+            q_res = tool_map["query_udm_sql"](
+                "FROM events |> AGGREGATE COUNT(*) AS cnt GROUP BY metadata.event_type AS event_type",
+                lookback_hours=24,
+            )
+            self.assertTrue(q_res["valid"])
+            self.assertEqual(q_res["total_rows"], 1)
+
+        with patch("engine.facade.SecOpsEngine.update_case_alert") as mock_alert:
+            mock_alert.return_value = MagicMock(
+                to_dict=lambda: {"status": "CLOSE", "alert_id": "de_123", "priority": "LOW"}
+            )
+            a_res = tool_map["update_case_alert"](case_id="108671", alert_id="de_123", status="CLOSE", priority="LOW")
+            self.assertEqual(a_res["status"], "CLOSE")
+            mock_alert.assert_called_with(
+                case_id="108671",
+                alert_id="de_123",
+                priority="LOW",
+                status="CLOSE",
+            )
+
+        with patch("engine.facade.SecOpsEngine.add_case_tag") as mock_tag:
+            mock_tag.return_value = {"status": "SUCCESS", "case_id": "108671", "tags_added": ["Tier1:Triaged", "Verdict:BTP"]}
+            t_res = tool_map["add_soar_case_tag"](case_id="108671", tags="Tier1:Triaged, Verdict:BTP")
+            self.assertEqual(t_res["status"], "SUCCESS")
+            mock_tag.assert_called_with(case_id="108671", tags=["Tier1:Triaged", "Verdict:BTP"])
+
+    def test_gemini_4_hydrogen_uses_global_and_thinking_level(self):
+        from unittest.mock import MagicMock, patch
+        mgr = GoogleADKManager(
+            api_key="test-api-key",
+            project_id="test-project",
+            location="us-central1",
+            model_name="gemini-4-hydrogen",
+        )
+        self.assertEqual(mgr.location, "global")
+
+        mock_resp = MagicMock()
+        mock_resp.text = "# Incident Investigation Report\n> **Verdict:** `True Positive (Malicious)` | **Disposition:** `Malicious — Active Compromise / Intrusion` | **Confidence:** `HIGH`"
+        mock_resp.candidates = []
+        mock_resp.automatic_function_calling_history = []
+
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.models.generate_content.return_value = mock_resp
+            mock_client_cls.return_value = mock_client
+
+            res = mgr.run_agent(
+                agent_name="Logic_Analyst_Agent",
+                instructions="Analyze the case",
+                input_text="Case 109588",
+                thinking_budget=8192,
+            )
+            self.assertIn("True Positive (Malicious)", res["final_response"])
+            call_kwargs = mock_client.models.generate_content.call_args.kwargs
+            cfg = call_kwargs["config"]
+            self.assertEqual(str(cfg.thinking_config.thinking_level).split(".")[-1], "HIGH")
+            self.assertIsNone(cfg.thinking_config.thinking_budget)
+
 
 if __name__ == "__main__":
     unittest.main()

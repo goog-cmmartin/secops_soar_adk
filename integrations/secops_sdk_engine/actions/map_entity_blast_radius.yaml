@@ -1,0 +1,63 @@
+creator: Christopher Martin
+description: Constructs an interactive Case Entity & Detection Blast Radius topology combining Chronicle UDM precursors, Silent and Alerting YARA-L detections, Related Cases, MITRE ATT&CK mappings, and Google ADK Agent 3-Tier Triage insights.
+dynamic_results_metadata:
+- result_example_path: resources/map_entity_blast_radius_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: SecOpsSDKEngine
+is_async: false
+name: Map Entity Blast Radius
+parameters:
+- default_value: ''
+  description: Case ID or Chronicle Case identifier to map. If left empty, uses the active SOAR Case context.
+  is_mandatory: false
+  name: Case ID
+  type: string
+- default_value: '48'
+  description: Number of hours prior to case creation / alert time to correlate in Chronicle UDM.
+  is_mandatory: false
+  name: Lookback Hours
+  type: string
+- default_value: true
+  description: If true, correlates unalerted precursor and pivot UDM events in addition to Silent and Alerting YARA-L rules.
+  is_mandatory: false
+  name: Include UDM Precursor Events
+  type: boolean
+- default_value: true
+  description: If true, links active and historical SOAR cases sharing high-signal entities onto the blast radius graph.
+  is_mandatory: false
+  name: Include Related Cases
+  type: boolean
+- default_value: '28'
+  description: Maximum number of entity, rule, and related-case nodes to plot in the topology graph.
+  is_mandatory: false
+  name: Max Nodes
+  type: string
+- default_value: ''
+  description: Optional comma-separated list of SOAR Entity Types (e.g., DESTINATIONURL, FILENAME, PROCESS, ADDRESS, HOSTNAME, USERUNIQNAME) or specific entity identifiers to filter.
+  is_mandatory: false
+  name: Entity Filter
+  type: string
+- default_value: Filter Out (Exclude)
+  description: Determines whether unprefixed entries in Entity Filter are excluded (Filter Out) or strictly required (Filter In).
+  is_mandatory: false
+  name: Entity Filter Mode
+  type: ddl
+  optional_values:
+  - Filter Out (Exclude)
+  - Filter In (Include)
+- default_value: ''
+  description: Optional Google ADK Agent JsonResult payload (e.g. [GoogleADK_Run ADK Agent_1.JsonResult]). If left empty, automatically discovers ADK findings from SOAR Case Context or the Case Wall.
+  is_mandatory: false
+  name: ADK Result JSON
+  type: string
+- default_value: false
+  description: If true, posts a concise Blast Radius footprint summary note to the SOAR Case Wall.
+  is_mandatory: false
+  name: Post Wall Comment
+  type: boolean
+- default_value: ''
+  description: Optional SecOps UI base URL for 1-click Chronicle UDM Search and Case links. If left empty, the HTML widget resolves the active SecOps origin automatically.
+  is_mandatory: false
+  name: SecOps UI Base URL
+  type: string

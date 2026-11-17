@@ -205,6 +205,7 @@ def _analyze_precedents(
     title_prior_case_ids: List[str] = []
     title_closed_count = 0
     title_incident_count = 0
+    precedent_errors: Dict[str, str] = {}
 
     if title:
         try:
@@ -217,8 +218,8 @@ def _analyze_precedents(
                         title_closed_count += 1
                     if c.is_incident:
                         title_incident_count += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            precedent_errors["title_search"] = f"{type(exc).__name__}: {exc}"
 
     # 2. Search prior cases by involved entities in parallel
     entity_precedents: List[EntityPrecedentItem] = []
@@ -259,19 +260,24 @@ def _analyze_precedents(
                             is_frequent=len(prior_ids) >= 3,
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    precedent_errors[f"entity:{ident}"] = f"{type(exc).__name__}: {exc}"
 
     total_entity_matches = sum(ep.prior_case_count for ep in entity_precedents)
     all_repeat_ids: Set[str] = set(title_prior_case_ids)
     for ep in entity_precedents:
         all_repeat_ids.update(ep.recent_case_ids)
 
-    # Determine novelty vs repeat status
-    is_novel = (len(title_prior_case_ids) == 0 and total_entity_matches == 0)
+    precedents_complete = not bool(precedent_errors)
+    # Determine novelty vs repeat status (never claim novelty when precedent search failed)
+    is_novel = precedents_complete and (len(title_prior_case_ids) == 0 and total_entity_matches == 0)
     is_repeat = (len(title_prior_case_ids) > 0 or total_entity_matches > 0)
 
     precedent_notes: List[str] = []
+    if not precedents_complete:
+        precedent_notes.append(
+            f"Precedent search incomplete ({len(precedent_errors)} query error(s)); novelty cannot be confirmed."
+        )
     if title and title_prior_case_ids:
         precedent_notes.append(
             f"Observed {len(title_prior_case_ids)} prior case(s) with matching title "
@@ -299,6 +305,8 @@ def _analyze_precedents(
         is_repeat=is_repeat,
         repeat_case_ids=sorted(list(all_repeat_ids), reverse=True)[:10],
         precedent_notes=precedent_notes,
+        precedents_complete=precedents_complete,
+        precedent_errors=precedent_errors,
     )
 
 
@@ -531,14 +539,18 @@ class GetCaseTimelineWorkflow:
     def execute(self, case_id: str, include_wall: bool = True) -> CaseTimeline:
         inv = self.investigate_workflow.execute(case_id=case_id)
         wall_records = None
+        wall_error: Optional[str] = None
         if include_wall:
             try:
                 from engine.workflows.case_wall import GetCaseWallWorkflow
                 wall_res = GetCaseWallWorkflow(self.adapter).execute(case_id=case_id, limit=30)
                 wall_records = wall_res.records
-            except Exception:
-                pass
-        return build_case_timeline(inv, wall_records=wall_records)
+            except Exception as exc:
+                wall_error = f"{type(exc).__name__}: {exc}"
+        timeline = build_case_timeline(inv, wall_records=wall_records)
+        if wall_error:
+            timeline.provenance["wall_fetch_error"] = wall_error
+        return timeline
 
 
 class CaseTriageWorkflow:
@@ -578,6 +590,7 @@ class CaseTriageWorkflow:
         inv = self.investigate_workflow.execute(clean_case_id)
 
         # Step 2: Gemini AI Case Summary (optional / resilient)
+        step_errors: Dict[str, str] = {}
         gemini_summary: Optional[CaseSummary] = None
         if fetch_summary:
             try:
@@ -586,8 +599,8 @@ class CaseTriageWorkflow:
                     timeout_sec=summary_timeout_sec,
                     poll_interval_sec=2.0,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                step_errors["gemini_summary"] = f"{type(exc).__name__}: {exc}"
 
         # Step 3: Historical Precedent Analysis (optional)
         precedent_summary: Optional[CasePrecedentSummary] = None
@@ -599,8 +612,10 @@ class CaseTriageWorkflow:
                     entities=inv.entities,
                     search_workflow=self.search_workflow,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                step_errors["precedent_search"] = f"{type(exc).__name__}: {exc}"
+        if step_errors:
+            inv.provenance["triage_step_errors"] = dict(step_errors)
 
         # Extract suspicious entities
         suspicious_ents: List[str] = []
@@ -684,45 +699,39 @@ class CaseTriageWorkflow:
 
         # Step 6 & 7: Apply stage update and/or post triage comment if requested
         if apply_stage_update and suggested_stage and not is_closed and suggested_stage != inv.stage:
-            try:
-                self.adapter.update_case(
-                    case_id=clean_case_id,
-                    updates={"stage": suggested_stage},
-                    update_mask="stage",
-                )
-                inv.stage = suggested_stage
-            except Exception:
-                pass
+            self.adapter.update_case(
+                case_id=clean_case_id,
+                updates={"stage": suggested_stage},
+                update_mask="stage",
+            )
+            inv.stage = suggested_stage
 
         if post_comment:
-            try:
-                comment_lines = [
-                    f"### [ASOC Automated Case Triage Assessment]",
-                    f"**Verdict**: `{verdict.value}`",
-                    f"**Summary**: {triage_summary}",
-                    "",
-                ]
-                if precedent_summary and precedent_summary.precedent_notes:
-                    comment_lines.append("**Historical Precedents**:")
-                    for n in precedent_summary.precedent_notes:
-                        comment_lines.append(f"- {n}")
-                    comment_lines.append("")
+            comment_lines = [
+                f"### [ASOC Automated Case Triage Assessment]",
+                f"**Verdict**: `{verdict.value}`",
+                f"**Summary**: {triage_summary}",
+                "",
+            ]
+            if precedent_summary and precedent_summary.precedent_notes:
+                comment_lines.append("**Historical Precedents**:")
+                for n in precedent_summary.precedent_notes:
+                    comment_lines.append(f"- {n}")
+                comment_lines.append("")
 
-                if gemini_summary and gemini_summary.summary:
-                    comment_lines.append(f"**Gemini AI Narrative**: {gemini_summary.summary}")
-                    comment_lines.append("")
+            if gemini_summary and gemini_summary.summary:
+                comment_lines.append(f"**Gemini AI Narrative**: {gemini_summary.summary}")
+                comment_lines.append("")
 
-                if recommended_actions:
-                    comment_lines.append("**Recommended Actions**:")
-                    for act in recommended_actions:
-                        comment_lines.append(f"- {act}")
-                    comment_lines.append("")
+            if recommended_actions:
+                comment_lines.append("**Recommended Actions**:")
+                for act in recommended_actions:
+                    comment_lines.append(f"- {act}")
+                comment_lines.append("")
 
-                comment_lines.append("--- Auto-generated by SecOps Engine SDK ---")
-                comment_payload = "\n".join(comment_lines)
-                self.adapter.create_case_comment(clean_case_id, comment=comment_payload)
-            except Exception:
-                pass
+            comment_lines.append("--- Auto-generated by SecOps Engine SDK ---")
+            comment_payload = "\n".join(comment_lines)
+            self.adapter.create_case_comment(clean_case_id, comment=comment_payload)
 
         is_novel = precedent_summary.is_novel if precedent_summary else False
         is_repeat = precedent_summary.is_repeat if precedent_summary else False

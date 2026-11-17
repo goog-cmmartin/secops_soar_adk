@@ -364,7 +364,8 @@ class GoogleSecOpsAdapter:
             "rawQuery": query,
         }
         res = self._request("GET", path, params=params)
-        return parse_validate_query_response(res, dialect=resolved_dialect, accepted_types=UDM_SEARCH_QUERY_TYPES)
+        accepted = None if resolved_dialect == "DIALECT_SQL" else UDM_SEARCH_QUERY_TYPES
+        return parse_validate_query_response(res, dialect=resolved_dialect, accepted_types=accepted)
 
     def start_search(
         self,
@@ -878,14 +879,55 @@ class GoogleSecOpsAdapter:
             return [res]
         return []
 
-    def get_case(self, case_id: str) -> Dict[str, Any]:
+    def get_case(self, case_id: str, expand: Optional[str] = "tags") -> Dict[str, Any]:
         """Fetches raw case metadata by case ID."""
         case_id_clean = case_id.split("/")[-1]
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}"
-        res = self._request("GET", path)
+        params = {"expand": expand} if expand else None
+        res = self._request("GET", path, params=params)
         if not isinstance(res, dict) or "name" not in res:
             raise RuntimeError(f"Case '{case_id}' not found or invalid response from SecOps.")
         return res
+
+    def add_case_tag(self, case_id: str, tag: str) -> Dict[str, Any]:
+        """Attaches a tag to a SOAR case via the :addTag RPC."""
+        raw_id = str(case_id).strip().split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}:addTag"
+        res = self._request("POST", path, body={"tag": str(tag).strip()})
+        return res if isinstance(res, dict) else {}
+
+    def remove_case_tag(self, case_id: str, tag: str) -> Dict[str, Any]:
+        """Removes a tag from a SOAR case via the :removeTag RPC."""
+        raw_id = str(case_id).strip().split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}:removeTag"
+        res = self._request("POST", path, body={"tag": str(tag).strip()})
+        return res if isinstance(res, dict) else {}
+
+    def merge_cases(
+        self,
+        case_ids: List[Union[str, int]],
+        target_case_id: Union[str, int],
+    ) -> Dict[str, Any]:
+        """Merges multiple SOAR cases into a single target case via the :merge RPC."""
+        cleaned_ids: List[Union[str, int]] = []
+        for cid in case_ids:
+            raw_c = str(cid).strip().split("/")[-1]
+            if raw_c:
+                cleaned_ids.append(int(raw_c) if raw_c.isdigit() else raw_c)
+        raw_target = str(target_case_id).strip().split("/")[-1]
+        target_val: Union[str, int] = int(raw_target) if raw_target.isdigit() else raw_target
+        if target_val not in cleaned_ids:
+            cleaned_ids.insert(0, target_val)
+
+        body = {
+            "casesIds": cleaned_ids,
+            "caseToMergeWith": target_val,
+        }
+        path = f"/v1beta/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases:merge"
+        res = self._request("POST", path, body=body)
+        return res if isinstance(res, dict) else {"result": res}
 
     def update_case(
         self,
@@ -1239,7 +1281,19 @@ class GoogleSecOpsAdapter:
         if not clean_name.startswith("projects/"):
             clean_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/{clean_name}"
         path = f"/v1alpha/{clean_name}/involvedEntities"
-        res = self._request("GET", path)
+        res = self._request("GET", path, params={"pageSize": 1000})
+        if isinstance(res, dict):
+            return res.get("involvedEntities", [])
+        return []
+
+    def list_case_entities(self, case_id: Union[str, int], page_size: int = 1000) -> List[Dict[str, Any]]:
+        """Lists all involved entities across all alerts of a case in a single API call using the '-' caseAlerts wildcard."""
+        clean_case_id = str(case_id).strip().split("/")[-1]
+        path = (
+            f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/"
+            f"cases/{clean_case_id}/caseAlerts/-/involvedEntities"
+        )
+        res = self._request("GET", path, params={"pageSize": min(int(page_size or 1000), 1000)})
         if isinstance(res, dict):
             return res.get("involvedEntities", [])
         return []
@@ -2312,11 +2366,28 @@ class GoogleSecOpsAdapter:
 
         if target_text is None and target_name is not None:
             stripped = target_name.strip()
-            if "\n" in target_name or stripped.startswith("$") or "match:" in target_name or "outcome:" in target_name:
+            upper_stripped = stripped.upper()
+            if (
+                "\n" in target_name
+                or stripped.startswith("$")
+                or "match:" in target_name
+                or "outcome:" in target_name
+                or "|>" in target_name
+                or upper_stripped.startswith(("FROM ", "SELECT ", "WITH "))
+            ):
                 target_text = target_name
                 target_name = None
 
         if target_text:
+            effective_dialect = dialect
+            upper_target = target_text.strip().upper()
+            if effective_dialect == "YL2" and (
+                "|>" in target_text or upper_target.startswith(("FROM ", "SELECT ", "WITH "))
+            ):
+                effective_dialect = "SQL"
+            elif effective_dialect in ("DIALECT_SQL", "SQL"):
+                effective_dialect = "SQL"
+
             if start_time and end_time:
                 input_payload = {
                     "timeWindow": {
@@ -2333,7 +2404,7 @@ class GoogleSecOpsAdapter:
                 }
             query_payload = {
                 "query": target_text,
-                "dialect": dialect,
+                "dialect": effective_dialect,
                 "input": input_payload,
             }
             query_label = "inline_dashboard_query"
@@ -3655,16 +3726,21 @@ class GoogleSecOpsAdapter:
     ) -> Dict[str, Any]:
         """Creates data table rows in bulk in Chronicle SIEM."""
         clean_id = table_name_or_id.split("/")[-1]
-        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}/dataTableRows:bulkCreate"
+        parent = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
+        path = f"/v1alpha/{parent}/dataTableRows:bulkCreate"
         # Each row can be {"values": [...]} or raw list of values
         requests = []
         for r in rows:
-            if isinstance(r, dict) and "values" in r:
-                requests.append({"row": r})
+            if isinstance(r, dict) and "dataTableRow" in r:
+                req_item = dict(r)
+                req_item.setdefault("parent", parent)
+                requests.append(req_item)
+            elif isinstance(r, dict) and "values" in r:
+                requests.append({"parent": parent, "dataTableRow": {"values": [str(v) for v in r["values"]]}})
             elif isinstance(r, (list, tuple)):
-                requests.append({"row": {"values": [str(v) for v in r]}})
+                requests.append({"parent": parent, "dataTableRow": {"values": [str(v) for v in r]}})
             elif isinstance(r, dict):
-                requests.append({"row": r})
+                requests.append({"parent": parent, "dataTableRow": r})
         body = {"requests": requests}
         return self._request("POST", path, body=body)
 

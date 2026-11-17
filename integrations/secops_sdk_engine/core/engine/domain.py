@@ -759,6 +759,13 @@ class SearchSession:
         """True when the server hit its event cap; more events match than it returns."""
         return self.too_many_events
 
+    def raise_for_failure(self) -> "SearchSession":
+        """Raises RuntimeError if this search session ended in LifecycleState.FAILED."""
+        if self.lifecycle == LifecycleState.FAILED:
+            detail = self.error or f"UDM search session {self.session_id or ''} failed".strip()
+            raise RuntimeError(detail)
+        return self
+
     @property
     def aggregates_sampled(self) -> bool:
         """True when timelines/field aggregations cover only the first capped events."""
@@ -1533,10 +1540,24 @@ class CaseInvestigation:
     @property
     def is_incident(self) -> bool:
         return bool(
-            self.raw_case.get("isIncident", False)
+            self.raw_case.get("incident", False)
+            or self.raw_case.get("isIncident", False)
             or self.raw_case.get("is_incident", False)
             or str(self.stage).lower() == "incident"
         )
+
+    @property
+    def tags(self) -> List[str]:
+        raw_tags = self.raw_case.get("tags") or []
+        out: List[str] = []
+        for t in raw_tags:
+            if isinstance(t, str) and t.strip():
+                out.append(t.strip())
+            elif isinstance(t, dict):
+                dn = t.get("displayName") or t.get("tag") or t.get("name")
+                if dn and str(dn).strip():
+                    out.append(str(dn).strip())
+        return out
 
 
 @dataclass
@@ -1729,6 +1750,8 @@ class CasePrecedentSummary:
     is_repeat: bool = False
     repeat_case_ids: List[str] = field(default_factory=list)
     precedent_notes: List[str] = field(default_factory=list)
+    precedents_complete: bool = True
+    precedent_errors: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -1833,6 +1856,7 @@ class CaseAiInvestigationResult:
     extracted_users: List[str] = field(default_factory=list)
     extracted_hashes: List[str] = field(default_factory=list)
     hunt_results: Dict[str, int] = field(default_factory=dict)
+    hunt_errors: Dict[str, str] = field(default_factory=dict)
     primary_alert_id: Optional[str] = None
     incident_marked: bool = False
     alert_escalated: bool = False
@@ -4568,6 +4592,8 @@ class EntityInvestigationReport:
     ioc_matches: List[EnterpriseIocMatch] = field(default_factory=list)
     related_cases: List[Any] = field(default_factory=list)
     entity_summary: Optional[EntitySummaryResult] = None
+    partial: bool = False
+    stage_errors: Dict[str, str] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -5034,6 +5060,7 @@ class DashboardHealthFinding:
     details: str
     remediation_steps: List[str] = field(default_factory=list)
     broken_query_details: List[Dict[str, Any]] = field(default_factory=list)
+    inspection_error: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -5050,6 +5077,7 @@ class DashboardHealthReport(UniversalBatchMixin):
     custom_count: int
     curated_count: int
     findings: List[DashboardHealthFinding] = field(default_factory=list)
+    unknown_count: int = 0
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
@@ -5102,6 +5130,9 @@ class DataTableHealthReport(UniversalBatchMixin):
     stale_count: int
     schema_issue_count: int
     findings: List[DataTableHealthFinding] = field(default_factory=list)
+    unknown_count: int = 0
+    lineage_available: bool = True
+    lineage_error: Optional[str] = None
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
@@ -5777,6 +5808,8 @@ class TimestampIntegrityReport(UniversalBatchMixin):
     top_delayed_log_types: List[TimestampMetricRow] = field(default_factory=list)
     top_skewed_log_types: List[TimestampMetricRow] = field(default_factory=list)
     narrative: str = ""
+    narrative_source: str = "gemini"
+    narrative_error: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
     # Run metadata (not part of the persisted Evidence Fabric document).
     persist_requested: bool = False
@@ -5820,6 +5853,8 @@ class TimestampIntegrityReport(UniversalBatchMixin):
             "top_delayed_log_types": [lt.to_dict() for lt in self.top_delayed_log_types],
             "top_skewed_log_types": [lt.to_dict() for lt in self.top_skewed_log_types],
             "narrative": self.narrative,
+            "narrative_source": self.narrative_source,
+            "narrative_error": self.narrative_error,
         }
         if include_run_metadata:
             data["run_metadata"] = {
@@ -5829,6 +5864,8 @@ class TimestampIntegrityReport(UniversalBatchMixin):
                 "persistence_error": self.persistence_error,
                 "baseline_available": self.baseline_available,
                 "baseline_error": self.baseline_error,
+                "narrative_source": self.narrative_source,
+                "narrative_error": self.narrative_error,
             }
         return data
 
@@ -5893,6 +5930,8 @@ class RuleConflictPair:
     events_overlap: Optional[Dict[str, Any]] = None
     match_overlap: Optional[Dict[str, Any]] = None
     condition_overlap: Optional[Dict[str, Any]] = None
+    narrative_source: str = "gemini"
+    narrative_error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -5913,6 +5952,8 @@ class RuleConflictPair:
             "events_overlap": self.events_overlap,
             "match_overlap": self.match_overlap,
             "condition_overlap": self.condition_overlap,
+            "narrative_source": self.narrative_source,
+            "narrative_error": self.narrative_error,
         }
 
 
@@ -6048,6 +6089,13 @@ class RuleAuditReport(UniversalBatchMixin):
     conflict_count: int = 0
     shadowed_by_curated_count: int = 0
     total_detections_90d: int = 0
+    unknown_count: int = 0
+    telemetry_available: bool = True
+    telemetry_error: Optional[str] = None
+    deployments_available: bool = True
+    deployments_error: Optional[str] = None
+    errors_available: bool = True
+    errors_error: Optional[str] = None
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     provenance: Optional[Provenance] = None
 
@@ -6069,6 +6117,13 @@ class RuleAuditReport(UniversalBatchMixin):
             "conflict_count": self.conflict_count,
             "shadowed_by_curated_count": self.shadowed_by_curated_count,
             "total_detections_90d": self.total_detections_90d,
+            "unknown_count": self.unknown_count,
+            "telemetry_available": self.telemetry_available,
+            "telemetry_error": self.telemetry_error,
+            "deployments_available": self.deployments_available,
+            "deployments_error": self.deployments_error,
+            "errors_available": self.errors_available,
+            "errors_error": self.errors_error,
             "findings": [f.to_dict() for f in self.findings],
             "generated_at": self.generated_at.isoformat() if isinstance(self.generated_at, datetime) else str(self.generated_at),
             "provenance": self.provenance.to_dict() if self.provenance else None,

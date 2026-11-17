@@ -13,7 +13,10 @@ import json
 import logging
 import uuid
 import functools
-from typing import Any, Dict, List, Optional, Tuple
+import warnings
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Set up virtual namespace shims for flattened SOAR execution environment
 def _setup_secops_shims():
@@ -160,11 +163,17 @@ class GoogleADKManager:
             except Exception:
                 pass
 
-        # Models such as gemini-3.8-flash, gemini-3.7-flash, and gemini-4-argon are hosted on Vertex AI's global endpoint.
+        # Models such as gemini-3.8-flash, gemini-3.7-flash, gemini-4-argon, and gemini-4-hydrogen are hosted on Vertex AI's global endpoint.
         # SecOps SOAR instance regions ("us", "europe") do not map to Vertex regional endpoints.
-        global_models = {"gemini-3.8-flash", "gemini-3.7-flash", "gemini-4-argon", "gemini-4"}
+        global_models = {"gemini-3.8-flash", "gemini-3.7-flash", "gemini-4-argon", "gemini-4-hydrogen", "gemini-4"}
+        model_lower = str(self.model_name or "").strip().lower()
         loc_str = str(location or "").strip().lower()
-        if self.model_name in global_models or loc_str in ("us", "americas", "global", ""):
+        if (
+            model_lower in global_models
+            or model_lower.startswith("gemini-3")
+            or model_lower.startswith("gemini-4")
+            or loc_str in ("us", "americas", "global", "")
+        ):
             self.location = "global"
         else:
             self.location = location or "global"
@@ -210,7 +219,9 @@ class GoogleADKManager:
             try:
                 import google.auth
                 from google.auth import impersonated_credentials
-                source_creds, _ = google.auth.default(scopes=scopes)
+                source_creds, default_project = google.auth.default(scopes=scopes)
+                if not self.project_id and default_project:
+                    self.project_id = default_project
                 self._credentials = impersonated_credentials.Credentials(
                     source_credentials=source_creds,
                     target_principal=self.workload_identity_email,
@@ -256,7 +267,9 @@ class GoogleADKManager:
         # 3. Application Default Credentials (ADC)
         try:
             import google.auth
-            creds, _ = google.auth.default(scopes=scopes)
+            creds, default_project = google.auth.default(scopes=scopes)
+            if not self.project_id and default_project:
+                self.project_id = default_project
             self._credentials = creds
             return self._credentials
         except Exception as e:
@@ -330,7 +343,7 @@ class GoogleADKManager:
         """
         target_url = mcp_url or "https://us-chronicle.googleapis.com/mcp"
         target_proj = user_project or self.project_id
-        target_cust = customer_id or "a556547c-1cff-43ef-a2e4-cf5b12a865df"
+        target_cust = customer_id or os.environ.get("SECOPS_CUSTOMER_ID") or ""
         target_region = region or self.location or "us"
         if target_region.startswith("us-"):
             target_region = "us"
@@ -346,6 +359,7 @@ class GoogleADKManager:
                 arguments: Dictionary containing parameters for the tool.
             """
             args = dict(arguments) if arguments else {}
+            raw_args = dict(args)
             # Normalize snake_case keys to camelCase for SecOps tools
             key_aliases = {
                 "case_id": "caseId",
@@ -393,7 +407,12 @@ class GoogleADKManager:
                     import inspect
                     target_fn = tool_dict[tool_name]
                     sig = inspect.signature(target_fn)
-                    valid_kwargs = {k: v for k, v in args.items() if k in sig.parameters}
+                    combined_args = {**args, **raw_args}
+                    reverse_aliases = {v: k for k, v in key_aliases.items()}
+                    for c_key, s_key in reverse_aliases.items():
+                        if c_key in combined_args and s_key not in combined_args:
+                            combined_args[s_key] = combined_args[c_key]
+                    valid_kwargs = {k: v for k, v in combined_args.items() if k in sig.parameters}
                     return target_fn(**valid_kwargs)
 
             # Auto-inject default SecOps parameters if omitted
@@ -467,12 +486,12 @@ class GoogleADKManager:
         non-alerting (silent) detection discovery, and raw UDM event searches.
 
         Exposes 3 high-impact tools:
-          1. correlate_silent_detections(case_id: str, lookback_hours: int = 168)
+          1. correlate_silent_detections(case_id: str, lookback_hours: int = 48)
           2. search_udm_events(query: str, start_time: str, end_time: str, include_detections: bool = True, receive_limit: int = 25)
           3. get_detection_rule(rule_id: str)
         """
-        target_project = project_id or self.project_id or "sdl-preview-americas"
-        target_customer = customer_id or os.environ.get("SECOPS_CUSTOMER_ID") or "a556547c-1cff-43ef-a2e4-cf5b12a865df"
+        target_project = project_id or self.project_id or os.environ.get("GCP_PROJECT_ID") or ""
+        target_customer = customer_id or os.environ.get("SECOPS_CUSTOMER_ID") or ""
         target_region = (region or self.location or "us").lower()
         if target_region in ("global", "americas", ""):
             target_region = "us"
@@ -515,12 +534,13 @@ class GoogleADKManager:
         cred_provider = ADKCredentialProvider()
         adapter = GoogleSecOpsAdapter(config=config, credential_provider=cred_provider)
         engine = SecOpsEngine(adapter=adapter)
+        self.secops_engine = engine
         correlate_wf = CorrelateSilentDetectionsWorkflow(adapter=adapter)
         search_wf = SearchUDMWorkflow(adapter=adapter)
 
         def correlate_silent_detections(
             case_id: str,
-            lookback_hours: int = 168,
+            lookback_hours: int = 48,
             attach_to_case: bool = False,
             post_wall_comment: bool = False,
         ) -> dict:
@@ -532,21 +552,23 @@ class GoogleADKManager:
 
             Args:
                 case_id: The numeric SOAR case identifier (e.g. '108618').
-                lookback_hours: Lookback window in hours to correlate (default 168, i.e. 7 days).
-                attach_to_case: If True, attaches discovered unattached detections and delta entities to the SOAR case.
-                post_wall_comment: If True, posts a Markdown correlation summary to the SOAR Case Wall.
+                lookback_hours: Lookback window in hours to correlate (default 48, i.e. 2 days).
+                attach_to_case: If True, attaches discovered unattached detections and corroborated detection entities to the SOAR case.
+                post_wall_comment: Deprecated/ignored in agent tool calls to prevent duplicate Case Wall comments (the ADK agent posts its own unified Stage 5 Triage Report).
             """
             try:
                 res = correlate_wf.execute(
                     case_id=str(case_id),
-                    lookback_hours=int(lookback_hours or 168),
+                    lookback_hours=int(lookback_hours or 48),
                     attach_to_case=bool(attach_to_case),
                     attach_entities=bool(attach_to_case),
-                    post_wall_comment=bool(post_wall_comment),
+                    extract_entities_from_events=False,
+                    post_wall_comment=False,
                     correlate_detections=True,
                     correlate_udm_events=True,
                 )
                 raw_meta = res.raw if isinstance(res.raw, dict) else {}
+                attached_ents = getattr(res, "attached_entities", []) or []
                 output = {
                     "case_id": res.case_id,
                     "lookback_hours": res.lookback_hours,
@@ -557,13 +579,20 @@ class GoogleADKManager:
                     "detections_found": res.detections_found,
                     "events_found": res.events_found[:25],
                     "total_events_scanned": len(res.events_found),
-                    "attached_count": res.attached_count,
-                    "entities_attached_count": res.entities_attached_count,
-                    "comment_posted": res.comment_posted,
+                    "attached_count": getattr(res, "attached_evidence_count", getattr(res, "attached_count", 0)),
+                    "entities_attached_count": getattr(res, "entities_attached_count", len(attached_ents)),
+                    "attached_entities": attached_ents,
+                    "prior_detections_count": raw_meta.get("prior_detections_count"),
+                    "delta_detections_count": raw_meta.get("delta_detections_count", 0),
+                    "recommended_detection_tags": raw_meta.get("recommended_detection_tags", []),
+                    "comment_posted": getattr(res, "comment_posted", False),
                     "summary": (
-                        f"Found {len(res.detections_found)} silent detections and "
+                        f"Found {len(res.detections_found)} silent detections "
+                        f"(delta vs prior comments: +{raw_meta.get('delta_detections_count', 0)}), "
+                        f"{len(attached_ents)} newly attached delta entities, and "
                         f"{len(res.events_found)} matching UDM events across "
-                        f"{len(res.entities_searched)} entities for Case {res.case_id}."
+                        f"{len(res.entities_searched)} entities for Case {res.case_id}. "
+                        f"Recommended detection tags: {raw_meta.get('recommended_detection_tags', [])}"
                     ),
                 }
                 return prune_deep_object(output, max_depth=8)
@@ -648,6 +677,120 @@ class GoogleADKManager:
             except Exception as err:
                 return {"error": str(err), "filter_query": filter_query}
 
+        def validate_udm_sql(sql_query: str) -> dict:
+            """
+            Validates a GoogleSQL or GoogleSQL Pipe Syntax (`|>`) query against the Chronicle UDM
+            query compiler (`:validateQuery` with `dialect="DIALECT_SQL"`).
+
+            GoogleSQL / Pipe Syntax Engine Invariants (`secops-nl2sql`):
+              1. Start pipe queries with `FROM events` followed by `|> WHERE ...` and `|> AGGREGATE ...`.
+              2. Filter empty proto strings with `NULLIF(col, '') IS NOT NULL` (proto3 strings default to `""`).
+              3. Access repeated proto fields safely using `ARRAY_LENGTH(arr) > 0` or `[SAFE_OFFSET(0)]`, or `UNNEST(...)`.
+              4. Every expression in `|> EXTEND`, `|> AGGREGATE`, and `GROUP BY` MUST have an explicit `AS alias`
+                 (e.g. `|> AGGREGATE COUNT(1) AS event_count GROUP BY principal.hostname AS host`).
+              5. NEVER use `PROTO` as a column alias (it is a reserved keyword in GoogleSQL; use `network_protocol` instead).
+              6. Event timestamps are structs: use `TIMESTAMP_SECONDS(metadata.event_timestamp.seconds)` when doing timestamp math.
+
+            Args:
+                sql_query: The GoogleSQL or Pipe Syntax (`|>`) query string to validate.
+            """
+            try:
+                val_res = adapter.validate_query(str(sql_query).strip(), dialect="DIALECT_SQL")
+                return {
+                    "valid": bool(val_res.valid),
+                    "dialect": val_res.dialect,
+                    "query_type": val_res.raw_query_type,
+                    "error_text": getattr(val_res, "error_message", None) or getattr(val_res, "error_text", None),
+                    "error_type": val_res.error_type,
+                    "error_position": getattr(val_res, "error_position", None),
+                }
+            except Exception as err:
+                return {"valid": False, "error": str(err), "sql_query": sql_query}
+
+        def query_udm_sql(
+            sql_query: str,
+            lookback_hours: int = 168,
+            start_time: Optional[str] = None,
+            end_time: Optional[str] = None,
+        ) -> dict:
+            """
+            Validates and executes a token-efficient GoogleSQL or GoogleSQL Pipe Syntax (`|>`) analytical
+            query over Chronicle UDM telemetry (`events`), returning compact tabular rows and columns.
+
+            PREFER THIS TOOL over raw `search_udm_events` whenever summarizing entity activity, process trees,
+            network connections, authentication counts, or command lines across a lookback window.
+
+            GoogleSQL / Pipe Syntax Engine Invariants (`secops-nl2sql`):
+              - Example Pipe Query:
+                ```sql
+                FROM events
+                |> WHERE principal.hostname = "ws-fin-042" OR target.hostname = "ws-fin-042"
+                |> WHERE NULLIF(target.process.command_line, '') IS NOT NULL
+                |> AGGREGATE COUNT(1) AS exec_count,
+                              MIN(TIMESTAMP_SECONDS(metadata.event_timestamp.seconds)) AS first_seen,
+                             MAX(TIMESTAMP_SECONDS(metadata.event_timestamp.seconds)) AS last_seen
+                   GROUP BY metadata.event_type AS event_type,
+                            principal.user.userid AS user_id,
+                            target.process.file.full_path AS process_path,
+                            target.process.command_line AS command_line
+                |> ORDER BY exec_count DESC
+                |> LIMIT 25
+                ```
+              - Every expression in `|> EXTEND`, `|> AGGREGATE`, and `GROUP BY` MUST have an `AS alias`.
+              - Use `NULLIF(field, '')` instead of `IS NOT NULL` for string filters (proto3 defaults to `""`).
+              - Access repeated fields via `[SAFE_OFFSET(0)]` (e.g., `principal.ip[SAFE_OFFSET(0)] AS src_ip`).
+              - Never use `PROTO` as an alias (reserved keyword).
+
+            Args:
+                sql_query: GoogleSQL or Pipe Syntax (`FROM events |> ...`) query string.
+                lookback_hours: Relative lookback window in hours if start_time/end_time are omitted (default 168 = 7d).
+                start_time: Optional ISO-8601 UTC start time (e.g. '2026-10-24T00:00:00Z').
+                end_time: Optional ISO-8601 UTC end time (e.g. '2026-10-31T23:59:59Z').
+            """
+            try:
+                cleaned_sql = str(sql_query).strip()
+                val_res = adapter.validate_query(cleaned_sql, dialect="DIALECT_SQL")
+                if not val_res.valid:
+                    err_msg = getattr(val_res, "error_message", None) or getattr(val_res, "error_text", None)
+                    return {
+                        "valid": False,
+                        "error": err_msg or "SQL query failed Chronicle validation.",
+                        "error_type": val_res.error_type,
+                        "error_position": getattr(val_res, "error_position", None),
+                        "sql_query": cleaned_sql,
+                    }
+
+                hours = max(1, int(lookback_hours or 168))
+                if hours % 24 == 0 and hours >= 24:
+                    t_unit = "DAY"
+                    t_val = str(hours // 24)
+                else:
+                    t_unit = "HOUR"
+                    t_val = str(hours)
+
+                res = adapter.execute_dashboard_query(
+                    query_text=cleaned_sql,
+                    dialect="SQL",
+                    time_unit=t_unit,
+                    time_value=t_val,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+                return prune_deep_object(
+                    {
+                        "valid": True,
+                        "dialect": "SQL",
+                        "columns": res.columns,
+                        "rows": res.rows[:100],
+                        "total_rows": res.total_rows,
+                        "time_window": res.time_window,
+                    },
+                    max_depth=7,
+                )
+            except Exception as err:
+                manager_ref.logger.error(f"Error in query_udm_sql: {err}")
+                return {"error": str(err), "sql_query": sql_query}
+
         def investigate_entity(
             indicator: str,
             max_events: int = 25,
@@ -721,6 +864,52 @@ class GoogleADKManager:
             except Exception as err:
                 return {"error": str(err)}
 
+        def tune_case_detections(
+            case_id: Optional[str] = None,
+            rule_id: Optional[str] = None,
+            lookback_days: int = 14,
+            apply_tuning: bool = False,
+            ttl_days: int = 30,
+            post_wall_comment: bool = True,
+        ) -> dict:
+            """
+            Synthesizes multi-factor false-positive exclusions for a SOAR Case (and/or SIEM rule_id),
+            verifies them against the YARA-L compiler or Curated Findings Refinement dry-run API,
+            logs the proposal to 'asoc_detection_tuning' with a 30-day TTL, and optionally applies
+            the Curated Findings Refinement live when apply_tuning=True or tag 'Tune:Approve' is present.
+            """
+            try:
+                res = engine.tune_case_detections(
+                    case_id=case_id,
+                    rule_id=rule_id,
+                    lookback_days=int(lookback_days or 14),
+                    apply_tuning=bool(apply_tuning),
+                    ttl_days=int(ttl_days or 30),
+                    record_to_data_table=True,
+                    post_wall_comment=bool(post_wall_comment),
+                )
+                return prune_deep_object(res, max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def sync_detection_tuning_dashboard(
+            dashboard_title: str = "Detection Tuning & FP Reduction Command Center",
+            lookback_days: int = 7,
+        ) -> dict:
+            """
+            Creates or refreshes the 'Detection Tuning & FP Reduction Command Center' Native Dashboard
+            in Google SecOps with live 7d RULE_DETECTIONS KPIs, AI multi-factor tuning proposals,
+            and the 'asoc_detection_tuning' + Curated Findings Refinements governance ledger.
+            """
+            try:
+                res = engine.sync_detection_tuning_dashboard(
+                    dashboard_title=dashboard_title or "Detection Tuning & FP Reduction Command Center",
+                    lookback_days=int(lookback_days or 7),
+                )
+                return prune_deep_object(res, max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
         def list_soar_cases(
             status: Optional[str] = "OPENED",
             priorities: Optional[str] = None,
@@ -750,11 +939,14 @@ class GoogleADKManager:
 
         def investigate_soar_case(case_id: str) -> dict:
             """
-            Retrieves full SOAR case details, alerts, involved entities, and comments for a given case_id.
+            Retrieves full SOAR case details, existing case tags, alerts, involved entities, and comments for a given case_id.
             """
             try:
                 inv = engine.investigate_case(case_id=str(case_id).strip())
-                return prune_deep_object(inv.to_dict() if hasattr(inv, "to_dict") else inv.__dict__, max_depth=7)
+                payload = {k: v for k, v in (inv.to_dict() if hasattr(inv, "to_dict") else dict(inv.__dict__)).items() if k != "raw"}
+                payload["tags"] = inv.tags if hasattr(inv, "tags") else []
+                payload["is_incident"] = inv.is_incident if hasattr(inv, "is_incident") else False
+                return prune_deep_object(payload, max_depth=7)
             except Exception as err:
                 return {"error": str(err), "case_id": case_id}
 
@@ -766,12 +958,13 @@ class GoogleADKManager:
             except Exception as err:
                 return {"error": str(err), "case_id": case_id}
 
-        def list_soar_case_comments(case_id: str) -> dict:
+        def list_soar_case_comments(case_id: str, limit: int = 25) -> dict:
             """Lists comments from the SOAR Case Wall for the specified case_id."""
             try:
                 comments = engine.list_case_comments(case_id=str(case_id).strip())
+                lim = max(1, min(int(limit or 25), 50))
                 return prune_deep_object(
-                    {"case_id": str(case_id), "comments": [c.to_dict() if hasattr(c, "to_dict") else c.__dict__ for c in comments[:25]]},
+                    {"case_id": str(case_id), "comments": [c.to_dict() if hasattr(c, "to_dict") else c.__dict__ for c in comments[:lim]]},
                     max_depth=6,
                 )
             except Exception as err:
@@ -784,7 +977,11 @@ class GoogleADKManager:
             assignee: Optional[str] = None,
             incident: Optional[bool] = None,
         ) -> dict:
-            """Updates a SOAR case's priority, stage, assignee, or incident status."""
+            """
+            Updates a SOAR case's priority ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'),
+            stage ('Triage', 'Assessment', 'Investigation', 'Incident', 'Improvement', 'Research', 'Preclose'),
+            assignee, or incident boolean flag.
+            """
             try:
                 res = engine.update_case(
                     case_id=str(case_id).strip(),
@@ -796,6 +993,108 @@ class GoogleADKManager:
                 return prune_deep_object(res.to_dict() if hasattr(res, "to_dict") else res.__dict__, max_depth=5)
             except Exception as err:
                 return {"error": str(err), "case_id": case_id}
+
+        def update_case_alert(
+            case_id: str,
+            alert_id: str = "ALL",
+            status: Optional[str] = None,
+            priority: Optional[str] = None,
+        ) -> dict:
+            """
+            Updates one, multiple, or ALL SOAR Case Alerts' status and/or priority in a single call.
+
+            Args:
+                case_id: The numeric SOAR case ID (e.g. '108671').
+                alert_id: Pass 'ALL' (default) to update all alerts in the case in one call, a comma-separated list of alert IDs (e.g. '411732,411733'), or a single alert identifier/resource name.
+                status: Target alert status: 'OPEN' or 'CLOSE' (also accepts 'CLOSED' which normalizes to 'CLOSE').
+                priority: Target alert priority: 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', or 'INFO'.
+            """
+            try:
+                clean_case_id = str(case_id).strip()
+                raw_aid = str(alert_id or "ALL").strip()
+                if raw_aid.upper() in ("ALL", "*"):
+                    alerts_raw = adapter.list_case_alerts(case_id=clean_case_id)
+                    target_ids = [
+                        str(a.get("name", "")).split("/")[-1] or str(a.get("id", ""))
+                        for a in alerts_raw
+                        if isinstance(a, dict) and (a.get("name") or a.get("id"))
+                    ]
+                else:
+                    target_ids = [x.strip() for x in raw_aid.split(",") if x.strip()]
+
+                updated = []
+                for tid in target_ids:
+                    res = engine.update_case_alert(
+                        case_id=clean_case_id,
+                        alert_id=tid,
+                        priority=priority,
+                        status=status,
+                    )
+                    updated.append(res.to_dict() if hasattr(res, "to_dict") else res.__dict__)
+                if len(updated) == 1 and raw_aid.upper() not in ("ALL", "*"):
+                    return prune_deep_object(updated[0], max_depth=5)
+                return prune_deep_object(
+                    {"case_id": clean_case_id, "updated_count": len(updated), "alerts": updated},
+                    max_depth=6,
+                )
+            except Exception as err:
+                return {"error": str(err), "case_id": case_id, "alert_id": alert_id}
+
+        def add_soar_case_tag(case_id: str, tags: str) -> dict:
+            """
+            Attaches one or more standardized tags (from the `soc_case_tag_taxonomy` Data Table) to a SOAR Case.
+
+            Args:
+                case_id: The numeric SOAR case ID (e.g. '108671').
+                tags: Comma-separated tag strings to attach (e.g. 'Tier1:Triaged,Verdict:BTP,Disp:PolicyViolation').
+            """
+            try:
+                tag_list = [t.strip() for t in str(tags or "").split(",") if t.strip()]
+                if "Tier1:Triaged" in tag_list:
+                    tag_list = ["Tier1:Triaged"] + [t for t in tag_list if t != "Tier1:Triaged"]
+                res = engine.add_case_tag(case_id=str(case_id).strip(), tags=tag_list)
+                return prune_deep_object(res, max_depth=5)
+            except Exception as err:
+                return {"error": str(err), "case_id": case_id, "tags": tags}
+
+        def remove_soar_case_tag(case_id: str, tags: str) -> dict:
+            """
+            Removes one or more tags from a SOAR Case.
+
+            Args:
+                case_id: The numeric SOAR case ID (e.g. '108671').
+                tags: Comma-separated tag strings to remove.
+            """
+            try:
+                res = engine.remove_case_tag(case_id=str(case_id).strip(), tags=tags)
+                return prune_deep_object(res, max_depth=5)
+            except Exception as err:
+                return {"error": str(err), "case_id": case_id, "tags": tags}
+
+        def get_soc_triage_sop() -> dict:
+            """
+            Retrieves both the `soc_triage_sop_matrix` (3-Tier Verdict & Disposition to Alert Status, Priority,
+            Case Stage, Incident flag, Required Tags, and COA steps) and `soc_case_tag_taxonomy` Data Tables
+            in a single call.
+            """
+            try:
+                sop_batch = engine.list_data_table_rows(table_name_or_id="soc_triage_sop_matrix", page_size=50)
+                tag_batch = engine.list_data_table_rows(table_name_or_id="soc_case_tag_taxonomy", page_size=50)
+                return prune_deep_object(
+                    {
+                        "soc_triage_sop_matrix": [r.values for r in sop_batch.rows],
+                        "soc_triage_sop_columns": [
+                            "sop_id", "level1_verdict", "level2_disposition", "default_confidence",
+                            "alert_status", "alert_priority", "case_stage", "mark_incident",
+                            "required_tags", "coa_summary",
+                        ],
+                        "soc_case_tag_taxonomy": [r.values for r in tag_batch.rows],
+                        "soc_case_tag_columns": ["tag_name", "category", "apply_condition", "description"],
+                    },
+                    max_depth=6,
+                )
+            except Exception as err:
+                return {"error": str(err)}
 
         def list_data_tables(limit: int = 50) -> dict:
             """Lists Google SecOps Data Tables in the tenant."""
@@ -1049,6 +1348,53 @@ class GoogleADKManager:
             except Exception as err:
                 return {"error": str(err), "dashboard_name": effective_name}
 
+        def group_cases_by_entity(
+            environments: Optional[str] = "Default Environment",
+            lookback_hours: int = 24,
+            grouping_window_hours: int = 24,
+            min_shared_entities: int = 1,
+            max_cases: int = 100,
+            max_distinct_hosts_per_case: int = 1,
+            include_enriched_entities: bool = False,
+            require_shared_host_when_both_have_hosts: bool = True,
+            dry_run: bool = True,
+            post_wall_comment: bool = True,
+            trigger_correlation_tag: bool = True,
+            target_case_ids: Optional[str] = None,
+        ) -> dict:
+            """
+            Scans open SOAR cases within `lookback_hours`, extracts high-signal alert entities (`HOSTNAME`, `IP`,
+            non-generic `USER`, non-generic `FILEHASH`), filters out multi-host magnet cases (`> max_distinct_hosts_per_case`
+            distinct hostnames), groups cases sharing at least `min_shared_entities` within `grouping_window_hours`,
+            and either returns a Dry-Run merge plan (`dry_run=True`) or executes `POST .../cases:merge` (`dry_run=False`).
+            """
+            if isinstance(environments, str):
+                env_list = [e.strip() for e in environments.split(",") if e.strip()] or None
+            else:
+                env_list = environments
+            if isinstance(target_case_ids, str):
+                tid_list = [t.strip() for t in target_case_ids.split(",") if t.strip()] or None
+            else:
+                tid_list = target_case_ids
+            try:
+                res = engine.group_cases_by_entity(
+                    environments=env_list,
+                    lookback_hours=int(lookback_hours or 24),
+                    grouping_window_hours=int(grouping_window_hours or 24),
+                    min_shared_entities=int(min_shared_entities or 1),
+                    max_cases=int(max_cases or 100),
+                    max_distinct_hosts_per_case=int(max_distinct_hosts_per_case or 1),
+                    include_enriched_entities=bool(include_enriched_entities),
+                    require_shared_host_when_both_have_hosts=bool(require_shared_host_when_both_have_hosts),
+                    dry_run=bool(dry_run),
+                    post_wall_comment=bool(post_wall_comment),
+                    trigger_correlation_tag=bool(trigger_correlation_tag),
+                    target_case_ids=tid_list,
+                )
+                return prune_deep_object(res, max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
         def remove_dashboard_chart(dashboard_id: str, chart_id: str) -> dict:
             """Removes a chart widget from a Native Dashboard."""
             try:
@@ -1110,19 +1456,197 @@ class GoogleADKManager:
             except Exception as err:
                 return {"error": str(err)}
 
+        def _to_plain_dict(obj: Any) -> Any:
+            import dataclasses
+            if hasattr(obj, "to_dict"):
+                return obj.to_dict()
+            if dataclasses.is_dataclass(obj):
+                return dataclasses.asdict(obj)
+            if hasattr(obj, "__dict__"):
+                return obj.__dict__
+            return obj
+
+        def run_platform_health_check(
+            lookback_days: int = 7,
+            sync_data_table: bool = True,
+            sync_dashboard: bool = True,
+            data_table_name: str = "secops_platform_health_ledger",
+            dashboard_title: str = "SecOps Platform Health & Operations Center",
+            dashboard_id: Optional[str] = None,
+            ai_executive_summary: Optional[str] = None,
+            include_cloud_logging: bool = True,
+        ) -> dict:
+            """
+            Executes the 7-Pillar SecOps Platform Health Check Agent:
+              1. SOAR Playbook Failures & Queue Latency (`PLAYBOOK` native telemetry + fragile step inspection)
+              2. YARA-L & Curated Detection Rule Errors (`ruleExecutionErrors` + high execution latency)
+              3. CBN Parser Errors & Unparsed Log Drops (`logTypeMetrics` + parser state audit)
+              4. Ingestion Data Feed Failures (`feedMetrics` + feed status)
+              5. SOAR Scheduled Jobs & Remote Agents (`list_job_instances` + `list_remote_agents`)
+              6. Ingestion Timestamp Skew & Pipeline Latency (`audit_timestamp_integrity`)
+              7. Google Cloud Logging Operational Errors (`chronicle.googleapis.com` ERROR/CRITICAL logs)
+            Reconciles active and historical findings into the Chronicle Data Table `secops_platform_health_ledger`
+            with state transitions (`NEW`, `RECURRING`, `RESOLVED`, `occurrence_count`) and publishes/updates the
+            9-tile `SecOps Platform Health & Operations Center` Native Dashboard.
+            """
+            try:
+                res = engine.run_platform_health_check(
+                    lookback_days=int(lookback_days or 7),
+                    sync_data_table=bool(sync_data_table),
+                    sync_dashboard=bool(sync_dashboard),
+                    data_table_name=str(data_table_name or "secops_platform_health_ledger").strip(),
+                    dashboard_title=str(dashboard_title or "SecOps Platform Health & Operations Center").strip(),
+                    dashboard_id=dashboard_id,
+                    ai_executive_summary=ai_executive_summary,
+                    include_cloud_logging=bool(include_cloud_logging),
+                )
+                return prune_deep_object(res, max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def sync_platform_health_dashboard(
+            lookback_days: int = 7,
+            sync_data_table: bool = True,
+            data_table_name: str = "secops_platform_health_ledger",
+            dashboard_title: str = "SecOps Platform Health & Operations Center",
+            dashboard_id: Optional[str] = None,
+            ai_executive_summary: Optional[str] = None,
+            include_cloud_logging: bool = True,
+        ) -> dict:
+            """Alias for `run_platform_health_check` that audits all 7 SecOps health pillars, reconciles the Data Table ledger, and updates the `SecOps Platform Health & Operations Center` Native Dashboard."""
+            return run_platform_health_check(
+                lookback_days=lookback_days,
+                sync_data_table=sync_data_table,
+                sync_dashboard=True,
+                data_table_name=data_table_name,
+                dashboard_title=dashboard_title,
+                dashboard_id=dashboard_id,
+                ai_executive_summary=ai_executive_summary,
+                include_cloud_logging=include_cloud_logging,
+            )
+
+        def audit_rule_health(
+            include_curated: bool = True,
+            latency_threshold_min: float = 30.0,
+            error_lookback_days: int = 7,
+        ) -> dict:
+            """Audits custom YARA-L and Google Curated Detection rules for runtime execution errors (`ruleExecutionErrors`), high execution latency, and alerting misconfigurations."""
+            try:
+                rep = engine.audit_rule_health(
+                    include_curated=bool(include_curated),
+                    latency_threshold_min=float(latency_threshold_min or 30.0),
+                    error_lookback_days=int(error_lookback_days) if error_lookback_days else None,
+                )
+                return prune_deep_object(_to_plain_dict(rep), max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def list_rule_errors(
+            rule_id_or_name: Optional[str] = None,
+            max_results: int = 50,
+        ) -> dict:
+            """Lists runtime and compilation execution errors (`ruleExecutionErrors`) across custom YARA-L and Curated Detection rules."""
+            try:
+                res = engine.list_rule_errors(
+                    rule_id_or_name=rule_id_or_name,
+                    page_size=min(int(max_results or 50), 100),
+                    max_results=min(int(max_results or 50), 100),
+                )
+                return prune_deep_object(_to_plain_dict(res), max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def audit_parser_health(lookback_days: int = 7) -> dict:
+            """Audits all configured CBN parsers and parser extensions for failed log drops, irregular parsing rates, and custom parser version drift."""
+            try:
+                rep = engine.audit_parser_health(lookback_days=int(lookback_days or 7))
+                return prune_deep_object(_to_plain_dict(rep), max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def diagnose_unparsed_logs(
+            log_type: str,
+            lookback_hours: int = 168,
+            limit: int = 5,
+        ) -> dict:
+            """Finds unparsed raw logs for a specific `log_type` and dry-runs them against the active CBN parser to pinpoint exact Logstash filter failure errors."""
+            try:
+                rep = engine.diagnose_unparsed_logs(
+                    log_type=str(log_type).strip().upper(),
+                    lookback_hours=int(lookback_hours or 168),
+                    limit=min(int(limit or 5), 20),
+                )
+                return prune_deep_object(_to_plain_dict(rep), max_depth=6)
+            except Exception as err:
+                return {"error": str(err), "log_type": log_type}
+
+        def audit_feed_health(lookback_days: int = 7) -> dict:
+            """Audits push/pull Chronicle Data Feeds against Health Hub telemetry for transport errors, silent feeds, and stalled ingestion."""
+            try:
+                rep = engine.audit_feed_health(lookback_days=int(lookback_days or 7))
+                return prune_deep_object(_to_plain_dict(rep), max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def audit_timestamp_integrity(days: int = 7) -> dict:
+            """Audits log sources for ingestion pipeline lag (`ingestion_timestamp` vs `event_timestamp`) and NTP clock skew."""
+            try:
+                rep = engine.audit_timestamp_integrity(days=int(days or 7), persist=False)
+                return prune_deep_object(_to_plain_dict(rep), max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def query_secops_errors(
+            hours: int = 24,
+            component: Optional[str] = None,
+            page_size: int = 50,
+        ) -> dict:
+            """Queries Google Cloud Logging (`chronicle.googleapis.com`) for SecOps operational ERROR/CRITICAL logs across parsers, feeds, rules, or forwarders."""
+            try:
+                res = engine.query_secops_errors(
+                    hours=int(hours or 24),
+                    component=component,
+                    page_size=min(int(page_size or 50), 100),
+                )
+                return prune_deep_object(_to_plain_dict(res), max_depth=6)
+            except Exception as err:
+                return {"error": str(err)}
+
+        def query_cloud_logging(
+            filter_str: str,
+            page_size: int = 50,
+        ) -> dict:
+            """Executes a raw Google Cloud Logging filter query (e.g., `resource.type=\"chronicle.googleapis.com/Instance\" AND severity>=ERROR`) against the project."""
+            try:
+                res = engine.query_cloud_logging(
+                    filter_str=str(filter_str).strip(),
+                    page_size=min(int(page_size or 50), 100),
+                )
+                return prune_deep_object(_to_plain_dict(res), max_depth=6)
+            except Exception as err:
+                return {"error": str(err), "filter_str": filter_str}
+
         return [
             correlate_silent_detections,
             search_udm_events,
             aggregate_udm_events,
+            validate_udm_sql,
+            query_udm_sql,
             investigate_entity,
             get_detection_rule,
             list_detection_rules,
             find_top_noisy_rules,
+            tune_case_detections,
+            sync_detection_tuning_dashboard,
             list_soar_cases,
             investigate_soar_case,
             add_soar_case_comment,
             list_soar_case_comments,
             update_soar_case,
+            update_case_alert,
+            add_soar_case_tag,
+            remove_soar_case_tag,
+            get_soc_triage_sop,
             list_data_tables,
             get_data_table,
             create_data_table,
@@ -1140,10 +1664,21 @@ class GoogleADKManager:
             remove_dashboard_chart,
             audit_dashboard_health,
             sync_secops_homepage_dashboard,
+            group_cases_by_entity,
             search_playbooks,
             get_playbook,
             audit_playbook_health,
             audit_playbook_decay,
+            run_platform_health_check,
+            sync_platform_health_dashboard,
+            audit_rule_health,
+            list_rule_errors,
+            audit_parser_health,
+            diagnose_unparsed_logs,
+            audit_feed_health,
+            audit_timestamp_integrity,
+            query_secops_errors,
+            query_cloud_logging,
         ]
 
 
@@ -1346,13 +1881,28 @@ class GoogleADKManager:
                     "max_output_tokens": target_max_tokens,
                 }
                 if thinking_budget and thinking_budget > 0:
-                    config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+                    model_lower = str(self.model_name or "").strip().lower()
+                    if model_lower.startswith("gemini-4"):
+                        # Gemini 4 models (e.g. gemini-4-hydrogen, gemini-4-argon) require thinking_level
+                        # instead of an integer thinking_budget.
+                        if int(thinking_budget) <= 1024:
+                            level = "LOW"
+                        elif int(thinking_budget) <= 4096:
+                            level = "MEDIUM"
+                        else:
+                            level = "HIGH"
+                        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level=level)
+                        self.logger.info(
+                            f"Mapped thinking_budget={thinking_budget} to thinking_level='{level}' for model '{self.model_name}'."
+                        )
+                    else:
+                        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
 
-                # Configure automatic function calling with bounded remote call allowance (12 turns max)
+                # Configure automatic function calling with bounded remote call allowance (25 turns max)
                 try:
                     config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(
                         disable=False,
-                        maximum_remote_calls=12,
+                        maximum_remote_calls=25,
                         ignore_call_history=False,
                     )
                 except Exception as afc_cfg_err:
@@ -1392,13 +1942,25 @@ class GoogleADKManager:
                         config=types.GenerateContentConfig(**config_kwargs),
                     )
                 except Exception as gen_exc:
-                    gen_err_msg = str(gen_exc)
-                    if not collected_tool_logs:
-                        raise
-                    self.logger.warning(
-                        f"generate_content interrupted after {len(collected_tool_logs)} tool calls ({gen_err_msg}); "
-                        "recovering with forced synthesis pass from collected tool telemetry."
-                    )
+                    err_str = str(gen_exc)
+                    if "thinking budget is not supported" in err_str.lower() or "use thinking level instead" in err_str.lower():
+                        self.logger.info(
+                            f"Model '{self.model_name}' rejected thinking_budget; retrying with thinking_level='HIGH'."
+                        )
+                        config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="HIGH")
+                        response = client.models.generate_content(
+                            model=self.model_name,
+                            contents=input_text,
+                            config=types.GenerateContentConfig(**config_kwargs),
+                        )
+                    else:
+                        gen_err_msg = err_str
+                        if not collected_tool_logs:
+                            raise
+                        self.logger.warning(
+                            f"generate_content interrupted after {len(collected_tool_logs)} tool calls ({gen_err_msg}); "
+                            "recovering with forced synthesis pass from collected tool telemetry."
+                        )
 
                 # Robust multi-layer response extraction
                 final_text = ""

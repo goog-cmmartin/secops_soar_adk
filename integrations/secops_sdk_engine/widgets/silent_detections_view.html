@@ -491,7 +491,7 @@
       const attachedCount = rawData.attached_count || 0;
       const attachedEntitiesCount = rawData.attached_entities_count || 0;
       const entitiesCount = rawData.entities_count || 0;
-      const lookback = rawData.lookback_hours || 24;
+      const lookback = rawData.lookback_hours || 48;
 
       let html = `
         <div class="widget-header-card">
@@ -545,9 +545,12 @@
 
       const detections = rawData.detections_found || [];
       if (detections.length > 0) {
+        const detHeaderLabel = totalDetections > detections.length
+          ? `Discovered Detections (Showing ${detections.length} of ${totalDetections})`
+          : `Discovered Detections (${detections.length})`;
         html += `
           <div class="section-title">
-            <span>Discovered Detections (${detections.length})</span>
+            <span>${detHeaderLabel}</span>
           </div>
           <div class="table-container">
             <table>
@@ -587,6 +590,18 @@
             </tr>
           `;
         }
+        if (totalDetections > detections.length) {
+          const remCount = totalDetections - detections.length;
+          const rulesCount = Array.isArray(rawData.rules_triggered) ? rawData.rules_triggered.length : 0;
+          const rulesNote = rulesCount > 0 ? ` across ${rulesCount} unique rule${rulesCount > 1 ? 's' : ''}` : '';
+          html += `
+            <tr>
+              <td colspan="5" style="color: var(--soar-text-muted); font-size: 0.75rem; text-align: center;">
+                <em>...and ${remCount} additional detection${remCount > 1 ? 's' : ''}${rulesNote} (capped for payload performance)</em>
+              </td>
+            </tr>
+          `;
+        }
         html += `</tbody></table></div>`;
       } else {
         html += `<p style="color: var(--soar-text-muted); font-size: 0.75rem;">No silent detections discovered within the ${lookback}h lookback window.</p>`;
@@ -594,9 +609,13 @@
 
       const events = rawData.events_found || [];
       if (events.length > 0) {
+        const shownEvents = Math.min(events.length, 10);
+        const evHeaderLabel = eventsCount > shownEvents
+          ? `Discovered UDM Events (Showing ${shownEvents} of ${eventsCount})`
+          : `Discovered UDM Events (${events.length})`;
         html += `
           <div class="section-title">
-            <span>Discovered UDM Events (${events.length})</span>
+            <span>${evHeaderLabel}</span>
           </div>
           <div class="table-container">
             <table>
@@ -624,9 +643,12 @@
 
       const attached = rawData.attached_evidences || [];
       if (attached.length > 0) {
+        const attHeaderLabel = attachedCount > attached.length
+          ? `Attached Evidence Items (Showing ${attached.length} of ${attachedCount})`
+          : `Attached Evidence Items (${attached.length})`;
         html += `
           <div class="section-title">
-            <span>Attached Evidence Items (${attached.length})</span>
+            <span>${attHeaderLabel}</span>
           </div>
           <div class="table-container">
             <table>

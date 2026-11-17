@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
+import urllib.parse
 import urllib.request
 
 from engine.config import SecOpsConfigurationError
@@ -167,10 +168,14 @@ class IdentityGovernanceWorkflow:
 
     def fetch_inventory_identity_report(
         self,
-        inventory_base_url: str = "http://localhost:8000",
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Queries SecOps Inventory service on local port 8000 for SecOps Access audit or Identity reports."""
+        """Queries configured SecOps Inventory service for SecOps Access audit or Identity reports."""
+        from engine.config import resolve_inventory_base_url
+
+        inventory_base_url = resolve_inventory_base_url(
+            getattr(self.adapter, "inventory_base_url", None)
+        )
         target_tenant = tenant_id or getattr(self.adapter, "tenant_id", None) or getattr(self.adapter, "project_id", None)
         if not target_tenant:
             raise SecOpsConfigurationError(
@@ -190,7 +195,8 @@ class IdentityGovernanceWorkflow:
             except Exception as e:
                 logger.debug("Failed to resolve tenant ID from %s: %s", target_tenant, e)
 
-        audit_url = f"{inventory_base_url}/api/tenants/{target_tenant}/audits/SecOps%20Access/view"
+        safe_tenant = urllib.parse.quote(str(target_tenant), safe="")
+        audit_url = f"{inventory_base_url}/api/tenants/{safe_tenant}/audits/SecOps%20Access/view"
 
         try:
             req = urllib.request.Request(audit_url, headers={"Accept": "application/json"})
@@ -216,14 +222,12 @@ class IdentityGovernanceWorkflow:
     def generate_governance_report(
         self,
         project_id: Optional[str] = None,
-        inventory_base_url: str = "http://localhost:8000",
     ) -> IdentityGovernanceReport:
         """Generates a complete Identity Governance report combining IAM bindings, custom roles, and inventory data."""
         proj = project_id or self.default_project_id
         bindings = self.get_chronicle_iam_bindings(project_id=proj)
         custom_roles = self.get_chronicle_custom_roles(project_id=proj)
         inventory_summary = self.fetch_inventory_identity_report(
-            inventory_base_url=inventory_base_url,
             tenant_id=proj,
         )
 

@@ -46,7 +46,7 @@ Correlates case entities with silent (non-alerting) detections and UDM events, w
 
 #### Action Parameters:
 - `Case ID` (String, Optional): Numeric or terminal Case ID (defaults to active case context).
-- `Lookback Hours` (Integer, Default: `24`): Time window to query prior to the case creation time.
+- `Lookback Hours` (Integer, Default: `48`): Time window to query prior to the case creation time.
 - `Attach to Case` (Boolean, Default: `false`): Attaches discovered detections and events to Case Evidence.
 - `Attach Entities` (Boolean, Default: `true`): Discovers delta entities in detection events and attaches them to the Case.
 - `Post Wall Comment` (Boolean, Default: `true`): Publishes the Markdown correlation report to the Case Wall.

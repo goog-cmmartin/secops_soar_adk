@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
 if TYPE_CHECKING:
@@ -20,10 +21,14 @@ from engine.workflows.case_actions import AddCaseCommentWorkflow
 from engine.workflows.case_investigation import InvestigateCaseWorkflow
 from engine.workflows.case_search import SearchCasesWorkflow
 from engine.workflows.correlate_silent_detections import (
+    GENERIC_BINARIES,
+    GENERIC_BINARY_PATH_SUBSTRINGS,
     ParsedEntityFilter,
     _clean_case_id,
     is_noisy_entity,
 )
+
+logger = logging.getLogger(__name__)
 
 # Entity types that represent generic metadata or threat intelligence tags rather than concrete observables
 NON_OBSERVABLE_ENTITY_TYPES = {
@@ -71,7 +76,10 @@ class RelatedCasesByEntityResult(UniversalDictMixin):
     entities_searched: List[Dict[str, Any]] = field(default_factory=list)
     entity_precedents: List[Dict[str, Any]] = field(default_factory=list)
     related_cases: List[Dict[str, Any]] = field(default_factory=list)
+    entity_search_errors: Dict[str, str] = field(default_factory=dict)
+    partial: bool = False
     comment_id: Optional[str] = None
+    comment_error: Optional[str] = None
     secops_ui_base_url: str = ""
     provenance: Dict[str, Any] = field(default_factory=dict)
 
@@ -147,13 +155,38 @@ class RelatedCasesByEntityWorkflow:
         # 2. Collect and sanitize candidate entities
         candidate_entities: List[Dict[str, Any]] = []
         seen_identifiers: Set[str] = set()
+        prev_was_generic_binary = False
+        prev_alert_id: Optional[str] = None
 
         for ent in investigation.entities:
             ident = str(ent.identifier or "").strip()
             if not ident:
                 continue
+            ent_raw = ent.raw if isinstance(getattr(ent, "raw", None), dict) else {}
+            alert_id = str(ent_raw.get("alertIdentifier") or "GLOBAL").strip()
+            if alert_id != prev_alert_id:
+                prev_was_generic_binary = False
+                prev_alert_id = alert_id
+
+            ident_lower = ident.lower()
             ident_upper = ident.upper()
             etype = str(ent.entity_type or "UNKNOWN").strip().upper()
+
+            is_gen_bin = any(
+                ident_lower == b or ident_lower.endswith("\\" + b) or ident_lower.endswith("/" + b)
+                for b in GENERIC_BINARIES
+            ) or any(sub in ident_lower for sub in GENERIC_BINARY_PATH_SUBSTRINGS)
+            if is_gen_bin:
+                prev_was_generic_binary = True
+                continue
+
+            is_hash_entity = etype in ("FILEHASH", "HASH", "SHA256", "MD5", "SHA1") or (
+                len(ident_lower) in (32, 40, 64) and all(c in "0123456789abcdef" for c in ident_lower)
+            )
+            if is_hash_entity and prev_was_generic_binary:
+                continue
+            if not is_hash_entity:
+                prev_was_generic_binary = False
 
             if not parsed_filter.matches(ident, etype):
                 continue
@@ -162,7 +195,7 @@ class RelatedCasesByEntityWorkflow:
                 continue
             if not include_threat_actors and etype in THREAT_ACTOR_ENTITY_TYPES:
                 continue
-            if is_noisy_entity(ident) or ident_upper in ("OUTCOME", "UNKNOWN", "TRUE", "FALSE", "NONE", "NULL"):
+            if is_noisy_entity(ident, etype) or ident_upper in ("OUTCOME", "UNKNOWN", "TRUE", "FALSE", "NONE", "NULL"):
                 continue
 
             if ident_upper not in seen_identifiers:
@@ -222,6 +255,7 @@ class RelatedCasesByEntityWorkflow:
         # 3. Search historical & active cases per entity in parallel
         entity_results_map: Dict[str, List[Any]] = {}
         entity_total_counts_map: Dict[str, int] = {}
+        entity_search_errors: Dict[str, str] = {}
 
         def _search_for_entity(ent_meta: Dict[str, Any]):
             ident = ent_meta["identifier"]
@@ -248,9 +282,17 @@ class RelatedCasesByEntityWorkflow:
                         _, items, total_cnt = fut.result()
                         entity_results_map[ident] = items
                         entity_total_counts_map[ident] = total_cnt
-                    except Exception:
+                    except Exception as search_err:
+                        logger.warning("Case search failed for entity '%s': %s", ident, search_err)
+                        entity_search_errors[ident] = f"{type(search_err).__name__}: {search_err}"
                         entity_results_map[ident] = []
                         entity_total_counts_map[ident] = 0
+
+            if len(entity_search_errors) == len(searched_entities):
+                first_err = next(iter(entity_search_errors.values()))
+                raise RuntimeError(
+                    f"All {len(searched_entities)} entity case searches failed for case {clean_case_id}: {first_err}"
+                )
 
         # 4. Aggregate by Related Case and by Entity
         related_cases_by_id: Dict[str, Dict[str, Any]] = {}
@@ -355,6 +397,7 @@ class RelatedCasesByEntityWorkflow:
                     "active_cases_count": active_cnt,
                     "closed_cases_count": closed_cnt,
                     "related_case_ids": matched_case_ids[:25],
+                    "search_error": entity_search_errors.get(ident),
                 }
             )
 
@@ -408,7 +451,10 @@ class RelatedCasesByEntityWorkflow:
             entities_searched=searched_entities,
             entity_precedents=entity_precedents,
             related_cases=ranked_cases,
+            entity_search_errors=entity_search_errors,
+            partial=bool(entity_search_errors),
             comment_id=None,
+            comment_error=None,
             secops_ui_base_url=base_url_clean,
             provenance={
                 "workflow": "case.related_by_entity",
@@ -417,6 +463,7 @@ class RelatedCasesByEntityWorkflow:
                 "case_status_scope": scope_norm,
                 "min_shared_entities": min_shared_entities,
                 "entities_searched": len(searched_entities),
+                "entity_search_errors_count": len(entity_search_errors),
                 "total_related_cases": total_related,
                 "returned_related_cases": len(ranked_cases),
             },
@@ -427,8 +474,9 @@ class RelatedCasesByEntityWorkflow:
                 md = self._build_wall_comment(result)
                 comment_rec = self.comment_workflow.execute(case_id=clean_case_id, content=md)
                 result.comment_id = getattr(comment_rec, "comment_id", None) or getattr(comment_rec, "name", None)
-            except Exception:
-                pass
+            except Exception as comment_err:
+                logger.warning("Failed posting related-cases comment on case %s: %s", clean_case_id, comment_err)
+                result.comment_error = f"{type(comment_err).__name__}: {comment_err}"
 
         return result
 

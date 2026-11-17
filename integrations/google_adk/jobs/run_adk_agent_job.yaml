@@ -8,7 +8,7 @@ parameters:
     is_mandatory: false
     name: Agent Name
     type: string
-  - default_value: Inspect recent open SOAR cases, correlate any unattached silent detections, check Data Tables and Native Dashboards for key findings, and produce a concise Markdown operational summary.
+  - default_value: Execute the 5-Stage Tier 1 Autonomous Triage SOP for each target SOAR case at the T+10m maturity window (inspect case & T+0m comments, re-run silent detection correlation & delta entity extraction, profile entities with PipedSQL via query_udm_sql, consult get_soc_triage_sop() for the SOP matrix & tag taxonomy, batch-update alert status/priority with update_case_alert(alert_id='ALL'), attach standardized case tags including recommended_detection_tags, invoke tune_case_detections() and tag Tune:Candidate whenever Verdict is False Positive (FP) or recurring Benign Positive (BTP), and post the structured BLUF triage report to the Case Wall).
     description: The mission instructions or analytical prompt for the ADK Agent to execute on each run.
     is_mandatory: false
     name: User Prompt
@@ -32,6 +32,11 @@ parameters:
     description: Lookback time window in minutes when Sweep Recent Open Cases is enabled (set to 0 to evaluate the latest open cases regardless of age).
     is_mandatory: false
     name: Lookback Minutes
+    type: string
+  - default_value: '10'
+    description: Minimum age in minutes a SOAR case must reach before being triaged by the scheduled sweep (T+10m maturity window to allow streaming YARA-L detections and T+0m playbooks to settle).
+    is_mandatory: false
+    name: Min Case Age Minutes
     type: string
   - default_value: '5'
     description: Maximum number of open cases to evaluate per run when Sweep Recent Open Cases is enabled (1-25).

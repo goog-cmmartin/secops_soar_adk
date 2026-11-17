@@ -299,6 +299,35 @@
       border-color: var(--soar-accent);
       color: var(--soar-accent);
     }
+    .btn-tune-candidate {
+      background: var(--soar-accent-subtle);
+      color: var(--soar-accent);
+      border: 1px solid var(--soar-accent);
+    }
+    .btn-tune-candidate:hover {
+      background: var(--soar-accent);
+      color: #ffffff;
+    }
+    .btn-tune-approve {
+      background: var(--verdict-benign-bg);
+      color: var(--verdict-benign-text);
+      border: 1px solid var(--verdict-benign-border);
+    }
+    .btn-tune-approve:hover {
+      filter: brightness(1.08);
+      border-color: var(--verdict-benign-text);
+    }
+    .tag-toast-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.55rem 1.25rem;
+      font-size: 0.74rem;
+      background: var(--soar-accent-subtle);
+      border-bottom: 1px solid var(--soar-accent);
+      color: var(--soar-text-primary);
+    }
 
     /* Body Markdown Area */
     .card-body {
@@ -455,6 +484,12 @@
           <span id="verdict-badge" class="badge" style="display:none;"></span>
           <span id="model-badge" class="badge badge-accent">Google ADK</span>
           <span id="session-badge" class="badge badge-muted" style="display:none;"></span>
+          <button id="tune-candidate-btn" class="btn-copy btn-tune-candidate" onclick="addSoarCaseTag('Tune:Candidate', this)" title="Adds Tune:Candidate tag to synthesize a multi-factor detection tuning proposal">
+            <span>🛠️ Propose Tuning (Tag Tune:Candidate)</span>
+          </button>
+          <button id="tune-approve-btn" class="btn-copy btn-tune-approve" onclick="addSoarCaseTag('Tune:Approve', this)" title="Adds Tune:Approve tag to auto-apply Curated Rule Findings Refinements">
+            <span>✅ Approve Tuning (Tag Tune:Approve)</span>
+          </button>
           <button id="copy-btn" class="btn-copy" onclick="copyReportText()" style="display:none;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -463,6 +498,11 @@
             <span>Copy Markdown</span>
           </button>
         </div>
+      </div>
+
+      <!-- Interactive Tag Toast Banner -->
+      <div id="tag-toast-banner" class="tag-toast-banner">
+        <span id="tag-toast-text"></span>
       </div>
 
       <!-- 3-Tier Triage Taxonomy Banner -->
@@ -632,6 +672,7 @@
     }
 
     let cachedMarkdown = "";
+    let cachedPayload = null;
     function copyReportText() {
       if (!cachedMarkdown) return;
       navigator.clipboard.writeText(cachedMarkdown).then(() => {
@@ -640,6 +681,98 @@
         btn.innerHTML = "<span>Copied!</span>";
         setTimeout(() => { btn.innerHTML = orig; }, 1800);
       });
+    }
+
+    function escapeHtml(text) {
+      if (text === null || text === undefined) return "";
+      const div = document.createElement("div");
+      div.innerText = String(text);
+      return div.innerHTML;
+    }
+
+    function resolveCurrentCaseId() {
+      if (cachedPayload && cachedPayload.case_id && !String(cachedPayload.case_id).includes("[Case.Id]")) {
+        return String(cachedPayload.case_id).trim();
+      }
+      const placeholderCaseId = "[Case.Id]";
+      if (placeholderCaseId && !placeholderCaseId.includes("Case.Id")) {
+        return placeholderCaseId.trim();
+      }
+      try {
+        const href = (window.top && window.top.location && window.top.location.href) || document.referrer || "";
+        const m = href.match(/\/cases\/(\d+)/i);
+        if (m && m[1]) return m[1];
+      } catch (e) {}
+      return "";
+    }
+
+    function showTagToast(message, isSuccess) {
+      const banner = document.getElementById("tag-toast-banner");
+      const textEl = document.getElementById("tag-toast-text");
+      if (!banner || !textEl) return;
+      banner.style.display = "flex";
+      banner.style.borderColor = isSuccess ? "var(--verdict-benign-border)" : "var(--soar-accent)";
+      banner.style.background = isSuccess ? "var(--verdict-benign-bg)" : "var(--soar-accent-subtle)";
+      banner.style.color = isSuccess ? "var(--verdict-benign-text)" : "var(--soar-text-primary)";
+      textEl.innerHTML = message;
+    }
+
+    async function addSoarCaseTag(tagName, btnEl) {
+      const caseId = resolveCurrentCaseId();
+      const origHtml = btnEl ? btnEl.innerHTML : "";
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = `<span>⏳ Adding ${escapeHtml(tagName)}...</span>`;
+      }
+      try { await navigator.clipboard.writeText(tagName); } catch (e) {}
+
+      let addedViaApi = false;
+      if (caseId) {
+        const endpoints = [
+          {
+            url: `/api/external/v1/cases/AddCaseTag?format=camel`,
+            body: { caseId: Number(caseId) || caseId, tag: tagName, tagName: tagName }
+          },
+          {
+            url: `/api/external/v1/cases/AddTag?format=camel`,
+            body: { caseId: Number(caseId) || caseId, tag: tagName, tagName: tagName }
+          }
+        ];
+        for (const ep of endpoints) {
+          try {
+            const resp = await fetch(ep.url, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json", "Accept": "application/json" },
+              body: JSON.stringify(ep.body)
+            });
+            if (resp && resp.ok) {
+              addedViaApi = true;
+              break;
+            }
+          } catch (err) {}
+        }
+      }
+
+      if (addedViaApi) {
+        if (btnEl) btnEl.innerHTML = `<span>✓ Tagged ${escapeHtml(tagName)}</span>`;
+        showTagToast(
+          `<strong>✓ Case #${escapeHtml(caseId)} tagged with <code>${escapeHtml(tagName)}</code>!</strong> The <em>Case Autonomous False Positive Tuning</em> playbook has been queued.`,
+          true
+        );
+      } else {
+        if (btnEl) {
+          btnEl.innerHTML = `<span>📋 Copied ${escapeHtml(tagName)}</span>`;
+          setTimeout(() => {
+            btnEl.disabled = false;
+            btnEl.innerHTML = origHtml;
+          }, 2600);
+        }
+        showTagToast(
+          `<strong>📋 Tag <code>${escapeHtml(tagName)}</code> copied to clipboard!</strong> Click the <strong>+</strong> Tag icon in the Case #${escapeHtml(caseId || "")} header above and paste <code>${escapeHtml(tagName)}</code> to trigger the playbook.`,
+          false
+        );
+      }
     }
 
     // =========================================================================
@@ -670,6 +803,7 @@
         }
         payload = extractPayload(rawContent);
       }
+      cachedPayload = payload;
 
       const contentDiv = document.getElementById('content');
       const copyBtn = document.getElementById('copy-btn');
@@ -710,6 +844,10 @@
       if (sessionId) {
         sessionBadgeEl.textContent = "Session: " + (sessionId.length > 14 ? sessionId.substring(0, 14) + '...' : sessionId);
         sessionBadgeEl.style.display = "inline-flex";
+      }
+      const statusIndEl = document.getElementById('status-indicator');
+      if (statusIndEl && typeof payload === "object" && (payload.reused_cached_result || payload.recovered_from_case_wall)) {
+        statusIndEl.innerHTML = `<span title="Preserved prior Tier-1 Triage Report without re-running agent">Status: Completed &bull; Cached Report</span>`;
       }
 
       cachedMarkdown = markdownText;

@@ -70,10 +70,19 @@ from engine.workflows.case_actions import (
     CreateCaseAlertRecommendationWorkflow,
     GetOrCreateCaseSummaryWorkflow,
 )
+from engine.workflows.case_attack_graph import (
+    BuildKillChainTimelineWorkflow,
+    MapEntityBlastRadiusWorkflow,
+)
 from engine.workflows.case_evidence import AttachCaseEvidenceWorkflow, DetachCaseEvidenceWorkflow
+from engine.workflows.case_grouping import GroupCasesByEntityWorkflow
 from engine.workflows.case_investigation import InvestigateCaseWorkflow
 from engine.workflows.case_list import ListCasesWorkflow
 from engine.workflows.correlate_silent_detections import CorrelateSilentDetectionsWorkflow
+from engine.workflows.detection_tuning import (
+    AutonomousCaseDetectionTuningWorkflow,
+    SyncDetectionTuningDashboardWorkflow,
+)
 from engine.workflows.homepage_dashboard import SyncSecOpsHomepageDashboardWorkflow
 from engine.workflows.related_cases_by_entity import RelatedCasesByEntityWorkflow
 from engine.workflows.search_udm import SearchUDMWorkflow
@@ -269,13 +278,28 @@ class SecOpsSDKEngineManager:
                 pass
 
         if not self.project_id:
-            self.project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT") or "sdl-preview-americas"
+            self.project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+
+        if not self.customer_id:
+            self.customer_id = os.environ.get("SECOPS_CUSTOMER_ID") or ""
+
+        if not self.customer_id or not self.project_id:
+            missing = []
+            if not self.customer_id:
+                missing.append("SecOps Customer ID")
+            if not self.project_id:
+                missing.append("GCP Project ID")
+            raise ValueError(
+                f"Missing required SOAR Integration configuration parameter(s): {', '.join(missing)}. "
+                "Please configure them in the SecOps SDK Engine integration instance settings."
+            )
 
         self.api_base = f"https://{self.region}-chronicle.googleapis.com"
+        self.project_number = os.environ.get("SECOPS_PROJECT_NUMBER") or self.project_id
         self.config = SecOpsConfig(
             project_id=self.project_id,
             customer_id=self.customer_id,
-            project_number=self.project_id,
+            project_number=self.project_number,
             location=self.region,
             api_base=self.api_base,
         )
@@ -291,6 +315,7 @@ class SecOpsSDKEngineManager:
             config=self.config,
             credential_provider=self.credential_provider,
         )
+        self.engine = self.adapter
 
         self.correlate_workflow = CorrelateSilentDetectionsWorkflow(adapter=self.adapter)
         self.related_cases_workflow = RelatedCasesByEntityWorkflow(adapter=self.adapter)
@@ -300,6 +325,11 @@ class SecOpsSDKEngineManager:
         self.case_summary_workflow = GetOrCreateCaseSummaryWorkflow(adapter=self.adapter)
         self.alert_recommendation_workflow = CreateCaseAlertRecommendationWorkflow(adapter=self.adapter)
         self.homepage_dashboard_workflow = SyncSecOpsHomepageDashboardWorkflow(adapter=self.adapter)
+        self.case_grouping_workflow = GroupCasesByEntityWorkflow(adapter=self.adapter)
+        self.detection_tuning_workflow = AutonomousCaseDetectionTuningWorkflow(adapter=self.adapter)
+        self.tuning_dashboard_workflow = SyncDetectionTuningDashboardWorkflow(adapter=self.adapter)
+        self.blast_radius_workflow = MapEntityBlastRadiusWorkflow(adapter=self.adapter)
+        self.kill_chain_workflow = BuildKillChainTimelineWorkflow(adapter=self.adapter)
 
     def test_connection(self) -> Dict[str, Any]:
         """
@@ -324,7 +354,7 @@ class SecOpsSDKEngineManager:
     def correlate_silent_detections(
         self,
         case_id: Union[str, int],
-        lookback_hours: int = 24,
+        lookback_hours: int = 48,
         attach_to_case: bool = False,
         attach_entities: bool = True,
         post_wall_comment: bool = True,
@@ -579,6 +609,136 @@ class SecOpsSDKEngineManager:
             include_tenant_health=include_tenant_health,
             ai_executive_summary=ai_executive_summary,
         )
+
+    def group_cases_by_entity(
+        self,
+        environments: Optional[List[str]] = None,
+        lookback_hours: int = 24,
+        grouping_window_hours: int = 24,
+        min_shared_entities: int = 1,
+        max_cases: int = 100,
+        max_distinct_hosts_per_case: int = 2,
+        include_enriched_entities: bool = False,
+        require_shared_host_when_both_have_hosts: bool = True,
+        dry_run: bool = True,
+        post_wall_comment: bool = True,
+        trigger_correlation_tag: bool = True,
+        target_case_ids: Optional[List[Union[str, int]]] = None,
+    ) -> Any:
+        """Executes GroupCasesByEntityWorkflow to discover and merge open cases sharing high-signal entities."""
+        return self.case_grouping_workflow.execute(
+            environments=environments,
+            lookback_hours=lookback_hours,
+            grouping_window_hours=grouping_window_hours,
+            min_shared_entities=min_shared_entities,
+            max_cases=max_cases,
+            max_distinct_hosts_per_case=max_distinct_hosts_per_case,
+            include_enriched_entities=include_enriched_entities,
+            require_shared_host_when_both_have_hosts=require_shared_host_when_both_have_hosts,
+            dry_run=dry_run,
+            post_wall_comment=post_wall_comment,
+            trigger_correlation_tag=trigger_correlation_tag,
+            target_case_ids=target_case_ids,
+        )
+
+    def tune_case_detections(
+        self,
+        case_id: Optional[Union[str, int]] = None,
+        rule_id: Optional[str] = None,
+        lookback_days: int = 14,
+        dominance_threshold: float = 0.15,
+        apply_tuning: bool = False,
+        ttl_days: int = 30,
+        record_to_data_table: bool = True,
+        post_wall_comment: bool = True,
+        actor: str = "chris.martin@1823127835827.altostrat.com",
+    ) -> Dict[str, Any]:
+        """Executes AutonomousCaseDetectionTuningWorkflow for a SOAR Case and/or SIEM Rule."""
+        return self.detection_tuning_workflow.execute(
+            case_id=str(case_id) if case_id is not None else None,
+            rule_id=rule_id,
+            lookback_days=lookback_days,
+            dominance_threshold=dominance_threshold,
+            apply_tuning=apply_tuning,
+            ttl_days=ttl_days,
+            record_to_data_table=record_to_data_table,
+            post_wall_comment=post_wall_comment,
+            actor=actor,
+        )
+
+    def sync_detection_tuning_dashboard(
+        self,
+        dashboard_title: str = "Detection Tuning & FP Reduction Command Center",
+        dashboard_id: Optional[str] = None,
+        lookback_days: int = 7,
+        top_rules_limit: int = 5,
+    ) -> Dict[str, Any]:
+        """Synchronizes the Detection Tuning & FP Reduction Command Center Native Dashboard."""
+        return self.tuning_dashboard_workflow.execute(
+            dashboard_title=dashboard_title,
+            dashboard_id=dashboard_id,
+            lookback_days=lookback_days,
+            top_rules_limit=top_rules_limit,
+        )
+
+    def map_entity_blast_radius(
+        self,
+        case_id: Union[str, int],
+        lookback_hours: int = 48,
+        include_udm_precursors: bool = True,
+        include_related_cases: bool = True,
+        max_nodes: int = 28,
+        entity_filter: Optional[List[str]] = None,
+        entity_filter_mode: str = "AUTO",
+        adk_result: Optional[Union[str, Dict[str, Any]]] = None,
+        cached_correlation: Optional[Dict[str, Any]] = None,
+        cached_related_cases: Optional[Dict[str, Any]] = None,
+        post_wall_comment: bool = False,
+        secops_ui_base_url: str = "",
+    ) -> Any:
+        """Executes MapEntityBlastRadiusWorkflow to construct an interactive Case Entity & Detection Topology."""
+        return self.blast_radius_workflow.execute(
+            case_id=case_id,
+            lookback_hours=lookback_hours,
+            include_udm_precursors=include_udm_precursors,
+            include_related_cases=include_related_cases,
+            max_nodes=max_nodes,
+            entity_filter=entity_filter,
+            entity_filter_mode=entity_filter_mode,
+            adk_result=adk_result,
+            cached_correlation=cached_correlation,
+            cached_related_cases=cached_related_cases,
+            post_wall_comment=post_wall_comment,
+            secops_ui_base_url=secops_ui_base_url,
+        )
+
+    def build_kill_chain_timeline(
+        self,
+        case_id: Union[str, int],
+        lookback_hours: int = 48,
+        include_udm_precursors: bool = True,
+        max_timeline_events: int = 50,
+        entity_filter: Optional[List[str]] = None,
+        entity_filter_mode: str = "AUTO",
+        adk_result: Optional[Union[str, Dict[str, Any]]] = None,
+        cached_correlation: Optional[Dict[str, Any]] = None,
+        post_wall_comment: bool = False,
+        secops_ui_base_url: str = "",
+    ) -> Any:
+        """Executes BuildKillChainTimelineWorkflow to construct a chronological multi-lane Kill-Chain Swimlane."""
+        return self.kill_chain_workflow.execute(
+            case_id=case_id,
+            lookback_hours=lookback_hours,
+            include_udm_precursors=include_udm_precursors,
+            max_timeline_events=max_timeline_events,
+            entity_filter=entity_filter,
+            entity_filter_mode=entity_filter_mode,
+            adk_result=adk_result,
+            cached_correlation=cached_correlation,
+            post_wall_comment=post_wall_comment,
+            secops_ui_base_url=secops_ui_base_url,
+        )
+
 
 
 

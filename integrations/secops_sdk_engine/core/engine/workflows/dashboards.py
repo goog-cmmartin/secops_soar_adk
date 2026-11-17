@@ -317,16 +317,25 @@ def run_dashboard_health_check(
     """
     # Override tenant if specified
     has_override = bool(project_id or customer_id or region)
-    orig_pid = adapter.project_id
-    orig_cid = adapter.customer_id
-    orig_reg = adapter.region
+    orig_pid = getattr(adapter, "project_id", None)
+    orig_cid = getattr(adapter, "customer_id", None)
+    adapter_dict = getattr(adapter, "__dict__", {})
+    has_location = "location" in adapter_dict or hasattr(type(adapter), "location")
+    has_region = "region" in adapter_dict or hasattr(type(adapter), "region")
+    if not has_location and not has_region:
+        has_location = True
+    orig_loc = getattr(adapter, "location", None) if has_location else None
+    orig_reg = getattr(adapter, "region", None) if has_region else None
     if has_override:
         if project_id:
             adapter.project_id = project_id
         if customer_id:
             adapter.customer_id = customer_id
         if region:
-            adapter.region = region
+            if has_location:
+                adapter.location = region
+            if has_region:
+                adapter.region = region
     
     try:
         # Step 1: Search for dashboard
@@ -410,7 +419,10 @@ def run_dashboard_health_check(
         if has_override:
             adapter.project_id = orig_pid
             adapter.customer_id = orig_cid
-            adapter.region = orig_reg
+            if has_location:
+                adapter.location = orig_loc
+            if has_region:
+                adapter.region = orig_reg
 
 
 class CreateDashboardWorkflow:
@@ -552,6 +564,7 @@ class AddDashboardChartWorkflow:
         start_x: int = 0,
         start_y: int = 0,
         drill_down_config: Optional[Dict[str, Any]] = None,
+        dialect: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not dashboard_id or not str(dashboard_id).strip():
             raise ValueError("dashboard_id must be provided.")
@@ -588,10 +601,17 @@ class AddDashboardChartWorkflow:
                         "startTimeVal": str(time_value),
                     }
                 }
+            effective_dialect = dialect
+            if not effective_dialect:
+                upper_q = query.strip().upper()
+                if "|>" in query or upper_q.startswith(("FROM ", "SELECT ", "WITH ")):
+                    effective_dialect = "SQL"
             dashboard_query = {
                 "query": query,
                 "input": input_spec,
             }
+            if effective_dialect:
+                dashboard_query["dialect"] = effective_dialect
 
         chart_layout = {
             "startX": int(start_x),

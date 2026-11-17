@@ -1,0 +1,14 @@
+action_identifier: Correlate Silent Detections
+condition_group:
+  conditions: []
+  logical_operator: and
+data_definition:
+  html_height: 560
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: half_width
+description: Interactive UDM and Raw Log Entity Pivot Explorer with entity type filter chips, smart type inference, compound AND/OR search builder, and 1-click Chronicle SIEM search navigation.
+scope: alert
+title: UDM and Raw Log Entity Pivot
+type: html

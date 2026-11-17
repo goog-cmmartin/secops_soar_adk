@@ -43,12 +43,10 @@ class SyncMitreRulesWorkflow:
     """Synchronizes custom and curated Google SecOps rules to Firestore cache with MITRE tags."""
 
     def __init__(self, adapter: GoogleSecOpsAdapter, store: Any = None):
+        from engine.ports import resolve_evidence_store
+
         self.adapter = adapter
-        if store is not None:
-            self.store = store
-        else:
-            from agents.core.evidence_store import get_evidence_store
-            self.store = get_evidence_store()
+        self.store = resolve_evidence_store(store, required=True)
         self.catalog = MitreCatalog.get_instance()
 
     def execute(
@@ -284,12 +282,10 @@ class AnalyzeMitreCoverageWorkflow:
     """Analyzes tenant detection rules and live ingestion telemetry against MITRE ATT&CK."""
 
     def __init__(self, adapter: GoogleSecOpsAdapter, store: Any = None):
+        from engine.ports import resolve_evidence_store
+
         self.adapter = adapter
-        if store is not None:
-            self.store = store
-        else:
-            from agents.core.evidence_store import get_evidence_store
-            self.store = get_evidence_store()
+        self.store = resolve_evidence_store(store, required=False)
         self.catalog = MitreCatalog.get_instance()
 
     def execute(
@@ -303,16 +299,16 @@ class AnalyzeMitreCoverageWorkflow:
         """Computes MITRE coverage from the cached rule states and live ingestion telemetry.
 
         ``persist=False`` performs no writes: the empty-cache sync (which saves
-        rule states) is skipped and the assessment is not saved. Note that
-        constructing this workflow without an explicit ``store`` calls
-        ``get_evidence_store()``, whose Firestore connectivity probe writes a
-        ``system_configs/connectivity_check`` document when Firestore is
-        reachable; pass a store to avoid it.
+        rule states) is skipped and the assessment is not saved.
         """
-        logger.info("Executing MITRE ATT&CK Strategic Coverage Analysis (profile=%s)...", profile_id)
+        from engine.ports import resolve_evidence_store
 
-        # 1. Fetch rules from Firestore cache
-        rules = self.store.list_rule_states(limit=10000)
+        logger.info("Executing MITRE ATT&CK Strategic Coverage Analysis (profile=%s)...", profile_id)
+        if self.store is None and persist:
+            self.store = resolve_evidence_store(None, required=True)
+
+        # 1. Fetch rules from cache when store is available
+        rules = self.store.list_rule_states(limit=10000) if self.store is not None else []
         if not rules and sync_cache_if_empty:
             if persist:
                 logger.info("No cached rules found in EvidenceFabricStore. Initiating sync...")
@@ -484,12 +480,10 @@ class GenerateMitreReportWorkflow:
     """Generates comprehensive Markdown and Slack reporting artifacts for MITRE posture."""
 
     def __init__(self, adapter: GoogleSecOpsAdapter, store: Any = None):
+        from engine.ports import resolve_evidence_store
+
         self.adapter = adapter
-        if store is not None:
-            self.store = store
-        else:
-            from agents.core.evidence_store import get_evidence_store
-            self.store = get_evidence_store()
+        self.store = resolve_evidence_store(store, required=False)
 
     def execute(
         self,

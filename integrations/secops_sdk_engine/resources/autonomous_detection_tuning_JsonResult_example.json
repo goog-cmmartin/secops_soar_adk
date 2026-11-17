@@ -1,0 +1,38 @@
+{
+  "case_id": "109043",
+  "case_title": "Unusual user access to AWS through third-party VPN",
+  "lookback_days": 14,
+  "ttl_days": 30,
+  "ttl_expires_date": "2026-12-07",
+  "rules_analyzed_count": 1,
+  "proposals_generated_count": 1,
+  "applied_count": 0,
+  "data_table_name": "asoc_detection_tuning",
+  "recorded_tuning_ids": [
+    "prop-tune-ur_59f8851b-4826-a1b2c3"
+  ],
+  "proposals": [
+    {
+      "proposal_id": "prop-tune-ur_59f8851b-4826-a1b2c3",
+      "rule_id": "ur_59f8851b-4826-45b1-b204-b1a69332cce8",
+      "rule_name": "Unusual user access to AWS through third-party VPN",
+      "rule_type": "GOOGLE_MANAGED",
+      "status": "TUNING_PROPOSED",
+      "unsuppressed_trigger_count": 18,
+      "projected_suppressed_count": 14,
+      "noise_reduction_pct": 77.8,
+      "preserved_real_alerts": 4,
+      "factors": {
+        "hostname": "ADIB-EXPOSED-VM",
+        "user": "admin"
+      },
+      "is_multi_factor": true,
+      "safety_guardrail_passed": true,
+      "udm_refinement_query": "(principal.hostname = \"ADIB-EXPOSED-VM\") and (principal.user.userid = \"admin\")",
+      "compiler_verified": true,
+      "applied": false,
+      "ttl_days": 30,
+      "ttl_expires_date": "2026-12-07"
+    }
+  ]
+}

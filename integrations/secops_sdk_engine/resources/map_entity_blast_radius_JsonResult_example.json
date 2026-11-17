@@ -1,0 +1,98 @@
+{
+  "case_id": "108412",
+  "case_title": "IIS Webshell Drop & Credential Harvesting",
+  "case_priority": "HIGH",
+  "case_status": "OPENED",
+  "case_stage": "Triage",
+  "lookback_hours": 48,
+  "time_window": {
+    "start_time": "2026-11-15T21:14:00Z",
+    "end_time": "2026-11-17T09:15:00Z"
+  },
+  "secops_ui_base_url": "",
+  "adk_overlay": {
+    "has_adk_analysis": true,
+    "verdict": "True Positive (Malicious)",
+    "verdict_tone": "malicious",
+    "disposition": "Malicious - Active Compromise / Intrusion",
+    "confidence": "HIGH",
+    "model": "gemini-3.8-flash",
+    "session_id": "case_108412",
+    "summary": "Corroborated IIS webshell drop via certutil.exe precursor followed by silent discovery rules and LSASS memory dump."
+  },
+  "metrics": {
+    "total_nodes": 5,
+    "entity_nodes_count": 3,
+    "detection_nodes_count": 1,
+    "related_case_nodes_count": 1,
+    "total_edges": 4,
+    "elevated_nodes_count": 4,
+    "silent_rules_count": 0,
+    "alerting_rules_count": 1
+  },
+  "nodes": [
+    {
+      "id": "n_1",
+      "identifier": "185.220.101.42",
+      "label": "185.220.101.42",
+      "subtitle": "External IP",
+      "node_type": "IP",
+      "raw_entity_type": "ADDRESS",
+      "risk": "malicious",
+      "is_suspicious": true,
+      "is_pivot": false,
+      "is_internal": false,
+      "is_alerting": false,
+      "mitre_techniques": [
+        {
+          "id": "T1190",
+          "name": "Exploit Public-Facing Application",
+          "tactic": "Initial Access"
+        }
+      ],
+      "udm_query": "(ip = \"185.220.101.42\" OR principal.ip = \"185.220.101.42\" OR target.ip = \"185.220.101.42\" OR src.ip = \"185.220.101.42\")",
+      "telemetry_stats": "1 Alerting Hit(s) • 4 UDM Event(s)",
+      "summary": "Extracted from SOAR Case #108412 alert context.",
+      "adk_insight": "External attacker IP 185.220.101.42 delivered encoded webshell payload to PRD-WEB-IIS04.",
+      "related_case_id": "",
+      "x": 110,
+      "y": 210
+    },
+    {
+      "id": "n_2",
+      "identifier": "PRD-WEB-IIS04",
+      "label": "PRD-WEB-IIS04",
+      "subtitle": "Endpoint / Host",
+      "node_type": "HOST",
+      "raw_entity_type": "HOSTNAME",
+      "risk": "malicious",
+      "is_suspicious": true,
+      "is_pivot": true,
+      "is_internal": true,
+      "is_alerting": false,
+      "mitre_techniques": [
+        {
+          "id": "T1505.003",
+          "name": "Web Shell",
+          "tactic": "Persistence"
+        }
+      ],
+      "udm_query": "(principal.hostname = \"PRD-WEB-IIS04\" OR target.hostname = \"PRD-WEB-IIS04\" OR principal.asset.hostname = \"PRD-WEB-IIS04\")",
+      "telemetry_stats": "1 Alerting Hit(s) • 2 Silent Rule(s) • 3 UDM Event(s)",
+      "summary": "Primary compromised IIS endpoint.",
+      "adk_insight": "w3wp.exe spawned cmd.exe and certutil.exe on PRD-WEB-IIS04 prior to credential dump.",
+      "related_case_id": "",
+      "x": 325,
+      "y": 210
+    }
+  ],
+  "edges": [
+    {
+      "from": "n_1",
+      "to": "n_2",
+      "label": "http post",
+      "is_hot": true,
+      "weight": 1
+    }
+  ]
+}

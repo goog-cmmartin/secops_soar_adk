@@ -135,6 +135,42 @@ class TestGoogleADKActions(unittest.TestCase):
         except SystemExit:
             pass
 
+    def test_recover_adk_report_from_case_comments(self):
+        from actions import run_adk_agent
+
+        class DummyEngine:
+            def list_case_comments(self, case_id):
+                return [
+                    {
+                        "name": "cases/109362/caseComments/20526",
+                        "comment": (
+                            "### 🛡️ Tier 1 Autonomous Triage Report (T+10m Scheduled Sweep)\n"
+                            "> **Verdict:** `True Positive (Malicious)` | **Disposition:** `Malicious — Active Compromise / Intrusion` | **Confidence:** `HIGH`\n\n"
+                            "### 1. Executive Summary (BLUF)\nConfirmed CVE-2024-4577 exploitation."
+                        ),
+                    },
+                    {
+                        "name": "cases/109362/caseComments/20524",
+                        "comment": "### [Automated Correlation] Silent Detections & Evidence\n- **Lookback Window**: 48 hours",
+                    },
+                ]
+
+        self.assertFalse(
+            run_adk_agent._is_valid_adk_report(
+                "Case '109362' already carries 'Tier1:Triaged' tag; reusing cached ADK Agent result to preserve Case Overview widget."
+            )
+        )
+        recovered = run_adk_agent._recover_adk_report_from_case_comments(
+            secops_engine=DummyEngine(),
+            case_id="109362",
+            agent_name="SecOps_Triage_109362",
+            model_name="gemini-3.8-flash",
+            session_id="case_109362",
+        )
+        self.assertIsNotNone(recovered)
+        self.assertTrue(recovered.get("recovered_from_case_wall"))
+        self.assertIn("**Verdict:** `True Positive (Malicious)`", recovered.get("final_response", ""))
+
 
 if __name__ == '__main__':
     unittest.main()

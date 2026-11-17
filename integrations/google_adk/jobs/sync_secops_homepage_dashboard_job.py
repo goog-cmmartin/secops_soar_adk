@@ -86,7 +86,8 @@ def main():
             _safe_extract_config(siemplify, "GCP Project ID")
             or _safe_extract_config(siemplify, "SecOps Project ID")
             or os.environ.get("GCP_PROJECT_ID")
-            or "sdl-preview-americas"
+            or os.environ.get("GOOGLE_CLOUD_PROJECT")
+            or ""
         )
         region = (
             _safe_extract_config(siemplify, "SecOps Region", default_value="us")
@@ -97,7 +98,7 @@ def main():
             _safe_extract_config(siemplify, "SecOps Customer ID")
             or _safe_extract_config(siemplify, "Customer ID")
             or os.environ.get("SECOPS_CUSTOMER_ID")
-            or "a556547c-1cff-43ef-a2e4-cf5b12a865df"
+            or ""
         )
         agent_engine_resource = _safe_extract_config(siemplify, "Agent Engine Resource Name")
         skills_gcs_path = _safe_extract_config(siemplify, "Skills GCS Path")

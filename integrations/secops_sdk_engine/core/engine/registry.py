@@ -252,5 +252,79 @@ class WorkflowRegistry:
         return cap.handler(*args, **kwargs)
 
 
-# Global default registry instance
-registry = WorkflowRegistry()
+def _make_unbound_catalog_handler(cap_id: str, sig: Any, fn_name: str) -> Callable[..., Any]:
+    def _unbound(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError(
+            f"Capability '{cap_id}' cannot be executed via the unbound module catalog "
+            f"'engine.registry.registry'; call engine.execute('{cap_id}', ...) on a SecOpsEngine instance."
+        )
+
+    _unbound.__name__ = fn_name
+    _unbound.__signature__ = sig  # type: ignore[attr-defined]
+    return _unbound
+
+
+class _CatalogWorkflowRegistry(WorkflowRegistry):
+    """Lazy metadata catalog of default capabilities without holding bound engine references."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._loaded = False
+
+    def _ensure_loaded(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+        from dataclasses import replace
+        import inspect
+        from engine.facade import SecOpsEngine
+
+        temp_registry = WorkflowRegistry()
+        SecOpsEngine(adapter=object(), custom_registry=temp_registry)
+        for cap in temp_registry.list_capabilities():
+            sig = inspect.signature(cap.handler)
+            fn_name = getattr(cap.handler, "__name__", cap.capability_id)
+            unbound_cap = replace(
+                cap,
+                handler=_make_unbound_catalog_handler(cap.capability_id, sig, fn_name),
+            )
+            super().register(unbound_cap)
+
+    def register(self, capability: WorkflowCapability) -> None:
+        self._ensure_loaded()
+        super().register(capability)
+
+    def get(self, capability_id: str) -> Optional[WorkflowCapability]:
+        self._ensure_loaded()
+        return super().get(capability_id)
+
+    def list_capabilities(
+        self,
+        category: Optional[str] = None,
+        domain: Optional[str] = None,
+        kind: Optional[str] = None,
+    ) -> List[WorkflowCapability]:
+        self._ensure_loaded()
+        return super().list_capabilities(category=category, domain=domain, kind=kind)
+
+    def validate_agent_call(
+        self, capability: WorkflowCapability, *args: Any, **kwargs: Any
+    ) -> None:
+        self._ensure_loaded()
+        super().validate_agent_call(capability, *args, **kwargs)
+
+    def execute(
+        self,
+        capability_id: str,
+        *args: Any,
+        enforce_agent_policy: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        self._ensure_loaded()
+        return super().execute(
+            capability_id, *args, enforce_agent_policy=enforce_agent_policy, **kwargs
+        )
+
+
+# Global read-only metadata catalog (never mutated by SecOpsEngine.__init__)
+registry: WorkflowRegistry = _CatalogWorkflowRegistry()

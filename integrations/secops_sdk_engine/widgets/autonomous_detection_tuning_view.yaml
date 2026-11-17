@@ -1,0 +1,17 @@
+action_identifier: Autonomous Detection Tuning
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 580
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: half_width
+description: Displays closed-loop autonomous detection tuning proposals, multi-factor exclusion tuples, retrospective blast-radius reduction gauges, compiler/dry-run verification badges, unified YARA-L/Findings Refinement diffs, and 30-day TTL expiration metadata.
+scope: alert
+title: Autonomous Detection Tuning
+type: html

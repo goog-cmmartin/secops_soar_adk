@@ -1,0 +1,55 @@
+creator: Christopher Martin
+description: Discovers and reconciles Google SecOps log sources across Ingestion API telemetry, Bindplane OTel downstream agent configurations, Chronicle Feeds, and Multi-Host UDM device autodetection into a Chronicle Data Table (asoc_log_source_inventory) and syncs the Log Source Inventory & Collector Health Native Dashboard.
+integration: SecOpsSDKEngine
+name: Sync Log Source Inventory Job
+parameters:
+  - default_value: 'asoc_log_source_inventory'
+    description: Chronicle Data Table name used to persist the unified Log Source Inventory, health status, Bindplane downstream pipeline metadata, and custom log_source_group tags.
+    is_mandatory: false
+    name: Data Table Name
+    type: string
+  - default_value: 'true'
+    description: Whether to create/update the Chronicle Data Table with the reconciled log source inventory.
+    is_mandatory: false
+    name: Sync Data Table
+    type: boolean
+  - default_value: 'true'
+    description: Whether to create or update the Chronicle Native Dashboard (Log Source Inventory & Collector Health).
+    is_mandatory: false
+    name: Sync Native Dashboard
+    type: boolean
+  - default_value: 'Log Source Inventory & Collector Health'
+    description: Display name for the Chronicle Native Dashboard.
+    is_mandatory: false
+    name: Dashboard Title
+    type: string
+  - default_value: ''
+    description: Optional existing Chronicle Native Dashboard ID to update in-place. Leave blank to auto-discover by title or create a new dashboard.
+    is_mandatory: false
+    name: Dashboard ID
+    type: string
+  - default_value: '7'
+    description: Lookback window in days for querying Chronicle ingestion metrics and multi-host UDM device autodetection.
+    is_mandatory: false
+    name: Lookback Days
+    type: string
+  - default_value: 'https://app.bindplane.com/v1'
+    description: Bindplane REST API base URL used to query connected OTel agents (/v1/agents) and downstream pipeline configurations (/v1/configs).
+    is_mandatory: false
+    name: Bindplane API URL
+    type: string
+  - default_value: ''
+    description: Optional Bindplane REST API Key (X-Bindplane-Api-Key). Falls back to BINDPLANE_API_KEY environment variable if left blank.
+    is_mandatory: false
+    name: Bindplane API Key
+    type: password
+  - default_value: ''
+    description: Optional Bindplane Account / Project ID (X-Bindplane-Account-ID). Falls back to BINDPLANE_PROJECT_ID environment variable if left blank.
+    is_mandatory: false
+    name: Bindplane Account ID
+    type: string
+  - default_value: 'true'
+    description: Whether to run GoogleSQL Pipe Syntax UDM device autodetection on FROM events to index individual child hosts behind multi-host feeds (Syslog, Webhook, S3/GCS, API) and extract metadata.ingestion_labels group tags.
+    is_mandatory: false
+    name: Include Multi-Host Feed Autodetection
+    type: boolean

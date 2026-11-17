@@ -844,8 +844,13 @@ class AuditPlaybookDecayWorkflow:
         selected_cards = filtered_cards[:limit]
         reports: List[PlaybookDecayReport] = []
 
-        from agents.core.evidence_store import get_evidence_store
-        evidence_store = get_evidence_store() if persist else None
+        evidence_store = None
+        if persist:
+            try:
+                from agents.core.evidence_store import get_evidence_store
+                evidence_store = get_evidence_store()
+            except ImportError:
+                logger.debug("agents.core.evidence_store not installed; skipping persistence.")
 
         for card in selected_cards:
             wf_id = card.get("identifier")

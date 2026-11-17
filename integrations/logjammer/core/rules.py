@@ -661,6 +661,22 @@ class RuleService:
       mentioned_tacs.add(tactic.strip().upper())
 
     # Detect platform / OS / cloud environment cues in the scenario
+    requested_lts = {
+        lt.strip().upper() for lt in (log_types or []) if lt and lt.strip()
+    }
+    allow_aws = not requested_lts or bool(
+        requested_lts & {"AWS_CLOUDTRAIL", "AWS_VPC_FLOW", "GUARDDUTY"}
+    )
+    allow_gcp = not requested_lts or bool(
+        requested_lts & {"GCP_CLOUDAUDIT", "GCP_VPC_FLOW", "GCP_DNS"}
+    )
+    allow_azure = not requested_lts or bool(
+        requested_lts
+        & {"AZURE_ACTIVITY", "AZURE_AD", "AZURE_AD_AUDIT", "OFFICE_365"}
+    )
+    allow_workspace = not requested_lts or ("WORKSPACE_ACTIVITY" in requested_lts)
+    allow_okta = not requested_lts or ("OKTA" in requested_lts)
+
     is_linux_or_ec2 = any(
         k in text_lower
         for k in ("linux", "ubuntu", "debian", "centos", "rhel", "bastion", "ec2", "i-0", "sshd", "/bin/", "/usr/bin/ssh", "auditd", "nix_system")
@@ -669,9 +685,9 @@ class RuleService:
         k in text_lower
         for k in ("windows", "powershell", "cmd.exe", "sysmon", "rundll32", "active directory", "kerberos", "lsass", "ntlm")
     )
-    is_aws = any(k in text_lower for k in ("aws", "ec2", "s3", "iam", "cloudtrail", "guardduty", "vpc"))
-    is_gcp = any(k in text_lower for k in ("gcp", "gke", "compute engine", "cloud storage", "bigquery", "cloudaudit"))
-    is_azure = any(k in text_lower for k in ("azure", "entra", "office 365", "o365", "m365"))
+    is_aws = allow_aws and any(k in text_lower for k in ("aws", "ec2", "s3", "iam", "cloudtrail", "guardduty", "vpc"))
+    is_gcp = allow_gcp and any(k in text_lower for k in ("gcp", "gke", "compute engine", "cloud storage", "bigquery", "cloudaudit"))
+    is_azure = allow_azure and any(k in text_lower for k in ("azure", "entra", "office 365", "o365", "m365"))
     has_ssh = any(k in text_lower for k in ("ssh", "sshd", "port 22", "bastion"))
 
     scored: List[tuple[SecOpsRule, float]] = []
@@ -696,6 +712,61 @@ class RuleService:
       rs_lower = str(r.raw_data.get("ruleset_name", "")).lower()
       cat_lower = str(r.raw_data.get("category", "")).lower()
       rule_text_lower = (r.text or "").lower()
+
+      # Enforce explicit log_types constraints so cloud-specific rules are never chosen when cloud log sources are excluded
+      if requested_lts:
+        is_workspace_rule = "workspace" in rs_lower or "workspace" in name_lower
+        is_okta_rule = "okta" in rs_lower or "okta" in name_lower
+        is_aws_rule = (
+            "aws" in rs_lower
+            or "aws" in name_lower
+            or "cloudtrail" in rule_text_lower
+            or "amazonaws.com" in rule_text_lower
+            or "guardduty" in name_lower
+        )
+        is_azure_rule = (
+            "azure" in rs_lower
+            or "azure" in name_lower
+            or "defender for cloud" in name_lower
+            or "office 365" in rs_lower
+        )
+        is_gcp_rule = (
+            "cdir scc" in rs_lower
+            or "gcp" in rs_lower
+            or "gcp" in name_lower
+            or "google cloud" in name_lower
+            or "cloud sql" in name_lower
+            or "googleapis.com" in rule_text_lower
+        )
+        if is_aws_rule and not allow_aws:
+          continue
+        if is_azure_rule and not allow_azure:
+          continue
+        if is_gcp_rule and not allow_gcp:
+          continue
+        if is_workspace_rule and not allow_workspace:
+          continue
+        if is_okta_rule and not allow_okta:
+          continue
+        if cat_lower == "cloud threats" and not (
+            (is_workspace_rule and allow_workspace)
+            or (is_okta_rule and allow_okta)
+            or (is_aws_rule and allow_aws)
+            or (is_azure_rule and allow_azure)
+            or (is_gcp_rule and allow_gcp)
+        ):
+          continue
+
+        # Reward rules aligned with explicitly requested log types
+        if is_workspace_rule and "WORKSPACE_ACTIVITY" in requested_lts:
+          score += 18.0
+        if "CS_EDR" in requested_lts and any(
+            et in rule_text_lower
+            for et in ("process_launch", "file_creation", "file_modification")
+        ):
+          score += 15.0
+        if "PAN_FIREWALL" in requested_lts and "network_connection" in rule_text_lower:
+          score += 12.0
 
       # 1. Exact MITRE technique / tactic matches
       for mt in mentioned_techs:
@@ -739,8 +810,11 @@ class RuleService:
             score += 18.0
 
       # Penalize strict OS / Cloud platform mismatches
+      if "macos" in cat_lower and not any(k in text_lower for k in ("macos", "darwin", "macbook", "os x", "dscl")):
+        score -= 20.0
+
       if is_linux_or_ec2:
-        if "windows" in cat_lower or "windows" in rs_lower or "windows" in name_lower:
+        if "windows" in cat_lower or "windows" in rs_lower or "windows" in name_lower or "macos" in cat_lower:
           score -= 25.0
         if "\\\\" in rule_text_lower and ".exe" in rule_text_lower and "/ssh/" not in rule_text_lower:
           score -= 20.0

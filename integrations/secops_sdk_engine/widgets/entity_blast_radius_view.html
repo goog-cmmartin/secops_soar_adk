@@ -1,0 +1,1456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Case Entity Blast Radius - SecOps SOAR Widget</title>
+  <style>
+    :root,
+    [data-theme="light"],
+    body.light {
+      --soar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Rubik", Helvetica, Arial, sans-serif;
+      --soar-font-mono: ui-monospace, SFMono-Regular, "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+      --soar-bg-page: #ffffff;
+      --soar-bg-card: #ffffff;
+      --soar-bg-canvas: #f8fafc;
+      --soar-bg-subtle: rgba(15, 23, 42, 0.045);
+      --soar-border: #e2e8f0;
+      --soar-border-strong: #cbd5e1;
+      --soar-grid-dot: rgba(100, 116, 139, 0.22);
+      --soar-text-primary: #0f172a;
+      --soar-text-secondary: #334155;
+      --soar-text-muted: #475569;
+      --soar-accent: #1d4ed8;
+      --soar-accent-hover: #1e40af;
+      --soar-accent-subtle: rgba(29, 78, 216, 0.10);
+
+      --tone-mal-bg: #fef2f2;
+      --tone-mal-text: #b91c1c;
+      --tone-mal-border: #fca5a5;
+      --tone-mal-stroke: #dc2626;
+
+      --tone-warn-bg: #fffbeb;
+      --tone-warn-text: #92400e;
+      --tone-warn-border: #fcd34d;
+      --tone-warn-stroke: #d97706;
+
+      --tone-ben-bg: #ecfdf5;
+      --tone-ben-text: #065f46;
+      --tone-ben-border: #6ee7b7;
+      --tone-ben-stroke: #059669;
+
+      --tone-info-bg: #eff6ff;
+      --tone-info-text: #1e40af;
+      --tone-info-border: #93c5fd;
+      --tone-info-stroke: #2563eb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --soar-bg-page: #161626;
+        --soar-bg-card: #161626;
+        --soar-bg-canvas: #111320;
+        --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+        --soar-border: #293140;
+        --soar-border-strong: #3b475c;
+        --soar-grid-dot: rgba(148, 163, 184, 0.16);
+        --soar-text-primary: #f1f5f9;
+        --soar-text-secondary: #cbd5e1;
+        --soar-text-muted: #94a3b8;
+        --soar-accent: #60a5fa;
+        --soar-accent-hover: #93c5fd;
+        --soar-accent-subtle: rgba(96, 165, 250, 0.16);
+
+        --tone-mal-bg: #3b191d;
+        --tone-mal-text: #fecaca;
+        --tone-mal-border: #8c1d28;
+        --tone-mal-stroke: #f87171;
+
+        --tone-warn-bg: #3a2307;
+        --tone-warn-text: #fde68a;
+        --tone-warn-border: #78350f;
+        --tone-warn-stroke: #fbbf24;
+
+        --tone-ben-bg: #122c22;
+        --tone-ben-text: #a7f3d0;
+        --tone-ben-border: #065f46;
+        --tone-ben-stroke: #34d399;
+
+        --tone-info-bg: #172554;
+        --tone-info-text: #bfdbfe;
+        --tone-info-border: #1e40af;
+        --tone-info-stroke: #60a5fa;
+      }
+    }
+
+    [data-theme="dark"], body.dark {
+      --soar-bg-page: #161626;
+      --soar-bg-card: #161626;
+      --soar-bg-canvas: #111320;
+      --soar-bg-subtle: rgba(255, 255, 255, 0.06);
+      --soar-border: #293140;
+      --soar-border-strong: #3b475c;
+      --soar-grid-dot: rgba(148, 163, 184, 0.16);
+      --soar-text-primary: #f1f5f9;
+      --soar-text-secondary: #cbd5e1;
+      --soar-text-muted: #94a3b8;
+      --soar-accent: #60a5fa;
+      --soar-accent-hover: #93c5fd;
+      --soar-accent-subtle: rgba(96, 165, 250, 0.16);
+
+      --tone-mal-bg: #3b191d;
+      --tone-mal-text: #fecaca;
+      --tone-mal-border: #8c1d28;
+      --tone-mal-stroke: #f87171;
+
+      --tone-warn-bg: #3a2307;
+      --tone-warn-text: #fde68a;
+      --tone-warn-border: #78350f;
+      --tone-warn-stroke: #fbbf24;
+
+      --tone-ben-bg: #122c22;
+      --tone-ben-text: #a7f3d0;
+      --tone-ben-border: #065f46;
+      --tone-ben-stroke: #34d399;
+
+      --tone-info-bg: #172554;
+      --tone-info-text: #bfdbfe;
+      --tone-info-border: #1e40af;
+      --tone-info-stroke: #60a5fa;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    ::selection { background: var(--soar-accent-subtle); color: var(--soar-text-primary); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--soar-border-strong); border-radius: 3px; }
+
+    html, body {
+      background: var(--soar-bg-page);
+      color: var(--soar-text-primary);
+      font-family: var(--soar-font);
+      font-size: 13px;
+      line-height: 1.45;
+      padding: 8px;
+      width: 100%;
+    }
+
+    button:focus-visible, a:focus-visible {
+      outline: 2px solid var(--soar-accent);
+      outline-offset: 2px;
+    }
+
+    .card-shell {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-header {
+      padding: 11px 16px;
+      border-bottom: 1px solid var(--soar-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .icon-box {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: var(--soar-accent-subtle);
+      border: 1px solid var(--soar-accent);
+      color: var(--soar-accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--soar-text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .header-sub {
+      font-size: 12px;
+      color: var(--soar-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--soar-border);
+      margin: 0 2px;
+    }
+
+    .chip-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+      transition: background 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .chip-btn:hover {
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    .chip-btn.active {
+      background: var(--soar-accent-subtle);
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    .adk-strip {
+      display: none;
+      padding: 7px 16px;
+      background: var(--soar-bg-subtle);
+      border-bottom: 1px solid var(--soar-border);
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 12px;
+    }
+
+    .adk-pills {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .badge-malicious { background: var(--tone-mal-bg); color: var(--tone-mal-text); border: 1px solid var(--tone-mal-border); }
+    .badge-warning, .badge-btp { background: var(--tone-warn-bg); color: var(--tone-warn-text); border: 1px solid var(--tone-warn-border); }
+    .badge-benign { background: var(--tone-ben-bg); color: var(--tone-ben-text); border: 1px solid var(--tone-ben-border); }
+    .badge-info, .badge-inconclusive { background: var(--tone-info-bg); color: var(--tone-info-text); border: 1px solid var(--tone-info-border); }
+    .badge-fp { background: var(--soar-bg-subtle); color: var(--soar-text-secondary); border: 1px solid var(--soar-border-strong); }
+
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      min-height: 475px;
+    }
+
+    .workspace-grid.inspector-collapsed {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .workspace-grid.inspector-collapsed .inspector-pane {
+      display: none;
+    }
+
+    .workspace-grid.inspector-collapsed .canvas-pane {
+      border-right: none;
+    }
+
+    @media (max-width: 860px) {
+      .workspace-grid {
+        grid-template-columns: 1fr;
+      }
+      .canvas-pane {
+        border-right: none;
+        border-bottom: 1px solid var(--soar-border);
+      }
+    }
+
+    .canvas-pane {
+      position: relative;
+      background-color: var(--soar-bg-canvas);
+      background-image: radial-gradient(var(--soar-grid-dot) 1px, transparent 1px);
+      background-size: 20px 20px;
+      border-right: 1px solid var(--soar-border);
+      min-height: 475px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #blast-svg {
+      width: 100%;
+      height: 440px;
+      flex: 1;
+      user-select: none;
+      display: block;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    #blast-svg.panning {
+      cursor: grabbing;
+    }
+
+    .node-group {
+      cursor: pointer;
+    }
+
+    .node-group.dragging {
+      cursor: grabbing;
+    }
+
+    @keyframes pulseThreat {
+      0% { transform: scale(1); opacity: 0.55; }
+      75% { transform: scale(1.34); opacity: 0; }
+      100% { transform: scale(1.34); opacity: 0; }
+    }
+    .pulse-ring {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: pulseThreat 2.6s infinite cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .edge-hot {
+      stroke-dasharray: 6 5;
+      animation: dashTravel 16s linear infinite;
+    }
+    @keyframes dashTravel {
+      to { stroke-dashoffset: -110; }
+    }
+
+    .canvas-footer {
+      background: var(--soar-bg-card);
+      border-top: 1px solid var(--soar-border);
+      padding: 5px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .legend-items {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--soar-text-secondary);
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 5px;
+    }
+
+    .zoom-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .hud-btn {
+      background: transparent;
+      color: var(--soar-text-secondary);
+      border: 1px solid transparent;
+      border-radius: 5px;
+      height: 26px;
+      min-width: 26px;
+      padding: 0 7px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      cursor: pointer;
+    }
+
+    .hud-btn:hover {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-accent);
+      border-color: var(--soar-border);
+    }
+
+    .hud-readout {
+      min-width: 46px;
+      text-align: center;
+      color: var(--soar-text-muted);
+    }
+
+    .inspector-pane {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+      background: var(--soar-bg-card);
+      height: 475px;
+      overflow: hidden;
+    }
+
+    .inspector-scroll-body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .inspector-close-btn {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-muted);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      width: 26px;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .inspector-close-btn:hover {
+      color: var(--soar-accent);
+      border-color: var(--soar-accent);
+    }
+
+    .section-heading {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--soar-text-secondary);
+      margin-top: 12px;
+      margin-bottom: 4px;
+    }
+
+    .mono-box {
+      font-family: var(--soar-font-mono);
+      font-size: 12px;
+      background: var(--soar-bg-canvas);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--soar-text-primary);
+      word-break: break-all;
+      max-height: 96px;
+      overflow-y: auto;
+    }
+
+    .adk-callout {
+      background: var(--soar-accent-subtle);
+      border: 1px solid var(--soar-accent);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: var(--soar-text-primary);
+    }
+
+    .action-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-top: 10px;
+      border-top: 1px solid var(--soar-border);
+    }
+
+    .btn-primary {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--soar-accent);
+      color: #ffffff;
+      border: 1px solid var(--soar-accent);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn-primary:hover { background: var(--soar-accent-hover); }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-primary);
+      border: 1px solid var(--soar-border);
+      cursor: pointer;
+    }
+    .btn-secondary:hover { border-color: var(--soar-accent); color: var(--soar-accent); }
+
+    .empty-state {
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--soar-text-muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card-shell">
+    <div class="card-header">
+      <div class="title-group">
+        <div class="icon-box" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="6" r="3"></circle>
+            <circle cx="18" cy="18" r="3"></circle>
+            <line x1="8.7" y1="10.7" x2="15.3" y2="7.3"></line>
+            <line x1="8.7" y1="13.3" x2="15.3" y2="16.7"></line>
+          </svg>
+        </div>
+        <div>
+          <div id="header-title" class="header-title">Case Entity &amp; Detection Blast Radius</div>
+          <div id="header-sub" class="header-sub">Evaluating case telemetry...</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button class="chip-btn active" data-filter="ALL" onclick="setNodeFilter('ALL')">All Nodes</button>
+        <button class="chip-btn" data-filter="ENTITY" onclick="setNodeFilter('ENTITY')">Entities</button>
+        <button class="chip-btn" data-filter="RULE" onclick="setNodeFilter('RULE')">YARA-L Rules</button>
+        <button class="chip-btn" data-filter="CASE" onclick="setNodeFilter('CASE')">Related Cases</button>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <button class="chip-btn" onclick="resetPositions()" title="Recompute clean spacing and fit graph to canvas">Auto-Layout</button>
+        <button id="panel-toggle-btn" class="chip-btn active" onclick="toggleInspectorPanel()" title="Show or hide the node details side panel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2.5"></rect>
+            <line x1="15" y1="3" x2="15" y2="21"></line>
+          </svg>
+          <span id="panel-toggle-label">Hide Panel</span>
+        </button>
+        <button class="chip-btn" onclick="toggleThemeManual()" title="Toggle Light / Dark theme" aria-label="Toggle theme">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="adk-strip" class="adk-strip"></div>
+
+    <div id="main-workspace" class="workspace-grid">
+      <div id="canvas-pane" class="canvas-pane">
+        <svg id="blast-svg" role="img" aria-label="Interactive Case Entity Blast Radius Graph"></svg>
+
+        <div class="canvas-footer">
+          <div class="legend-items">
+            <span><span class="legend-dot" style="background:var(--tone-mal-stroke);"></span>Malicious / Alerting</span>
+            <span><span class="legend-dot" style="background:var(--tone-warn-stroke);"></span>Silent Rule / Pivot</span>
+            <span><span class="legend-dot" style="background:var(--tone-ben-stroke);"></span>Benign / Authorized</span>
+            <span><span class="legend-dot" style="background:var(--tone-info-stroke);"></span>Context / Related Case</span>
+          </div>
+
+          <div class="zoom-controls" role="group" aria-label="Graph zoom controls">
+            <button class="hud-btn" onclick="zoomByStep(1 / 1.22)" title="Zoom out" aria-label="Zoom out">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+            <button id="zoom-readout" class="hud-btn hud-readout" onclick="resetZoom100()" title="Reset zoom to 100%">100%</button>
+            <button class="hud-btn" onclick="zoomByStep(1.22)" title="Zoom in" aria-label="Zoom in">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+            <button class="hud-btn" onclick="fitToView()" title="Fit entire topology in view">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <polyline points="9 21 3 21 3 15"></polyline>
+                <polyline points="21 15 21 21 15 21"></polyline>
+                <polyline points="3 9 3 3 9 3"></polyline>
+              </svg>
+              <span>Fit</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="inspector-pane" class="inspector-pane">
+        <div class="empty-state">Select a node in the topology graph to inspect UDM queries, MITRE mappings, and ADK insights.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="raw-data" style="display:none;">[{stepInstanceName}.JsonResult]</div>
+
+  <script>
+    // =========================================================================
+    // 3-Tier SOAR Theme Synchronization
+    // =========================================================================
+    function isRgbDark(color) {
+      if (!color) return false;
+      const s = String(color).trim();
+      let r = 255, g = 255, b = 255;
+      if (s.startsWith("#")) {
+        let h = s.slice(1);
+        if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+        if (h.length >= 6) {
+          r = parseInt(h.slice(0, 2), 16);
+          g = parseInt(h.slice(2, 4), 16);
+          b = parseInt(h.slice(4, 6), 16);
+        }
+      } else if (s.startsWith("rgb")) {
+        const m = s.match(/\d+/g);
+        if (m && m.length >= 3) {
+          r = Number(m[0]); g = Number(m[1]); b = Number(m[2]);
+        }
+      }
+      return (0.299 * r + 0.587 * g + 0.114 * b) < 140;
+    }
+
+    function setTheme(mode) {
+      document.documentElement.setAttribute("data-theme", mode);
+      document.body.className = mode;
+    }
+
+    function detectInitialTheme() {
+      try {
+        const parentBg = window.parent && window.parent.document && window.parent.getComputedStyle(window.parent.document.body).backgroundColor;
+        if (parentBg && parentBg !== "rgba(0, 0, 0, 0)" && parentBg !== "transparent") {
+          setTheme(isRgbDark(parentBg) ? "dark" : "light");
+          return;
+        }
+      } catch (e) {}
+      setTheme(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    }
+
+    function toggleThemeManual() {
+      const cur = document.documentElement.getAttribute("data-theme") || "light";
+      setTheme(cur === "dark" ? "light" : "dark");
+    }
+
+    window.addEventListener("message", evt => {
+      if (evt && evt.data && evt.data.background) {
+        setTheme(isRgbDark(evt.data.background) ? "dark" : "light");
+      }
+    });
+    detectInitialTheme();
+
+    // =========================================================================
+    // Tenant-Agnostic Chronicle SIEM & SOAR URL Builders
+    // =========================================================================
+    function resolveSecOpsOrigin(explicitBase) {
+      if (explicitBase && String(explicitBase).trim().startsWith("http")) {
+        return String(explicitBase).trim().replace(/\/+$/, "");
+      }
+      try {
+        if (window.top && window.top.location && window.top.location.origin && window.top.location.origin !== "null") {
+          if (!window.top.location.origin.includes(".scf.usercontent.goog")) {
+            return window.top.location.origin;
+          }
+        }
+      } catch (e) {}
+      try {
+        if (document.referrer) {
+          const refOrigin = new URL(document.referrer).origin;
+          if (refOrigin && refOrigin !== "null" && !refOrigin.includes(".scf.usercontent.goog")) {
+            return refOrigin;
+          }
+        }
+      } catch (e) {}
+      try {
+        if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+          const topOrig = window.location.ancestorOrigins[window.location.ancestorOrigins.length - 1];
+          if (topOrig && topOrig !== "null") return topOrig;
+        }
+      } catch (e) {}
+      return "";
+    }
+
+    function buildUdmSearchLink(query, tw, explicitBase) {
+      const origin = resolveSecOpsOrigin(explicitBase);
+      const now = new Date();
+      const startIso = (tw && tw.start_time) || new Date(now.getTime() - 48 * 3600 * 1000).toISOString();
+      const endIso = (tw && tw.end_time) || now.toISOString();
+      const path = `/search?query=${encodeURIComponent(query)}&startTime=${encodeURIComponent(startIso)}&endTime=${encodeURIComponent(endIso)}`;
+      return origin ? `${origin}${path}` : path;
+    }
+
+    function buildRelatedCaseLink(targetCaseId, explicitBase) {
+      const origin = resolveSecOpsOrigin(explicitBase);
+      const cleanId = String(targetCaseId || "").trim().replace(/^#/, "");
+      return origin ? `${origin}/cases/${encodeURIComponent(cleanId)}` : `/cases/${encodeURIComponent(cleanId)}`;
+    }
+
+    function openExternalUrl(evt, url) {
+      if (evt) evt.preventDefault();
+      try {
+        const w = window.open(url, "_blank", "noopener,noreferrer");
+        if (!w && window.top) window.top.open(url, "_blank", "noopener,noreferrer");
+      } catch (e) {
+        window.open(url, "_blank");
+      }
+      return false;
+    }
+
+    function escapeHtml(val) {
+      const d = document.createElement("div");
+      d.textContent = val == null ? "" : String(val);
+      return d.innerHTML;
+    }
+
+    function extractPayload(raw) {
+      if (!raw) return null;
+      if (typeof raw === "object") return raw;
+      const s = String(raw).trim();
+      if (!s || (s.startsWith("[") && s.includes(".JsonResult"))) return null;
+      try { return JSON.parse(s); } catch (e) { return null; }
+    }
+
+    // =========================================================================
+    // Authored Vector Node Icons (Uniform 1.8px stroke, zero emoji)
+    // =========================================================================
+    function svgIconForType(nodeType) {
+      switch (nodeType) {
+        case "HOST":
+          return `<rect x="-9" y="-8" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><line x1="-5" y1="8" x2="5" y2="8" stroke="currentColor" stroke-width="1.8"/><line x1="0" y1="4" x2="0" y2="8" stroke="currentColor" stroke-width="1.8"/>`;
+        case "IP":
+          return `<circle cx="0" cy="0" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><ellipse cx="0" cy="0" rx="4" ry="9" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="-9" y1="0" x2="9" y2="0" stroke="currentColor" stroke-width="1.5"/>`;
+        case "USER":
+          return `<circle cx="0" cy="-3" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M -8 8 C -8 3.5, 8 3.5, 8 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`;
+        case "PROCESS":
+          return `<polyline points="-6,-4 -1,0 -6,4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="1" y1="4" x2="7" y2="4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="-10" y="-8" width="20" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/>`;
+        case "FILEHASH":
+          return `<path d="M -6 -9 H 3 L 7 -5 V 9 H -6 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><polyline points="3,-9 3,-5 7,-5" fill="none" stroke="currentColor" stroke-width="1.6"/>`;
+        case "RULE":
+          return `<path d="M 0 -10 L 8 -6 V 1 C 8 6, 0 10, 0 10 C 0 10, -8 6, -8 1 V -6 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`;
+        case "CASE":
+          return `<path d="M -9 -6 H -3 L -1 -3 H 9 V 8 H -9 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>`;
+        default:
+          return `<circle cx="0" cy="0" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/>`;
+      }
+    }
+
+    function riskCssVars(risk) {
+      if (risk === "malicious") return { stroke: "var(--tone-mal-stroke)", bg: "var(--tone-mal-bg)", badge: "badge-malicious" };
+      if (risk === "warning") return { stroke: "var(--tone-warn-stroke)", bg: "var(--tone-warn-bg)", badge: "badge-warning" };
+      if (risk === "benign") return { stroke: "var(--tone-ben-stroke)", bg: "var(--tone-ben-bg)", badge: "badge-benign" };
+      return { stroke: "var(--tone-info-stroke)", bg: "var(--tone-info-bg)", badge: "badge-info" };
+    }
+
+    // =========================================================================
+    // Collision-Free 6-Tier + Barycenter Auto-Layout Engine
+    // =========================================================================
+    function computeAutoLayout(nodes, edges) {
+      const coords = {};
+      if (!Array.isArray(nodes) || nodes.length === 0) return coords;
+
+      const riskRank = { malicious: 0, warning: 1, info: 2, benign: 3 };
+      const buckets = [[], [], [], [], [], []];
+
+      nodes.forEach(n => {
+        const nt = String(n.node_type || "HOST");
+        let tier = 0;
+        if (nt === "CASE") tier = 5;
+        else if (nt === "RULE") tier = 4;
+        else if (nt === "PROCESS" || nt === "FILEHASH") tier = 3;
+        else if (nt === "USER") tier = 2;
+        else if (nt === "HOST" || (nt === "IP" && n.is_internal)) tier = 1;
+        else tier = 0;
+        buckets[tier].push(n);
+      });
+
+      buckets.forEach(col => {
+        col.sort((a, b) => {
+          const alA = a.is_alerting ? 0 : 1;
+          const alB = b.is_alerting ? 0 : 1;
+          if (alA !== alB) return alA - alB;
+          const rA = riskRank[a.risk] != null ? riskRank[a.risk] : 2;
+          const rB = riskRank[b.risk] != null ? riskRank[b.risk] : 2;
+          if (rA !== rB) return rA - rB;
+          const hDiff = (Number(b.hit_count) || 0) - (Number(a.hit_count) || 0);
+          if (hDiff !== 0) return hDiff;
+          return String(a.identifier || "").localeCompare(String(b.identifier || ""));
+        });
+      });
+
+      // Split dense tiers (> 5 nodes) into balanced visual sub-columns so vertical height stays compact and zero labels collide
+      const maxRowsPerSubcol = 5;
+      const visualCols = [];
+      buckets.forEach((tNodes, tierIdx) => {
+        if (!tNodes.length) return;
+        const numSub = Math.ceil(tNodes.length / maxRowsPerSubcol);
+        const chunkSize = Math.ceil(tNodes.length / numSub);
+        for (let i = 0; i < tNodes.length; i += chunkSize) {
+          visualCols.push({ tier: tierIdx, list: tNodes.slice(i, i + chunkSize) });
+        }
+      });
+
+      const tierGap = 250;
+      const subcolGap = 204;
+      const rowPitch = 116;
+      const centerY = 0;
+
+      let curX = 0;
+      let prevTier = null;
+      let subIdxInTier = 0;
+      visualCols.forEach(vc => {
+        if (prevTier !== null) {
+          if (vc.tier !== prevTier) {
+            curX += tierGap;
+            subIdxInTier = 0;
+          } else {
+            curX += subcolGap;
+            subIdxInTier += 1;
+          }
+        }
+        vc.x = curX;
+        vc.yOffset = (subIdxInTier % 2 === 1) ? 44 : 0;
+        prevTier = vc.tier;
+      });
+
+      function placeCol(vc) {
+        const cnt = vc.list.length;
+        const startY = (centerY + (vc.yOffset || 0)) - ((cnt - 1) * rowPitch) / 2;
+        vc.list.forEach((nd, idx) => {
+          coords[nd.id] = { x: vc.x, y: startY + idx * rowPitch };
+        });
+      }
+
+      visualCols.forEach(placeCol);
+
+      // Barycenter crossing-minimization sweeps
+      const adj = {};
+      const validIds = new Set(nodes.map(n => n.id));
+      (edges || []).forEach(e => {
+        if (validIds.has(e.from) && validIds.has(e.to)) {
+          if (!adj[e.from]) adj[e.from] = [];
+          if (!adj[e.to]) adj[e.to] = [];
+          adj[e.from].push(e.to);
+          adj[e.to].push(e.from);
+        }
+      });
+
+      function sortColByNeighbors(vc) {
+        if (vc.list.length <= 1) return;
+        vc.list.sort((a, b) => {
+          const nbA = adj[a.id] || [];
+          const nbB = adj[b.id] || [];
+          const yA = nbA.length ? nbA.reduce((s, id) => s + coords[id].y, 0) / nbA.length : coords[a.id].y;
+          const yB = nbB.length ? nbB.reduce((s, id) => s + coords[id].y, 0) / nbB.length : coords[b.id].y;
+          if (Math.abs(yA - yB) > 4) return yA - yB;
+          return (riskRank[a.risk] || 2) - (riskRank[b.risk] || 2);
+        });
+        placeCol(vc);
+      }
+
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < visualCols.length; i++) sortColByNeighbors(visualCols[i]);
+        for (let i = visualCols.length - 1; i >= 0; i--) sortColByNeighbors(visualCols[i]);
+      }
+
+      return coords;
+    }
+
+    // =========================================================================
+    // Interactive Graph, Pan/Zoom & Collapsible Inspector State
+    // =========================================================================
+    let payload = null;
+    try { payload = [{stepInstanceName}.JsonResult]; } catch (e) {
+      const el = document.getElementById("raw-data");
+      payload = el ? el.textContent : null;
+    }
+    payload = extractPayload(payload);
+
+    let positions = {};
+    let selectedNodeId = null;
+    let hoveredNodeId = null;
+    let activeFilter = "ALL";
+    let inspectorCollapsed = false;
+
+    const MIN_SCALE = 0.28;
+    const MAX_SCALE = 2.60;
+    let viewport = { x: 40, y: 235, scale: 1 };
+
+    let nodeDragCtx = null;
+    let panDragCtx = null;
+
+    function getVisibleGraph() {
+      if (!payload || !Array.isArray(payload.nodes)) return { nodes: [], edges: [] };
+      const nodes = payload.nodes.filter(n => {
+        if (activeFilter === "ALL") return true;
+        if (activeFilter === "RULE") return n.node_type === "RULE";
+        if (activeFilter === "CASE") return n.node_type === "CASE";
+        return n.node_type !== "RULE" && n.node_type !== "CASE";
+      });
+      const vSet = new Set(nodes.map(n => n.id));
+      const edges = (payload.edges || []).filter(e => vSet.has(e.from) && vSet.has(e.to));
+      return { nodes, edges };
+    }
+
+    function updateViewportTransform() {
+      const layer = document.getElementById("viewport-layer");
+      if (layer) {
+        layer.setAttribute("transform", `translate(${viewport.x.toFixed(1)}, ${viewport.y.toFixed(1)}) scale(${viewport.scale.toFixed(4)})`);
+      }
+      const readout = document.getElementById("zoom-readout");
+      if (readout) {
+        readout.textContent = `${Math.round(viewport.scale * 100)}%`;
+      }
+    }
+
+    function fitToView() {
+      const svg = document.getElementById("blast-svg");
+      const { nodes } = getVisibleGraph();
+      if (!svg || !nodes.length) return;
+
+      const w = svg.clientWidth || 720;
+      const h = svg.clientHeight || 440;
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      nodes.forEach(n => {
+        const p = positions[n.id] || { x: 0, y: 0 };
+        minX = Math.min(minX, p.x - 86);
+        maxX = Math.max(maxX, p.x + 86);
+        minY = Math.min(minY, p.y - 40);
+        maxY = Math.max(maxY, p.y + 72);
+      });
+
+      const contentW = Math.max(180, maxX - minX);
+      const contentH = Math.max(140, maxY - minY);
+      const padX = 32;
+      const padY = 24;
+
+      const availW = Math.max(160, w - padX * 2);
+      const availH = Math.max(140, h - padY * 2);
+      const nextScale = Math.max(MIN_SCALE, Math.min(1.12, Math.min(availW / contentW, availH / contentH)));
+
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      viewport.scale = nextScale;
+      viewport.x = w / 2 - cx * nextScale;
+      viewport.y = h / 2 - cy * nextScale;
+      updateViewportTransform();
+    }
+
+    function zoomAtPoint(factor, clientX, clientY) {
+      const svg = document.getElementById("blast-svg");
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const px = clientX - rect.left;
+      const py = clientY - rect.top;
+      const prev = viewport.scale;
+      const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev * factor));
+      if (Math.abs(next - prev) < 0.0001) return;
+
+      viewport.x = px - (px - viewport.x) * (next / prev);
+      viewport.y = py - (py - viewport.y) * (next / prev);
+      viewport.scale = next;
+      updateViewportTransform();
+    }
+
+    function zoomByStep(factor) {
+      const svg = document.getElementById("blast-svg");
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      zoomAtPoint(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }
+
+    function resetZoom100() {
+      const svg = document.getElementById("blast-svg");
+      const { nodes } = getVisibleGraph();
+      if (!svg || !nodes.length) return;
+      const w = svg.clientWidth || 720;
+      const h = svg.clientHeight || 440;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      nodes.forEach(n => {
+        const p = positions[n.id] || { x: 0, y: 0 };
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      });
+      viewport.scale = 1;
+      viewport.x = w / 2 - (minX + maxX) / 2;
+      viewport.y = h / 2 - (minY + maxY) / 2;
+      updateViewportTransform();
+    }
+
+    function setInspectorCollapsed(collapsed) {
+      inspectorCollapsed = Boolean(collapsed);
+      const ws = document.getElementById("main-workspace");
+      const btn = document.getElementById("panel-toggle-btn");
+      const lbl = document.getElementById("panel-toggle-label");
+      if (ws) ws.classList.toggle("inspector-collapsed", inspectorCollapsed);
+      if (btn) btn.classList.toggle("active", !inspectorCollapsed);
+      if (lbl) lbl.textContent = inspectorCollapsed ? "Show Panel" : "Hide Panel";
+      requestAnimationFrame(() => fitToView());
+    }
+
+    function toggleInspectorPanel() {
+      setInspectorCollapsed(!inspectorCollapsed);
+    }
+
+    function initData() {
+      if (!payload || !Array.isArray(payload.nodes) || payload.nodes.length === 0) {
+        document.getElementById("main-workspace").innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">No Blast Radius graph data available yet for this case.</div>`;
+        return;
+      }
+
+      const m = payload.metrics || {};
+      document.getElementById("header-title").textContent = `Case #${payload.case_id || ""} — ${payload.case_title || "Entity Blast Radius"}`;
+      document.getElementById("header-sub").textContent =
+        `${m.entity_nodes_count || 0} Entities • ${m.detection_nodes_count || 0} YARA-L Rules (${m.silent_rules_count || 0} Silent / ${m.alerting_rules_count || 0} Alerting) • ${m.related_case_nodes_count || 0} Related Cases • ${m.total_edges || 0} Edges`;
+
+      const adk = payload.adk_overlay || {};
+      const adkStrip = document.getElementById("adk-strip");
+      if (adk.has_adk_analysis && adk.verdict) {
+        const vBadge = adk.verdict_tone === "malicious" ? "badge-malicious"
+          : (adk.verdict_tone === "btp" ? "badge-btp" : (adk.verdict_tone === "fp" ? "badge-fp" : "badge-inconclusive"));
+        adkStrip.style.display = "flex";
+        adkStrip.innerHTML = `
+          <div class="adk-pills">
+            <span style="font-weight:700; color:var(--soar-text-secondary);">ADK Triage Overlay:</span>
+            <span class="badge ${vBadge}">${escapeHtml(adk.verdict)}</span>
+            ${adk.disposition ? `<span class="badge badge-fp">${escapeHtml(adk.disposition)}</span>` : ""}
+            ${adk.confidence ? `<span class="badge badge-info">Confidence: ${escapeHtml(adk.confidence)}</span>` : ""}
+          </div>
+          <span style="color:var(--soar-text-muted);">${escapeHtml(adk.model || "Google ADK")}</span>
+        `;
+      }
+
+      positions = computeAutoLayout(payload.nodes, payload.edges || []);
+      selectedNodeId = payload.nodes[0].id;
+
+      bindCanvasInteractions();
+      renderGraph();
+      renderInspector();
+      requestAnimationFrame(() => fitToView());
+    }
+
+    function resetPositions() {
+      const { nodes, edges } = getVisibleGraph();
+      if (!nodes.length) return;
+      const fresh = computeAutoLayout(nodes, edges);
+      Object.keys(fresh).forEach(id => { positions[id] = fresh[id]; });
+      renderGraph();
+      fitToView();
+    }
+
+    function setNodeFilter(mode) {
+      activeFilter = mode;
+      document.querySelectorAll(".chip-btn[data-filter]").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-filter") === mode);
+      });
+      const { nodes, edges } = getVisibleGraph();
+      const fresh = computeAutoLayout(nodes, edges);
+      Object.keys(fresh).forEach(id => { positions[id] = fresh[id]; });
+      if (nodes.length > 0 && !nodes.some(n => n.id === selectedNodeId)) {
+        selectedNodeId = nodes[0].id;
+      }
+      renderGraph();
+      renderInspector();
+      fitToView();
+    }
+
+    function renderGraph() {
+      const svg = document.getElementById("blast-svg");
+      if (!svg || !payload) return;
+
+      const { nodes: visibleNodes, edges: visibleEdges } = getVisibleGraph();
+      const focusId = hoveredNodeId || selectedNodeId;
+
+      const connectedNodes = new Set();
+      if (focusId) {
+        connectedNodes.add(focusId);
+        visibleEdges.forEach(e => {
+          if (e.from === focusId) connectedNodes.add(e.to);
+          if (e.to === focusId) connectedNodes.add(e.from);
+        });
+      }
+
+      let edgesMarkup = "";
+      let activeEdgeLabelsMarkup = "";
+      // Seed obstacle boxes with every visible node's icon + label card so edge pills never occlude any node
+      const placedBoxes = visibleNodes.map(n => {
+        const np = positions[n.id] || { x: 0, y: 0 };
+        return { x: np.x, y: np.y + 18, w: 158, h: 98 };
+      });
+
+      visibleEdges.forEach(e => {
+        const p1 = positions[e.from];
+        const p2 = positions[e.to];
+        if (!p1 || !p2) return;
+
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const sx = p1.x + (dx / dist) * 28;
+        const sy = p1.y + (dy / dist) * 28;
+        const ex = p2.x - (dx / dist) * 32;
+        const ey = p2.y - (dy / dist) * 32;
+        const ctrlX = (sx + ex) / 2;
+        const ctrlY = (sy + ey) / 2 - 16;
+
+        const isIncident = focusId ? (e.from === focusId || e.to === focusId) : false;
+        const edgeOpacity = focusId ? (isIncident ? "1" : "0.24") : "0.78";
+        const stroke = (e.is_hot || isIncident)
+          ? (e.is_hot ? "var(--tone-mal-stroke)" : "var(--soar-accent)")
+          : "var(--soar-border-strong)";
+        const marker = e.is_hot ? "url(#arr-hot)" : (isIncident ? "url(#arr-focus)" : "url(#arr-std)");
+        const cls = e.is_hot ? "edge-hot" : "";
+        const sw = isIncident ? "2.3" : (e.is_hot ? "1.9" : "1.4");
+
+        edgesMarkup += `
+          <path d="M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}"
+                fill="none" stroke="${stroke}" stroke-width="${sw}" opacity="${edgeOpacity}"
+                class="${cls}" marker-end="${marker}" />
+        `;
+
+        // Render edge relationship pill ONLY for the focused/hovered node's incident connections
+        const lbl = String(e.label || "").trim();
+        if (lbl && isIncident) {
+          const boxW = Math.max(60, Math.min(146, lbl.length * 6.5 + 16));
+          const boxH = 20;
+          const candidateTs = [0.5, 0.34, 0.66, 0.24, 0.76];
+          const candidateYOffsets = [0, -22, 22, -42, 42];
+          let bestX = 0.25 * sx + 0.5 * ctrlX + 0.25 * ex;
+          let bestY = 0.25 * sy + 0.5 * ctrlY + 0.25 * ey;
+          let foundClean = false;
+
+          for (let ti = 0; ti < candidateTs.length && !foundClean; ti++) {
+            const t = candidateTs[ti];
+            const omt = 1 - t;
+            const bx = omt * omt * sx + 2 * omt * t * ctrlX + t * t * ex;
+            const by = omt * omt * sy + 2 * omt * t * ctrlY + t * t * ey;
+            for (let yi = 0; yi < candidateYOffsets.length; yi++) {
+              const cy = by + candidateYOffsets[yi];
+              const hit = placedBoxes.some(pb =>
+                Math.abs(pb.x - bx) < (pb.w + boxW) / 2 + 4 &&
+                Math.abs(pb.y - cy) < (pb.h + boxH) / 2 + 3
+              );
+              if (!hit) {
+                bestX = bx;
+                bestY = cy;
+                foundClean = true;
+                break;
+              }
+            }
+          }
+          placedBoxes.push({ x: bestX, y: bestY, w: boxW, h: boxH });
+
+          activeEdgeLabelsMarkup += `
+            <g pointer-events="none">
+              <rect x="${(bestX - boxW / 2).toFixed(1)}" y="${(bestY - 10).toFixed(1)}" width="${boxW.toFixed(1)}" height="19" rx="4.5"
+                    fill="var(--soar-bg-card)" stroke="${e.is_hot ? 'var(--tone-mal-border)' : 'var(--soar-accent)'}" stroke-width="1"/>
+              <text x="${bestX.toFixed(1)}" y="${(bestY + 3.5).toFixed(1)}" text-anchor="middle"
+                    fill="var(--soar-text-primary)" style="font-size:11.5px; font-weight:600;">
+                ${escapeHtml(lbl)}
+              </text>
+            </g>
+          `;
+        }
+      });
+
+      let nodesMarkup = "";
+      visibleNodes.forEach(n => {
+        const pos = positions[n.id] || { x: 0, y: 0 };
+        const rv = riskCssVars(n.risk);
+        const isSel = n.id === selectedNodeId;
+        const isHov = n.id === hoveredNodeId;
+        const isDimmed = hoveredNodeId && !connectedNodes.has(n.id);
+        const nodeOpacity = isDimmed ? "0.42" : "1";
+
+        nodesMarkup += `
+          <g class="node-group" data-id="${escapeHtml(n.id)}" opacity="${nodeOpacity}" transform="translate(${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})">
+            ${n.risk === "malicious" ? `<circle r="28" fill="none" stroke="${rv.stroke}" stroke-width="2" class="pulse-ring"/>` : ""}
+            ${(isSel || isHov) ? `<circle r="31" fill="none" stroke="var(--soar-accent)" stroke-width="2.2" ${isSel ? 'stroke-dasharray="4 3"' : ''}/>` : ""}
+            <circle r="24" fill="${rv.bg}" stroke="${rv.stroke}" stroke-width="2.2"/>
+            <g style="color:${rv.stroke};">${svgIconForType(n.node_type)}</g>
+            <rect x="-75" y="29" width="150" height="35" rx="6"
+                  fill="var(--soar-bg-card)" stroke="${(isSel || isHov) ? 'var(--soar-accent)' : 'var(--soar-border)'}" stroke-width="${(isSel || isHov) ? '1.6' : '1'}"/>
+            <text x="0" y="43" text-anchor="middle" fill="var(--soar-text-primary)" style="font-size:12px; font-weight:600;">
+              ${escapeHtml(n.label)}
+            </text>
+            <text x="0" y="57" text-anchor="middle" fill="var(--soar-text-muted)" style="font-size:11.5px;">
+              ${escapeHtml(String(n.subtitle || "").slice(0, 24))}
+            </text>
+          </g>
+        `;
+      });
+
+      svg.innerHTML = `
+        <defs>
+          <marker id="arr-std" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--soar-text-muted)" opacity="0.65"></path>
+          </marker>
+          <marker id="arr-focus" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--soar-accent)"></path>
+          </marker>
+          <marker id="arr-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="var(--tone-mal-stroke)"></path>
+          </marker>
+        </defs>
+        <g id="viewport-layer" transform="translate(${viewport.x.toFixed(1)}, ${viewport.y.toFixed(1)}) scale(${viewport.scale.toFixed(4)})">
+          <g id="edges-layer">${edgesMarkup}</g>
+          <g id="nodes-layer">${nodesMarkup}</g>
+          <g id="edge-labels-layer">${activeEdgeLabelsMarkup}</g>
+        </g>
+      `;
+
+      svg.querySelectorAll(".node-group").forEach(g => {
+        g.addEventListener("pointerdown", onNodePointerDown);
+        g.addEventListener("pointerenter", onNodePointerEnter);
+        g.addEventListener("pointerleave", onNodePointerLeave);
+      });
+      updateViewportTransform();
+    }
+
+    function bindCanvasInteractions() {
+      const svg = document.getElementById("blast-svg");
+      const pane = document.getElementById("canvas-pane");
+      if (!svg || !pane) return;
+
+      svg.addEventListener("wheel", evt => {
+        evt.preventDefault();
+        const factor = evt.deltaY < 0 ? 1.12 : (1 / 1.12);
+        zoomAtPoint(factor, evt.clientX, evt.clientY);
+      }, { passive: false });
+
+      svg.addEventListener("pointerdown", evt => {
+        if (evt.target.closest(".node-group")) return;
+        panDragCtx = {
+          startX: evt.clientX,
+          startY: evt.clientY,
+          origX: viewport.x,
+          origY: viewport.y,
+          moved: false
+        };
+        svg.classList.add("panning");
+        window.addEventListener("pointermove", onCanvasPanMove);
+        window.addEventListener("pointerup", onCanvasPanUp);
+      });
+
+      if (typeof ResizeObserver !== "undefined") {
+        let prevW = pane.clientWidth;
+        const ro = new ResizeObserver(entries => {
+          for (const entry of entries) {
+            const nw = entry.contentRect.width;
+            if (Math.abs(nw - prevW) > 24) {
+              prevW = nw;
+              fitToView();
+            }
+          }
+        });
+        ro.observe(pane);
+      }
+    }
+
+    function onCanvasPanMove(evt) {
+      if (!panDragCtx) return;
+      const dx = evt.clientX - panDragCtx.startX;
+      const dy = evt.clientY - panDragCtx.startY;
+      if (Math.hypot(dx, dy) > 3) panDragCtx.moved = true;
+      viewport.x = panDragCtx.origX + dx;
+      viewport.y = panDragCtx.origY + dy;
+      updateViewportTransform();
+    }
+
+    function onCanvasPanUp() {
+      const svg = document.getElementById("blast-svg");
+      if (svg) svg.classList.remove("panning");
+      panDragCtx = null;
+      window.removeEventListener("pointermove", onCanvasPanMove);
+      window.removeEventListener("pointerup", onCanvasPanUp);
+    }
+
+    function onNodePointerEnter(evt) {
+      if (nodeDragCtx || panDragCtx) return;
+      const id = evt.currentTarget.getAttribute("data-id");
+      if (id && hoveredNodeId !== id) {
+        hoveredNodeId = id;
+        renderGraph();
+      }
+    }
+
+    function onNodePointerLeave() {
+      if (nodeDragCtx) return;
+      if (hoveredNodeId !== null) {
+        hoveredNodeId = null;
+        renderGraph();
+      }
+    }
+
+    function onNodePointerDown(evt) {
+      evt.stopPropagation();
+      const id = evt.currentTarget.getAttribute("data-id");
+      if (!id) return;
+      const cur = positions[id] || { x: 0, y: 0 };
+      nodeDragCtx = {
+        id,
+        startClientX: evt.clientX,
+        startClientY: evt.clientY,
+        origX: cur.x,
+        origY: cur.y,
+        moved: false
+      };
+      evt.currentTarget.classList.add("dragging");
+      window.addEventListener("pointermove", onNodePointerMove);
+      window.addEventListener("pointerup", onNodePointerUp);
+    }
+
+    function onNodePointerMove(evt) {
+      if (!nodeDragCtx) return;
+      const dxScreen = evt.clientX - nodeDragCtx.startClientX;
+      const dyScreen = evt.clientY - nodeDragCtx.startClientY;
+      if (Math.hypot(dxScreen, dyScreen) > 4) {
+        nodeDragCtx.moved = true;
+      }
+      positions[nodeDragCtx.id] = {
+        x: nodeDragCtx.origX + dxScreen / viewport.scale,
+        y: nodeDragCtx.origY + dyScreen / viewport.scale
+      };
+      renderGraph();
+    }
+
+    function onNodePointerUp() {
+      if (!nodeDragCtx) return;
+      const clickedId = nodeDragCtx.id;
+      const wasClick = !nodeDragCtx.moved;
+      nodeDragCtx = null;
+      window.removeEventListener("pointermove", onNodePointerMove);
+      window.removeEventListener("pointerup", onNodePointerUp);
+
+      selectedNodeId = clickedId;
+      if (wasClick && inspectorCollapsed) {
+        setInspectorCollapsed(false);
+      }
+      renderGraph();
+      renderInspector();
+    }
+
+    function copyTextBtn(txt, btnEl) {
+      if (!txt) return;
+      navigator.clipboard.writeText(txt).then(() => {
+        const orig = btnEl.textContent;
+        btnEl.textContent = "Copied!";
+        setTimeout(() => { btnEl.textContent = orig; }, 1400);
+      }).catch(() => {});
+    }
+
+    function renderInspector() {
+      const pane = document.getElementById("inspector-pane");
+      if (!pane || !payload || !Array.isArray(payload.nodes)) return;
+      const node = payload.nodes.find(n => n.id === selectedNodeId) || payload.nodes[0];
+      if (!node) {
+        pane.innerHTML = `<div class="empty-state">No node matches the active filter.</div>`;
+        return;
+      }
+
+      const rv = riskCssVars(node.risk);
+      const mitres = Array.isArray(node.mitre_techniques) ? node.mitre_techniques : [];
+      const mitreHtml = mitres.length
+        ? mitres.map(m => `<span class="badge badge-info">${escapeHtml(m.id)}${m.name ? " • " + escapeHtml(m.name) : ""}</span>`).join(" ")
+        : `<span style="font-size:12px; color:var(--soar-text-muted);">No direct ATT&amp;CK mapping</span>`;
+
+      const udmQuery = String(node.udm_query || "");
+      const udmLink = udmQuery ? buildUdmSearchLink(udmQuery, payload.time_window, payload.secops_ui_base_url) : "";
+      const caseLink = node.related_case_id ? buildRelatedCaseLink(node.related_case_id, payload.secops_ui_base_url) : "";
+
+      pane.innerHTML = `
+        <div class="inspector-scroll-body">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px; padding-bottom:10px; border-bottom:1px solid var(--soar-border);">
+            <div style="min-width:0; flex:1;">
+              <div style="font-size:14px; font-weight:700; word-break:break-all;">${escapeHtml(node.identifier || node.label)}</div>
+              <div style="font-size:12px; color:var(--soar-text-muted); margin-top:2px;">${escapeHtml(node.node_type)} • ${escapeHtml(node.subtitle || "")}</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+              <span class="badge ${rv.badge}">${escapeHtml(String(node.risk || "info").toUpperCase())}</span>
+              <button class="inspector-close-btn" onclick="setInspectorCollapsed(true)" title="Collapse details panel" aria-label="Collapse details panel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="section-heading">Telemetry Footprint</div>
+          <div style="font-size:12px; color:var(--soar-text-primary); font-variant-numeric:tabular-nums;">
+            ${escapeHtml(node.telemetry_stats || node.summary || "")}
+          </div>
+
+          <div class="section-heading">MITRE ATT&amp;CK Context</div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">${mitreHtml}</div>
+
+          ${node.adk_insight ? `
+            <div class="section-heading">ADK Agent Finding</div>
+            <div class="adk-callout">${escapeHtml(node.adk_insight)}</div>
+          ` : `
+            <div class="section-heading">Summary</div>
+            <div style="font-size:12px; color:var(--soar-text-secondary);">${escapeHtml(node.summary || "")}</div>
+          `}
+
+          ${udmQuery ? `
+            <div class="section-heading">UDM Pivot Query</div>
+            <div class="mono-box">${escapeHtml(udmQuery)}</div>
+          ` : ""}
+        </div>
+
+        <div class="action-row">
+          ${udmLink ? `
+            <a class="btn-primary" href="${escapeHtml(udmLink)}" target="_blank" rel="noopener noreferrer" onclick="return openExternalUrl(event, '${escapeHtml(udmLink)}')">
+              <span>Open in UDM Search</span>
+            </a>
+            <button class="btn-secondary" onclick="copyTextBtn(${JSON.stringify(udmQuery).replace(/"/g, '&quot;')}, this)">Copy Query</button>
+          ` : ""}
+          ${caseLink ? `
+            <a class="btn-primary" href="${escapeHtml(caseLink)}" target="_blank" rel="noopener noreferrer" onclick="return openExternalUrl(event, '${escapeHtml(caseLink)}')">
+              <span>Open Case #${escapeHtml(node.related_case_id)}</span>
+            </a>
+          ` : ""}
+        </div>
+      `;
+    }
+
+    window.addEventListener("DOMContentLoaded", initData);
+  </script>
+</body>
+</html>

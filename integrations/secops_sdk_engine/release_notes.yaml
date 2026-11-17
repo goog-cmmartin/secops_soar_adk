@@ -1,3 +1,93 @@
+- description: "Upgraded Case Kill-Chain Swimlane (kill_chain_swimlane_view.html & BuildKillChainTimelineWorkflow) with 3-way Y-axis mode switching (Kill-Chain Stage default, Detection Pipeline, Affected Entity), piecewise UTC time axis with dwell-time break corridors, interactive Nx burst cluster badges with inspector stepper, tier-specific vector glyphs, reconciled stage counts, and refined MITRE ATT&CK heuristic precedence plus identity canonicalization."
+  version: 7.5
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-17"
+- description: "Added Map Entity Blast Radius and Build Kill Chain Timeline actions, CaseAttackTelemetryCollector shared Case Context caching, MitreCatalog + heuristic ATT&CK resolution, Google ADK 3-Tier Triage overlay fusion, and full-width predefined HTML widgets (entity_blast_radius_view.html and kill_chain_swimlane_view.html) with tenant-agnostic Chronicle UDM Search and Related Case deep-links."
+  version: 7.3
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-17"
+- description: "Fixed UDM & Raw Log Entity Pivot widget (udm_entity_pivot_view.html) comma-split alignment when [Entity.Identifier] contains commas (e.g. EMAILSUBJECT or PROCESS entities), fixed resetDefaultTypeFilter() so USERUNIQNAME and FILEHASH chips are never auto-disabled, added dotted username inference (e.g. BOLA.E), and added multi-tenant base URL detection via document.referrer."
+  version: 7.2
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-15"
+- description: "Removed all hardcoded tenant ID fallbacks across SecOpsSDKEngineManager, actions, scheduled jobs, and HTML widgets so the integration is 100% tenant-agnostic and reads all configuration strictly from the SOAR Integration instance settings."
+  version: 7.1
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-15"
+- description: "Fixed tenant resource validation in GoogleSecOpsAdapter._resolve_instance_resource and SecOpsSDKEngineManager when Chronicle APIs return canonical numeric GCP project numbers (e.g. projects/123456789012/...) while the integration is configured with a string GCP Project ID (e.g. your-gcp-project-id)."
+  version: 7.0
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-15"
+- description: "Added JsonResult payload-size safeguards in Correlate Silent Detections (Max Result Records in JsonResult parameter, round-robin rule diversity capping, deep UDM/protobuf blob stripping, string truncation, 150 KB serialized ceiling, rules_triggered summary list, and 25-row Markdown report table capping)."
+  version: 6.9
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-14"
+- description: "Added persistent SOAR Case Context caching (CORRELATE_SILENT_CACHED_RESULT and RELATED_CASES_CACHED_RESULT) alongside /tmp caching so Case Overview HTML widgets retain full results across ephemeral SOAR worker pods on playbook re-runs."
+  version: 6.8
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-13"
+- description: "Added GroupCasesByEntityWorkflow (case_grouping.py) and merge_cases adapter support for high-signal entity overlap case grouping and merging with environment filtering, single-host magnet quarantine guardrails, and expanded generic Linux binary/hash denylists (sshpass, ssh, curl, empty-file SHA-256)."
+  version: 6.4
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-06"
+- description: "Added Data Table integration and Auto-Discovery to Log Source Drift Detection: asoc_log_baselines table persistence, multi-event partition auto-discovery in Profile Log Source, and direct Data Table streaming evaluation with automated drift status updates in Detect Log Source Drift Job."
+  version: 6.0
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-04"
+- description: "Added type-aware entity sanitization in CorrelateSilentDetectionsWorkflow and RelatedCasesByEntityWorkflow to block well-known Windows SIDs (e.g. S-1-0-0, S-1-5-18, S-1-5-10) and built-in domain RIDs, default cloud/OS users (e.g. ec2-user), bare numeric PIDs mapped as PROCESS entities, hex access bitmasks, timestamps, AWS-managed default policy ARNs, built-in Windows discovery/LOLBin utilities (e.g. net.exe), EDR sensor binaries, and misclassified HOSTNAME entities."
+  version: 5.9
+  item_name: "SecOpsSDKEngine"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-01"
 - description: "Normalized dashboard_name / dashboard_title and comma-separated community_categories parameters in SyncSecOpsHomepageDashboardWorkflow and SecOpsEngine.sync_secops_homepage_dashboard."
   version: 5.8
   item_name: "SecOpsSDKEngine"

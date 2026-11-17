@@ -425,7 +425,7 @@ def _format_header_markdown(
         if active_incidents_count == 0
         else f"🚨 **[{active_incidents_count} ACTIVE SERVICE DISRUPTION(S)]**"
     )
-    proj = tenant_health.get("project_id") or "sdl-preview-americas"
+    proj = tenant_health.get("project_id") or "configured-tenant"
     loc = (tenant_health.get("location") or "us").upper()
     return (
         f"# 🛡️ {dashboard_title}\n"
@@ -480,7 +480,7 @@ def _format_ai_executive_summary_markdown(
         inc = active_incidents[0]
         lines.append(
             f"- 🚨 **[ACTIVE DISRUPTION]** **[{inc.service_name}]({inc.public_url})** — {inc.external_desc} "
-            f"**Action:** Monitor forwarder buffering and ingestion latency on tenant `{tenant_health.get('project_id', 'sdl-preview-americas')}`."
+            f"**Action:** Monitor forwarder buffering and ingestion latency on tenant `{tenant_health.get('project_id') or 'configured-tenant'}`."
         )
     else:
         lines.append(
@@ -552,7 +552,7 @@ def _format_tenant_health_markdown(
     tenant_health: Dict[str, Any],
     refreshed_at_str: str,
 ) -> str:
-    proj = tenant_health.get("project_id") or "sdl-preview-americas"
+    proj = tenant_health.get("project_id") or "configured-tenant"
     loc = (tenant_health.get("location") or "us").upper()
     udm_24h = int(tenant_health.get("udm_events_24h") or 0)
     udm_types = int(tenant_health.get("active_udm_log_types_24h") or 0)

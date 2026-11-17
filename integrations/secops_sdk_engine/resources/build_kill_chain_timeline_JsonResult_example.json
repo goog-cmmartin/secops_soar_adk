@@ -1,0 +1,86 @@
+{
+  "case_id": "108412",
+  "case_title": "IIS Webshell Drop & Credential Harvesting",
+  "case_priority": "HIGH",
+  "case_status": "OPENED",
+  "case_stage": "Triage",
+  "lookback_hours": 48,
+  "time_window": {
+    "start_time": "2026-11-15T21:14:00Z",
+    "end_time": "2026-11-17T09:15:00Z"
+  },
+  "secops_ui_base_url": "",
+  "adk_overlay": {
+    "has_adk_analysis": true,
+    "verdict": "True Positive (Malicious)",
+    "verdict_tone": "malicious",
+    "disposition": "Malicious - Active Compromise / Intrusion",
+    "confidence": "HIGH",
+    "model": "gemini-3.8-flash",
+    "session_id": "case_108412",
+    "summary": "Corroborated IIS webshell drop via certutil.exe precursor followed by silent discovery rules and LSASS memory dump."
+  },
+  "lanes_summary": {
+    "ALL": 4,
+    "UDM": 1,
+    "SILENT": 1,
+    "ALERT": 1,
+    "SOAR_ADK": 1
+  },
+  "mitre_stages": [
+    {
+      "slug": "defense-evasion",
+      "label": "Defense Evasion",
+      "count": 1,
+      "active": true,
+      "techniques": [
+        "T1140"
+      ]
+    },
+    {
+      "slug": "discovery",
+      "label": "Discovery",
+      "count": 1,
+      "active": true,
+      "techniques": [
+        "T1033"
+      ]
+    },
+    {
+      "slug": "credential-access",
+      "label": "Credential Access",
+      "count": 1,
+      "active": true,
+      "techniques": [
+        "T1003.001"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "tl_1",
+      "timestamp": "2026-11-16T21:14:19Z",
+      "display_time": "21:14:19 UTC",
+      "epoch_ms": 1794863659000,
+      "lane": "UDM",
+      "lane_label": "Precursor UDM",
+      "severity": "warning",
+      "title": "PROCESS_LAUNCH: certutil.exe -decode st.b64 health.aspx",
+      "detail": "Host: PRD-WEB-IIS04 | Command: certutil.exe -f -decode C:\\Windows\\Temp\\st.b64 C:\\inetpub\\wwwroot\\health.aspx",
+      "mitre_id": "T1140",
+      "mitre_name": "Deobfuscate/Decode Files or Information",
+      "mitre_tactic": "Defense Evasion",
+      "mitre_tactic_slug": "defense-evasion",
+      "entities": [
+        "PRD-WEB-IIS04",
+        "certutil.exe -decode st.b64 health.aspx"
+      ],
+      "rule_id": "",
+      "event_id": "udm_ev_001",
+      "udm_query": "(principal.hostname = \"PRD-WEB-IIS04\" OR target.hostname = \"PRD-WEB-IIS04\" OR principal.asset.hostname = \"PRD-WEB-IIS04\")",
+      "adk_annotation": "Unalerted certutil.exe decode staged the IIS webshell 2 minutes prior to credential dumping."
+    }
+  ],
+  "events_truncated": false,
+  "total_events_discovered": 4
+}

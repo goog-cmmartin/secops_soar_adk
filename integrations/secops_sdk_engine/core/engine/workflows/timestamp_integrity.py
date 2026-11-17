@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from adapters.google_secops import GoogleSecOpsAdapter
-    from agents.core.evidence_store import EvidenceFabricStore
+    from engine.ports import EvidenceStorePort as EvidenceFabricStore
 from engine.domain import (
     TimestampIntegrityReport,
     TimestampMetricRow,
@@ -263,9 +263,11 @@ class TimestampIntegrityWorkflow:
         project_id: Optional[str] = None,
     ) -> str:
         """Synthesizes GenAI operational narrative via Vertex AI Gemini with deterministic fallback."""
+        adapter_pid = getattr(self.adapter, "project_id", None)
+        clean_adapter_pid = adapter_pid.strip() if isinstance(adapter_pid, str) else ""
         pid = (
             project_id
-            or getattr(self.adapter, "project_id", None)
+            or clean_adapter_pid
             or os.getenv("GOOGLE_CLOUD_PROJECT")
             or os.getenv("GCP_PROJECT")
         )
@@ -303,14 +305,20 @@ class TimestampIntegrityWorkflow:
         )
 
         try:
+            if not pid:
+                raise ValueError("Vertex AI project_id not configured")
             from google import genai
             client = genai.Client(vertexai=True, project=pid, location="global")
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
+            report.narrative_source = "gemini"
+            report.narrative_error = None
             return response.text
         except Exception as ex:
+            report.narrative_source = "deterministic_fallback"
+            report.narrative_error = f"{type(ex).__name__}: {ex}"
             logger.debug("Vertex AI executive brief generation unavailable, using deterministic brief: %s", ex)
             return self._deterministic_brief_fallback(report)
 

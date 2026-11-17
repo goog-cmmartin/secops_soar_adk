@@ -100,6 +100,7 @@ class AuditDashboardHealthWorkflow:
         broken_cnt = sum(1 for f in findings if f.status == DashboardHealthStatus.BROKEN_QUERY)
         empty_cnt = sum(1 for f in findings if f.status == DashboardHealthStatus.EMPTY_DASHBOARD)
         stale_cnt = sum(1 for f in findings if f.status == DashboardHealthStatus.STALE)
+        unknown_cnt = sum(1 for f in findings if f.status == DashboardHealthStatus.UNKNOWN)
         custom_cnt = sum(1 for f in findings if f.dashboard_type.upper() == "CUSTOM")
         curated_cnt = sum(1 for f in findings if f.dashboard_type.upper() in ("CURATED", "DEFAULT"))
 
@@ -114,6 +115,7 @@ class AuditDashboardHealthWorkflow:
             custom_count=custom_cnt,
             curated_count=curated_cnt,
             findings=findings,
+            unknown_count=unknown_cnt,
             generated_at=now_utc,
         )
 
@@ -144,6 +146,7 @@ class AuditDashboardHealthWorkflow:
         broken_query_details: List[Dict[str, Any]] = []
         has_orphan_chart = False
         was_deep_inspected = False
+        inspection_error: Optional[str] = None
         charts_count = dash.charts_count
 
         # Deep inspection for custom or recently modified dashboards
@@ -153,18 +156,26 @@ class AuditDashboardHealthWorkflow:
             and (is_custom or is_recently_modified or is_recently_created)
         ):
             was_deep_inspected = True
-            broken_query_details, has_orphan_chart, charts_count = self._audit_dashboard_widgets(dash.id)
+            broken_query_details, has_orphan_chart, charts_count, inspection_error = self._audit_dashboard_widgets(dash.id)
 
         raw_def = dash.raw.get("definition", {})
         has_explicit_empty_charts = isinstance(raw_def.get("charts"), list) and len(raw_def.get("charts", [])) == 0 and bool(raw_def)
-        is_empty = bool(is_custom and (charts_count == 0 if was_deep_inspected else has_explicit_empty_charts))
+        is_empty = bool(
+            is_custom
+            and not inspection_error
+            and (charts_count == 0 if was_deep_inspected else has_explicit_empty_charts)
+        )
 
         # Status determination hierarchy
         status = DashboardHealthStatus.HEALTHY
         details = "Dashboard is operating normally."
         remediations: List[str] = []
 
-        if broken_query_details:
+        if inspection_error:
+            status = DashboardHealthStatus.UNKNOWN
+            details = f"Dashboard widget inspection failed: {inspection_error}"
+            remediations.append("Verify dashboard read and query validation API permissions and retry the audit.")
+        elif broken_query_details:
             status = DashboardHealthStatus.BROKEN_QUERY
             details = f"Dashboard contains {len(broken_query_details)} broken widget query/queries with syntax or compiler errors."
             remediations.append("Inspect broken chart queries and correct invalid UDM field references or statistical syntax.")
@@ -204,15 +215,19 @@ class AuditDashboardHealthWorkflow:
             details=details,
             remediation_steps=remediations,
             broken_query_details=broken_query_details,
+            inspection_error=inspection_error,
             raw=dash.raw,
         )
         return finding, was_deep_inspected
 
-    def _audit_dashboard_widgets(self, dashboard_id: str) -> tuple[List[Dict[str, Any]], bool, int]:
+    def _audit_dashboard_widgets(
+        self, dashboard_id: str
+    ) -> tuple[List[Dict[str, Any]], bool, int, Optional[str]]:
         """Deeply inspects charts and validates underlying statistical queries."""
         broken_queries: List[Dict[str, Any]] = []
         has_orphan_chart = False
         charts_count = 0
+        validation_errors: List[str] = []
 
         try:
             get_dash_wf = GetDashboardDetailWorkflow(self.adapter)
@@ -242,8 +257,14 @@ class AuditDashboardHealthWorkflow:
                                 }
                             )
                     except Exception as e:
-                        logger.debug(f"Query validation exception for chart '{chart.display_name}': {e}")
+                        validation_errors.append(
+                            f"{chart.display_name or chart.id}: {type(e).__name__}: {e}"
+                        )
+                        logger.warning("Query validation exception for chart '%s': %s", chart.display_name, e)
         except Exception as exc:
-            logger.debug(f"Could not deep-audit dashboard '{dashboard_id}': {exc}")
+            err_msg = f"{type(exc).__name__}: {exc}"
+            logger.warning("Could not deep-audit dashboard '%s': %s", dashboard_id, exc)
+            return broken_queries, has_orphan_chart, charts_count, err_msg
 
-        return broken_queries, has_orphan_chart, charts_count
+        inspection_error = "; ".join(validation_errors) if validation_errors and not broken_queries else None
+        return broken_queries, has_orphan_chart, charts_count, inspection_error

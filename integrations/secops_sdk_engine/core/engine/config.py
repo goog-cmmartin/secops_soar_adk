@@ -42,6 +42,8 @@ def _strip_env_value(raw_val: str) -> str:
 def _load_env_file(env_path: Optional[Path] = None) -> None:
     """Lightweight .env file parser that populates os.environ without external dependencies."""
     if env_path is None:
+        if os.environ.get("SECOPS_IGNORE_DOTENV") == "1":
+            return
         # Check current working directory and parent directories
         candidate = Path.cwd() / ".env"
         if not candidate.is_file():
@@ -70,6 +72,30 @@ def _load_env_file(env_path: Optional[Path] = None) -> None:
                     os.environ[key] = val
     except OSError as e:
         logger.warning("Failed to read .env configuration file at %s: %s", env_path, e)
+
+
+DEFAULT_INVENTORY_BASE_URL = "http://localhost:8000"
+
+
+def resolve_inventory_base_url(explicit_url: Optional[str] = None) -> str:
+    """Resolves and validates the SecOps Inventory base URL from configuration."""
+    import urllib.parse
+
+    raw = (
+        explicit_url
+        or os.environ.get("SECOPS_INVENTORY_BASE_URL")
+        or DEFAULT_INVENTORY_BASE_URL
+    ).strip().rstrip("/")
+    parsed = urllib.parse.urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise SecOpsConfigurationError(
+            f"Invalid SECOPS_INVENTORY_BASE_URL '{raw}'; expected http(s)://host[:port]."
+        )
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise SecOpsConfigurationError(
+            f"Invalid SECOPS_INVENTORY_BASE_URL '{raw}'; credentials, query strings, and fragments are not permitted."
+        )
+    return raw
 
 
 @dataclass

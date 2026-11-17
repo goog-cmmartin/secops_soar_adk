@@ -245,7 +245,12 @@ class UpdateCaseAlertWorkflow:
             masks.append("priority")
 
         if status is not None:
-            payload["status"] = status.strip().upper()
+            s = status.strip().upper()
+            if s in ("CLOSED", "CLOSE"):
+                s = "CLOSE"
+            elif s in ("OPENED", "OPEN"):
+                s = "OPEN"
+            payload["status"] = s
             masks.append("status")
 
         if not payload:

@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Case Kill-Chain Swimlane - SecOps SOAR Widget</title>
+  <style>
+    :root,
+    [data-theme="light"],
+    body.light {
+      --soar-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Rubik", Helvetica, Arial, sans-serif;
+      --soar-font-mono: ui-monospace, SFMono-Regular, "Fira Code", Menlo, Monaco, Consolas, monospace;
+
+      --soar-bg-page: #ffffff;
+      --soar-bg-card: #ffffff;
+      --soar-bg-canvas: #f8fafc;
+      --soar-bg-subtle: rgba(15, 23, 42, 0.04);
+      --soar-bg-hover: rgba(37, 99, 235, 0.05);
+      --soar-border: #e2e8f0;
+      --soar-border-strong: #cbd5e1;
+      --soar-grid-line: rgba(100, 116, 139, 0.16);
+      --soar-text-primary: #0f172a;
+      --soar-text-secondary: #334155;
+      --soar-text-muted: #64748b;
+      --soar-accent: #2563eb;
+      --soar-accent-hover: #1d4ed8;
+      --soar-btn-bg: #2563eb;
+      --soar-btn-hover: #1d4ed8;
+      --soar-accent-subtle: rgba(37, 99, 235, 0.10);
+      --soar-accent-text: #1e40af;
+
+      --tone-mal-bg: #fef2f2;
+      --tone-mal-text: #b91c1c;
+      --tone-mal-border: #fca5a5;
+      --tone-mal-stroke: #dc2626;
+
+      --tone-warn-bg: #fffbeb;
+      --tone-warn-text: #b45309;
+      --tone-warn-border: #fcd34d;
+      --tone-warn-stroke: #d97706;
+
+      --tone-ben-bg: #ecfdf5;
+      --tone-ben-text: #047857;
+      --tone-ben-border: #6ee7b7;
+      --tone-ben-stroke: #059669;
+
+      --tone-info-bg: #eff6ff;
+      --tone-info-text: #1d4ed8;
+      --tone-info-border: #93c5fd;
+      --tone-info-stroke: #2563eb;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --soar-bg-page: #161626;
+        --soar-bg-card: #161626;
+        --soar-bg-canvas: #111320;
+        --soar-bg-subtle: rgba(255, 255, 255, 0.05);
+        --soar-bg-hover: rgba(59, 130, 246, 0.10);
+        --soar-border: #293140;
+        --soar-border-strong: #3b475c;
+        --soar-grid-line: rgba(148, 163, 184, 0.16);
+        --soar-text-primary: #f1f5f9;
+        --soar-text-secondary: #cbd5e1;
+        --soar-text-muted: #94a3b8;
+        --soar-accent: #60a5fa;
+        --soar-accent-hover: #93c5fd;
+        --soar-btn-bg: #2563eb;
+        --soar-btn-hover: #1d4ed8;
+        --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+        --soar-accent-text: #93c5fd;
+
+        --tone-mal-bg: #3b191d;
+        --tone-mal-text: #fca5a5;
+        --tone-mal-border: #8c1d28;
+        --tone-mal-stroke: #f87171;
+
+        --tone-warn-bg: #3a2307;
+        --tone-warn-text: #fcd34d;
+        --tone-warn-border: #78350f;
+        --tone-warn-stroke: #fbbf24;
+
+        --tone-ben-bg: #122c22;
+        --tone-ben-text: #6ee7b7;
+        --tone-ben-border: #065f46;
+        --tone-ben-stroke: #34d399;
+
+        --tone-info-bg: #172554;
+        --tone-info-text: #93c5fd;
+        --tone-info-border: #1e40af;
+        --tone-info-stroke: #60a5fa;
+      }
+    }
+
+    [data-theme="dark"], body.dark {
+      --soar-bg-page: #161626;
+      --soar-bg-card: #161626;
+      --soar-bg-canvas: #111320;
+      --soar-bg-subtle: rgba(255, 255, 255, 0.05);
+      --soar-bg-hover: rgba(59, 130, 246, 0.10);
+      --soar-border: #293140;
+      --soar-border-strong: #3b475c;
+      --soar-grid-line: rgba(148, 163, 184, 0.16);
+      --soar-text-primary: #f1f5f9;
+      --soar-text-secondary: #cbd5e1;
+      --soar-text-muted: #94a3b8;
+      --soar-accent: #60a5fa;
+      --soar-accent-hover: #93c5fd;
+      --soar-btn-bg: #2563eb;
+      --soar-btn-hover: #1d4ed8;
+      --soar-accent-subtle: rgba(59, 130, 246, 0.16);
+      --soar-accent-text: #93c5fd;
+
+      --tone-mal-bg: #3b191d;
+      --tone-mal-text: #fca5a5;
+      --tone-mal-border: #8c1d28;
+      --tone-mal-stroke: #f87171;
+
+      --tone-warn-bg: #3a2307;
+      --tone-warn-text: #fcd34d;
+      --tone-warn-border: #78350f;
+      --tone-warn-stroke: #fbbf24;
+
+      --tone-ben-bg: #122c22;
+      --tone-ben-text: #6ee7b7;
+      --tone-ben-border: #065f46;
+      --tone-ben-stroke: #34d399;
+
+      --tone-info-bg: #172554;
+      --tone-info-text: #93c5fd;
+      --tone-info-border: #1e40af;
+      --tone-info-stroke: #60a5fa;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    ::selection { background: var(--soar-accent-subtle); color: var(--soar-text-primary); }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--soar-bg-subtle); }
+    ::-webkit-scrollbar-thumb { background: var(--soar-border-strong); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--soar-text-muted); }
+
+    html, body {
+      background: var(--soar-bg-page);
+      color: var(--soar-text-primary);
+      font-family: var(--soar-font);
+      font-size: 13px;
+      line-height: 1.45;
+      padding: 8px;
+      width: 100%;
+      height: 100%;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    button:focus-visible, a:focus-visible, input:focus-visible {
+      outline: 2px solid var(--soar-accent);
+      outline-offset: 2px;
+    }
+
+    .card-shell {
+      background: var(--soar-bg-card);
+      border: 1px solid var(--soar-border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 16px);
+      min-height: 540px;
+    }
+
+    .card-header {
+      flex-shrink: 0;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--soar-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .icon-box {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: var(--soar-accent-subtle);
+      border: 1px solid var(--soar-accent);
+      color: var(--soar-accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .header-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--soar-text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .header-sub {
+      font-size: 12px;
+      color: var(--soar-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--soar-border);
+      margin: 0 2px;
+    }
+
+    .search-input {
+      background: var(--soar-bg-canvas);
+      color: var(--soar-text-primary);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 4px 9px;
+      font-size: 12px;
+      width: 170px;
+      caret-color: var(--soar-accent);
+    }
+    .search-input::placeholder { color: var(--soar-text-muted); }
+
+    .chip-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+      border-radius: 6px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+      transition: background 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .chip-btn:hover { border-color: var(--soar-accent); color: var(--soar-accent); }
+    .chip-btn.active {
+      background: var(--soar-accent-subtle);
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    .control-strip {
+      flex-shrink: 0;
+      padding: 7px 16px;
+      border-bottom: 1px solid var(--soar-border);
+      background: var(--soar-bg-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .stage-chain {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    .tactic-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      border: 1px solid var(--soar-border);
+      background: var(--soar-bg-card);
+      color: var(--soar-text-secondary);
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+      transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+    }
+    .tactic-pill:hover { border-color: var(--soar-accent); color: var(--soar-accent); }
+    .tactic-pill.active-tactic {
+      background: var(--soar-accent-subtle);
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+    .tactic-pill.response-pill {
+      border-style: dashed;
+    }
+
+    .mode-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+
+    .mode-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--soar-border);
+      background: var(--soar-bg-card);
+      color: var(--soar-text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+    }
+    .mode-btn:hover { border-color: var(--soar-accent); color: var(--soar-accent); }
+    .mode-btn.active {
+      background: var(--soar-btn-bg);
+      border-color: var(--soar-btn-bg);
+      color: #ffffff;
+    }
+
+    .swimlane-track-box {
+      flex-shrink: 0;
+      background: var(--soar-bg-canvas);
+      border-bottom: 1px solid var(--soar-border);
+      padding: 8px 14px 4px 14px;
+      overflow-x: auto;
+    }
+
+    #swimlane-svg {
+      width: 100%;
+      min-width: 720px;
+      display: block;
+      user-select: none;
+    }
+
+    .marker-node {
+      cursor: pointer;
+    }
+    .marker-node:hover .glyph-shape {
+      stroke-width: 2.8;
+    }
+
+    .canvas-footer {
+      flex-shrink: 0;
+      padding: 6px 16px;
+      border-bottom: 1px solid var(--soar-border);
+      background: var(--soar-bg-card);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--soar-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .legend-items {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--soar-text-secondary);
+      font-weight: 500;
+    }
+
+    .bottom-split {
+      flex: 1 1 0;
+      min-height: 200px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .bottom-split.inspector-collapsed {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .bottom-split.inspector-collapsed .detail-pane {
+      display: none;
+    }
+    .bottom-split.inspector-collapsed .event-list-pane {
+      border-right: none;
+    }
+
+    @media (max-width: 860px) {
+      .card-shell {
+        height: auto;
+        min-height: 0;
+      }
+      .bottom-split {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto;
+        overflow: visible;
+      }
+      .event-list-pane {
+        border-right: none;
+        border-bottom: 1px solid var(--soar-border);
+        max-height: 260px;
+      }
+    }
+
+    .event-list-pane {
+      position: relative;
+      border-right: 1px solid var(--soar-border);
+      min-height: 0;
+      height: 100%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+      scrollbar-color: var(--soar-border-strong) var(--soar-bg-subtle);
+      display: block;
+    }
+
+    .feed-sticky-bar {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--soar-bg-card);
+      border-bottom: 1px solid var(--soar-border);
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--soar-text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .feed-jump-btn {
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .feed-jump-btn:hover {
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    .event-row {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--soar-border);
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      transition: background 0.12s ease;
+    }
+    .event-row:last-child { border-bottom: none; }
+    .event-row:hover { background: var(--soar-bg-hover); }
+    .event-row.in-selected-cluster {
+      background: var(--soar-bg-subtle);
+    }
+    .event-row.selected {
+      background: var(--soar-accent-subtle);
+    }
+
+    .detail-pane {
+      padding: 12px 16px;
+      min-height: 0;
+      height: 100%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+      scrollbar-color: var(--soar-border-strong) var(--soar-bg-subtle);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .cluster-stepper {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--soar-border);
+      font-size: 12px;
+      color: var(--soar-text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .step-pills {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .step-pill {
+      min-width: 24px;
+      height: 22px;
+      padding: 0 6px;
+      border-radius: 4px;
+      border: 1px solid var(--soar-border);
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      font-variant-numeric: tabular-nums;
+    }
+    .step-pill.active {
+      background: var(--soar-btn-bg);
+      border-color: var(--soar-btn-bg);
+      color: #ffffff;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .badge-malicious { background: var(--tone-mal-bg); color: var(--tone-mal-text); border: 1px solid var(--tone-mal-border); }
+    .badge-warning, .badge-btp { background: var(--tone-warn-bg); color: var(--tone-warn-text); border: 1px solid var(--tone-warn-border); }
+    .badge-benign { background: var(--tone-ben-bg); color: var(--tone-ben-text); border: 1px solid var(--tone-ben-border); }
+    .badge-info { background: var(--tone-info-bg); color: var(--tone-info-text); border: 1px solid var(--tone-info-border); }
+    .badge-muted { background: var(--soar-bg-subtle); color: var(--soar-text-secondary); border: 1px solid var(--soar-border); }
+
+    .entity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-family: var(--soar-font-mono);
+      font-size: 12px;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-secondary);
+      border: 1px solid var(--soar-border);
+      cursor: pointer;
+      transition: border-color 0.12s ease, color 0.12s ease;
+    }
+    .entity-chip:hover {
+      border-color: var(--soar-accent);
+      color: var(--soar-accent);
+    }
+
+    .mono-detail {
+      font-family: var(--soar-font-mono);
+      font-size: 12px;
+      background: var(--soar-bg-subtle);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--soar-text-primary);
+      word-break: break-word;
+      line-height: 1.5;
+    }
+
+    .adk-note {
+      background: var(--soar-accent-subtle);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: var(--soar-text-primary);
+      line-height: 1.45;
+    }
+    .adk-note strong {
+      color: var(--soar-accent-text);
+    }
+
+    .btn-primary {
+      flex: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--soar-btn-bg);
+      color: #ffffff;
+      border: 1px solid var(--soar-btn-bg);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn-primary:hover { background: var(--soar-btn-hover); }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--soar-bg-subtle);
+      color: var(--soar-text-primary);
+      border: 1px solid var(--soar-border);
+      cursor: pointer;
+    }
+    .btn-secondary:hover { border-color: var(--soar-accent); color: var(--soar-accent); }
+
+    .empty-state {
+      padding: 36px 16px;
+      text-align: center;
+      color: var(--soar-text-muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card-shell">
+    <div class="card-header">
+      <div class="title-group">
+        <div class="icon-box" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 6 9 6 12 12 16 12 19 18 21 18"></polyline>
+            <circle cx="6" cy="6" r="2" fill="currentColor"></circle>
+            <polygon points="14,9.5 16.5,12 14,14.5 11.5,12" fill="currentColor"></polygon>
+            <rect x="17.5" y="16" width="4" height="4" rx="1" fill="currentColor"></rect>
+          </svg>
+        </div>
+        <div>
+          <div id="header-title" class="header-title">Case Kill-Chain Swimlane</div>
+          <div id="header-sub" class="header-sub">Evaluating chronological adversary progression...</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <input id="search-box" type="search" class="search-input" placeholder="Filter rules, entities, T-IDs..." oninput="onSearchChange(this.value)" aria-label="Filter timeline events"/>
+        <button class="chip-btn active" id="lane-ALL" onclick="setLane('ALL')">All</button>
+        <button class="chip-btn" id="lane-UDM" onclick="setLane('UDM')">Precursor UDM</button>
+        <button class="chip-btn" id="lane-SILENT" onclick="setLane('SILENT')">Silent YARA-L</button>
+        <button class="chip-btn" id="lane-ALERT" onclick="setLane('ALERT')">Alerting</button>
+        <button class="chip-btn" id="lane-SOAR_ADK" onclick="setLane('SOAR_ADK')">SOAR &amp; ADK</button>
+        <span class="toolbar-sep" aria-hidden="true"></span>
+        <button class="chip-btn" id="inspector-toggle-btn" onclick="toggleInspector()" title="Collapse or expand Evidence Inspector" aria-expanded="true">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+            <line x1="15" y1="3" x2="15" y2="21"></line>
+          </svg>
+          <span id="inspector-toggle-lbl">Hide Inspector</span>
+        </button>
+        <button class="chip-btn" onclick="toggleThemeManual()" title="Toggle Light / Dark theme" aria-label="Toggle theme">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Kill-Chain Stage Strip + Y-Axis Grouping Mode Toggle -->
+    <div class="control-strip">
+      <div id="tactic-strip" class="stage-chain"></div>
+      <div class="mode-group" role="tablist" aria-label="Swimlane Y-Axis Grouping">
+        <button id="mode-STAGE" class="mode-btn active" role="tab" aria-selected="true" onclick="setYMode('STAGE')" title="Organize rows by MITRE ATT&CK tactical progression">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 8 6 12 12 16 12 21 18"></polyline>
+          </svg>
+          Kill-Chain Stage
+        </button>
+        <button id="mode-PIPELINE" class="mode-btn" role="tab" aria-selected="false" onclick="setYMode('PIPELINE')" title="Organize rows by SecOps telemetry & detection tier">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="6" x2="20" y2="6"></line>
+            <line x1="4" y1="12" x2="20" y2="12"></line>
+            <line x1="4" y1="18" x2="20" y2="18"></line>
+          </svg>
+          Detection Pipeline
+        </button>
+        <button id="mode-ENTITY" class="mode-btn" role="tab" aria-selected="false" onclick="setYMode('ENTITY')" title="Organize rows by affected Principal, Host, or Source IP">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          </svg>
+          Affected Entity
+        </button>
+      </div>
+    </div>
+
+    <!-- Interactive Multi-Mode Swimlane Matrix -->
+    <div class="swimlane-track-box">
+      <svg id="swimlane-svg" viewBox="0 0 880 198" role="img" aria-label="Chronological Kill-Chain Swimlane"></svg>
+    </div>
+
+    <!-- Flat Legend & Temporal Span Summary Bar -->
+    <div class="canvas-footer">
+      <div class="legend-items">
+        <span class="legend-item">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="var(--tone-info-bg)" stroke="var(--tone-info-stroke)" stroke-width="1.8"/></svg>
+          Precursor UDM
+        </span>
+        <span class="legend-item">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><polygon points="6,1.2 10.8,6 6,10.8 1.2,6" fill="var(--tone-warn-bg)" stroke="var(--tone-warn-stroke)" stroke-width="1.8"/></svg>
+          Silent YARA-L
+        </span>
+        <span class="legend-item">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <circle cx="7" cy="7" r="6" fill="none" stroke="var(--tone-mal-stroke)" stroke-width="1" stroke-dasharray="2 1.5"/>
+            <polygon points="7,2.2 11.2,4.6 11.2,9.4 7,11.8 2.8,9.4 2.8,4.6" fill="var(--tone-mal-bg)" stroke="var(--tone-mal-stroke)" stroke-width="1.8"/>
+          </svg>
+          Alerting Rule
+        </span>
+        <span class="legend-item">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.8" y="1.8" width="8.4" height="8.4" rx="2.2" fill="var(--soar-accent-subtle)" stroke="var(--soar-accent)" stroke-width="1.8"/></svg>
+          SOAR &amp; ADK
+        </span>
+        <span class="legend-item">
+          <svg width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
+            <rect x="0.8" y="1" width="18.4" height="10" rx="5" fill="var(--soar-bg-subtle)" stroke="var(--soar-border-strong)" stroke-width="1.2"/>
+            <text x="10" y="8.4" text-anchor="middle" fill="var(--soar-text-secondary)" style="font-size:8px; font-weight:700;">3x</text>
+          </svg>
+          Burst Cluster (Click to step)
+        </span>
+      </div>
+      <div id="span-summary"></div>
+    </div>
+
+    <!-- Synchronized Event Stream + Collapsible Evidence Inspector -->
+    <div id="bottom-split" class="bottom-split">
+      <div id="event-list-pane" class="event-list-pane"></div>
+      <div id="detail-pane" class="detail-pane"></div>
+    </div>
+  </div>
+
+  <div id="raw-data" style="display:none;">[{stepInstanceName}.JsonResult]</div>
+
+  <script>
+    // =========================================================================
+    // 3-Tier SOAR Theme Synchronization
+    // =========================================================================
+    function isRgbDark(color) {
+      if (!color) return false;
+      const s = String(color).trim();
+      let r = 255, g = 255, b = 255;
+      if (s.startsWith("#")) {
+        let h = s.slice(1);
+        if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+        if (h.length >= 6) {
+          r = parseInt(h.slice(0, 2), 16);
+          g = parseInt(h.slice(2, 4), 16);
+          b = parseInt(h.slice(4, 6), 16);
+        }
+      } else if (s.startsWith("rgb")) {
+        const m = s.match(/\d+/g);
+        if (m && m.length >= 3) { r = Number(m[0]); g = Number(m[1]); b = Number(m[2]); }
+      }
+      return (0.299 * r + 0.587 * g + 0.114 * b) < 140;
+    }
+
+    function setTheme(mode) {
+      document.documentElement.setAttribute("data-theme", mode);
+      document.body.className = mode;
+    }
+
+    function detectInitialTheme() {
+      try {
+        const parentBg = window.parent && window.parent.document && window.parent.getComputedStyle(window.parent.document.body).backgroundColor;
+        if (parentBg && parentBg !== "rgba(0, 0, 0, 0)" && parentBg !== "transparent") {
+          setTheme(isRgbDark(parentBg) ? "dark" : "light");
+          return;
+        }
+      } catch (e) {}
+      setTheme(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    }
+
+    function toggleThemeManual() {
+      const cur = document.documentElement.getAttribute("data-theme") || "light";
+      setTheme(cur === "dark" ? "light" : "dark");
+    }
+
+    window.addEventListener("message", evt => {
+      if (evt && evt.data && evt.data.background) {
+        setTheme(isRgbDark(evt.data.background) ? "dark" : "light");
+      }
+    });
+    detectInitialTheme();
+
+    // =========================================================================
+    // Tenant-Agnostic Chronicle SIEM Search Deep-Link Builder
+    // =========================================================================
+    function resolveSecOpsOrigin(explicitBase) {
+      if (explicitBase && String(explicitBase).trim().startsWith("http")) {
+        return String(explicitBase).trim().replace(/\/+$/, "");
+      }
+      try {
+        if (window.top && window.top.location && window.top.location.origin && window.top.location.origin !== "null") {
+          if (!window.top.location.origin.includes(".scf.usercontent.goog")) {
+            return window.top.location.origin;
+          }
+        }
+      } catch (e) {}
+      try {
+        if (document.referrer) {
+          const refOrigin = new URL(document.referrer).origin;
+          if (refOrigin && refOrigin !== "null" && !refOrigin.includes(".scf.usercontent.goog")) {
+            return refOrigin;
+          }
+        }
+      } catch (e) {}
+      try {
+        if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+          const topOrig = window.location.ancestorOrigins[window.location.ancestorOrigins.length - 1];
+          if (topOrig && topOrig !== "null") return topOrig;
+        }
+      } catch (e) {}
+      return "";
+    }
+
+    function buildUdmSearchLink(query, tw, explicitBase) {
+      const origin = resolveSecOpsOrigin(explicitBase);
+      const now = new Date();
+      const startIso = (tw && tw.start_time) || new Date(now.getTime() - 48 * 3600 * 1000).toISOString();
+      const endIso = (tw && tw.end_time) || now.toISOString();
+      const path = `/search?query=${encodeURIComponent(query)}&startTime=${encodeURIComponent(startIso)}&endTime=${encodeURIComponent(endIso)}`;
+      return origin ? `${origin}${path}` : path;
+    }
+
+    function openExternalUrl(evt, url) {
+      if (evt) evt.preventDefault();
+      try {
+        const w = window.open(url, "_blank", "noopener,noreferrer");
+        if (!w && window.top) window.top.open(url, "_blank", "noopener,noreferrer");
+      } catch (e) {
+        window.open(url, "_blank");
+      }
+      return false;
+    }
+
+    function escapeHtml(val) {
+      const d = document.createElement("div");
+      d.textContent = val == null ? "" : String(val);
+      return d.innerHTML;
+    }
+
+    function extractPayload(raw) {
+      if (!raw) return null;
+      if (typeof raw === "object") return raw;
+      const s = String(raw).trim();
+      if (!s || (s.startsWith("[") && s.includes(".JsonResult"))) return null;
+      try { return JSON.parse(s); } catch (e) { return null; }
+    }
+
+    function sevTone(sev) {
+      if (sev === "malicious") return { stroke: "var(--tone-mal-stroke)", bg: "var(--tone-mal-bg)", text: "var(--tone-mal-text)", badge: "badge-malicious", rank: 4 };
+      if (sev === "warning") return { stroke: "var(--tone-warn-stroke)", bg: "var(--tone-warn-bg)", text: "var(--tone-warn-text)", badge: "badge-warning", rank: 3 };
+      if (sev === "benign") return { stroke: "var(--tone-ben-stroke)", bg: "var(--tone-ben-bg)", text: "var(--tone-ben-text)", badge: "badge-benign", rank: 2 };
+      return { stroke: "var(--tone-info-stroke)", bg: "var(--tone-info-bg)", text: "var(--tone-info-text)", badge: "badge-info", rank: 1 };
+    }
+
+    function formatDurationCompact(ms) {
+      const sec = Math.max(0, Math.round(ms / 1000));
+      if (sec < 60) return `${sec}s`;
+      const mins = Math.floor(sec / 60);
+      if (mins < 60) {
+        const remS = sec % 60;
+        return remS > 0 && mins < 10 ? `${mins}m ${remS}s` : `${mins}m`;
+      }
+      const hrs = Math.floor(mins / 60);
+      const remM = mins % 60;
+      if (hrs < 48) return remM > 0 ? `${hrs}h ${remM}m` : `${hrs}h`;
+      const days = Math.floor(hrs / 24);
+      const remH = hrs % 24;
+      return remH > 0 ? `${days}d ${remH}h` : `${days}d`;
+    }
+
+    function formatUtcTick(epochMs, includeSeconds) {
+      const d = new Date(Number(epochMs || 0));
+      const hh = String(d.getUTCHours()).padStart(2, "0");
+      const mm = String(d.getUTCMinutes()).padStart(2, "0");
+      const ss = String(d.getUTCSeconds()).padStart(2, "0");
+      return includeSeconds ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
+    }
+
+    // =========================================================================
+    // Canonical MITRE Kill-Chain Order & Entity Fallback Helpers
+    // =========================================================================
+    const KILL_CHAIN_CANONICAL = [
+      { slug: "reconnaissance", label: "Reconnaissance" },
+      { slug: "resource-development", label: "Resource Dev" },
+      { slug: "initial-access", label: "Initial Access" },
+      { slug: "execution", label: "Execution" },
+      { slug: "persistence", label: "Persistence" },
+      { slug: "privilege-escalation", label: "Privilege Escalation" },
+      { slug: "defense-evasion", label: "Defense Evasion" },
+      { slug: "credential-access", label: "Credential Access" },
+      { slug: "discovery", label: "Discovery" },
+      { slug: "lateral-movement", label: "Lateral Movement" },
+      { slug: "collection", label: "Collection" },
+      { slug: "command-and-control", label: "Command & Control" },
+      { slug: "exfiltration", label: "Exfiltration" },
+      { slug: "impact", label: "Impact" },
+      { slug: "unclassified-telemetry", label: "Telemetry Context" },
+      { slug: "soar-response", label: "SOAR & ADK" }
+    ];
+
+    const PIPELINE_ROWS = [
+      { key: "UDM", label: "Precursor UDM" },
+      { key: "SILENT", label: "Silent YARA-L" },
+      { key: "ALERT", label: "Alerting YARA-L" },
+      { key: "SOAR_ADK", label: "SOAR & ADK" }
+    ];
+
+    function getEventStageSlug(ev) {
+      if (ev.stage_slug) return ev.stage_slug;
+      if (ev.lane === "SOAR_ADK") return "soar-response";
+      if (ev.mitre_tactic_slug) return ev.mitre_tactic_slug;
+      return "unclassified-telemetry";
+    }
+
+    function getEventStageLabel(ev) {
+      const slug = getEventStageSlug(ev);
+      const found = KILL_CHAIN_CANONICAL.find(s => s.slug === slug);
+      return found ? found.label : (ev.mitre_tactic || "Telemetry Context");
+    }
+
+    function deriveFallbackEntity(ev) {
+      if (ev.primary_entity_key && ev.primary_entity_label) {
+        return { key: ev.primary_entity_key, label: ev.primary_entity_label };
+      }
+      if (ev.lane === "SOAR_ADK") {
+        return { key: "SOAR_ADK", label: "SOAR & ADK" };
+      }
+      const ents = Array.isArray(ev.entities) ? ev.entities : [];
+      for (const raw of ents) {
+        const s = String(raw || "").trim().replace(/^["']|["']$/g, "");
+        if (!s || s.startsWith("/tenants/") || /^[a-f0-9]{40,64}$/i.test(s)) continue;
+        if (s.includes(",") && s.includes(" ") && !s.includes("@")) continue;
+        if (s.includes("@") || (s.includes("\\") && !s.toLowerCase().endsWith(".exe"))) {
+          const local = s.split("@")[0].split("\\").pop();
+          return { key: "USER:" + local.toLowerCase(), label: "User: " + local };
+        }
+        if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(s)) {
+          return { key: "IP:" + s, label: "IP: " + s };
+        }
+        if (!s.includes(" ") && !s.toLowerCase().endsWith(".exe")) {
+          const h = s.split(".")[0];
+          return { key: "HOST:" + h.toLowerCase(), label: "Host: " + h };
+        }
+      }
+      return { key: "TELEMETRY:context", label: "System / Context" };
+    }
+
+    // =========================================================================
+    // State Management
+    // =========================================================================
+    let payload = null;
+    try { payload = [{stepInstanceName}.JsonResult]; } catch (e) {
+      const el = document.getElementById("raw-data");
+      payload = el ? el.textContent : null;
+    }
+    payload = extractPayload(payload);
+
+    let yAxisMode = "STAGE"; // "STAGE" | "PIPELINE" | "ENTITY"
+    let activeLane = "ALL";
+    let activeStageSlug = "";
+    let searchQuery = "";
+    let selectedEventId = "";
+    let inspectorCollapsed = false;
+    let currentClusters = [];
+
+    function initTimeline() {
+      if (!payload || !Array.isArray(payload.events) || payload.events.length === 0) {
+        document.getElementById("bottom-split").innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">No Kill-Chain Timeline milestones available yet for this case.</div>`;
+        return;
+      }
+
+      // Normalize derived stage & entity fields for both v1 and v2 payloads
+      payload.events.forEach(ev => {
+        ev._stageSlug = getEventStageSlug(ev);
+        ev._stageLabel = getEventStageLabel(ev);
+        const entInfo = deriveFallbackEntity(ev);
+        ev._entityKey = entInfo.key;
+        ev._entityLabel = entInfo.label;
+      });
+
+      const ls = payload.lanes_summary || {};
+      const adk = payload.adk_overlay || {};
+      const verdictSuffix = (adk.has_adk_analysis && adk.verdict) ? ` • ADK Verdict: ${adk.verdict}` : "";
+      document.getElementById("header-title").textContent = `Case #${payload.case_id || ""} — ${payload.case_title || "Kill-Chain Swimlane"}`;
+      document.getElementById("header-sub").textContent =
+        `${ls.ALL || payload.events.length} Milestones (${ls.UDM || 0} Precursor UDM • ${ls.SILENT || 0} Silent YARA-L • ${ls.ALERT || 0} Alerting • ${ls.SOAR_ADK || 0} SOAR/ADK)${verdictSuffix}`;
+
+      ["ALL", "UDM", "SILENT", "ALERT", "SOAR_ADK"].forEach(k => {
+        const btn = document.getElementById("lane-" + k);
+        if (btn && ls[k] !== undefined) {
+          const base = k === "ALL" ? "All" : (k === "UDM" ? "Precursor UDM" : (k === "SILENT" ? "Silent YARA-L" : (k === "ALERT" ? "Alerting" : "SOAR & ADK")));
+          btn.textContent = `${base} (${ls[k]})`;
+        }
+      });
+
+      selectedEventId = payload.events[0].id;
+      renderAll(false);
+    }
+
+    function setYMode(mode) {
+      yAxisMode = mode;
+      ["STAGE", "PIPELINE", "ENTITY"].forEach(m => {
+        const b = document.getElementById("mode-" + m);
+        if (b) {
+          b.classList.toggle("active", m === mode);
+          b.setAttribute("aria-selected", m === mode ? "true" : "false");
+        }
+      });
+      renderAll(false);
+    }
+
+    function setLane(lane) {
+      activeLane = lane;
+      ["ALL", "UDM", "SILENT", "ALERT", "SOAR_ADK"].forEach(k => {
+        const b = document.getElementById("lane-" + k);
+        if (b) b.classList.toggle("active", k === lane);
+      });
+      renderAll(false);
+    }
+
+    function toggleStageFilter(slug) {
+      activeStageSlug = (activeStageSlug === slug) ? "" : slug;
+      renderAll(false);
+    }
+
+    function onSearchChange(val) {
+      searchQuery = String(val || "").trim().toLowerCase();
+      renderAll(false);
+    }
+
+    function pivotOnEntity(entText) {
+      const box = document.getElementById("search-box");
+      if (box) {
+        if (searchQuery === String(entText).toLowerCase()) {
+          box.value = "";
+          searchQuery = "";
+        } else {
+          box.value = entText;
+          searchQuery = String(entText).toLowerCase();
+        }
+      }
+      if (yAxisMode !== "ENTITY") {
+        setYMode("ENTITY");
+      } else {
+        renderAll(false);
+      }
+    }
+
+    function toggleInspector() {
+      inspectorCollapsed = !inspectorCollapsed;
+      const split = document.getElementById("bottom-split");
+      const btn = document.getElementById("inspector-toggle-btn");
+      const lbl = document.getElementById("inspector-toggle-lbl");
+      if (split) split.classList.toggle("inspector-collapsed", inspectorCollapsed);
+      if (btn) {
+        btn.classList.toggle("active", inspectorCollapsed);
+        btn.setAttribute("aria-expanded", inspectorCollapsed ? "false" : "true");
+      }
+      if (lbl) lbl.textContent = inspectorCollapsed ? "Show Inspector" : "Hide Inspector";
+    }
+
+    function selectEvent(id, scrollFeed) {
+      selectedEventId = id;
+      if (inspectorCollapsed) {
+        toggleInspector();
+      }
+      renderAll(Boolean(scrollFeed));
+    }
+
+    function onClusterClick(clusterIdx) {
+      const cl = currentClusters[clusterIdx];
+      if (!cl || !cl.events || cl.events.length === 0) return;
+      const curPos = cl.events.findIndex(e => e.id === selectedEventId);
+      const nextEv = curPos >= 0 ? cl.events[(curPos + 1) % cl.events.length] : cl.events[0];
+      selectEvent(nextEv.id, true);
+    }
+
+    function getFilteredEvents() {
+      if (!payload || !Array.isArray(payload.events)) return [];
+      return payload.events.filter(ev => {
+        if (activeLane !== "ALL" && ev.lane !== activeLane) return false;
+        if (activeStageSlug && ev._stageSlug !== activeStageSlug) return false;
+        if (searchQuery) {
+          const hay = [
+            ev.title, ev.detail, ev.mitre_id, ev.mitre_name, ev.mitre_tactic,
+            ev._stageLabel, ev._entityLabel, ev.adk_annotation, ...(ev.entities || [])
+          ].join(" ").toLowerCase();
+          if (!hay.includes(searchQuery)) return false;
+        }
+        return true;
+      });
+    }
+
+    // =========================================================================
+    // Reconciled Kill-Chain Progression Strip (100% Milestone Accounting)
+    // =========================================================================
+    function renderTacticStrip() {
+      const strip = document.getElementById("tactic-strip");
+      if (!strip || !payload || !Array.isArray(payload.events)) return;
+
+      const countsBySlug = {};
+      const techsBySlug = {};
+      payload.events.forEach(ev => {
+        const s = ev._stageSlug;
+        countsBySlug[s] = (countsBySlug[s] || 0) + 1;
+        if (ev.mitre_id) {
+          if (!techsBySlug[s]) techsBySlug[s] = [];
+          if (!techsBySlug[s].includes(ev.mitre_id)) techsBySlug[s].push(ev.mitre_id);
+        }
+      });
+
+      const activeAttackStages = KILL_CHAIN_CANONICAL.filter(
+        st => st.slug !== "soar-response" && st.slug !== "unclassified-telemetry" && countsBySlug[st.slug] > 0
+      );
+      const unclassCount = countsBySlug["unclassified-telemetry"] || 0;
+      const soarCount = countsBySlug["soar-response"] || 0;
+
+      let html = `<span style="font-size:12px; font-weight:700; color:var(--soar-text-muted); margin-right:2px; white-space:nowrap;">Kill-Chain Stages:</span>`;
+
+      activeAttackStages.forEach((st, idx) => {
+        const isAct = activeStageSlug === st.slug;
+        const techs = techsBySlug[st.slug] || [];
+        const tip = techs.length ? `Techniques: ${techs.join(", ")}` : st.label;
+        html += `
+          <button class="tactic-pill ${isAct ? 'active-tactic' : ''}" onclick="toggleStageFilter('${escapeHtml(st.slug)}')" title="${escapeHtml(tip)}">
+            ${escapeHtml(st.label)} (${countsBySlug[st.slug]})
+          </button>
+          ${idx < activeAttackStages.length - 1 ? `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--soar-text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>` : ""}
+        `;
+      });
+
+      if (unclassCount > 0) {
+        const isAct = activeStageSlug === "unclassified-telemetry";
+        html += `
+          <span style="color:var(--soar-text-muted); font-size:12px;">•</span>
+          <button class="tactic-pill response-pill ${isAct ? 'active-tactic' : ''}" onclick="toggleStageFilter('unclassified-telemetry')" title="Unalerted contextual telemetry">
+            Telemetry (${unclassCount})
+          </button>
+        `;
+      }
+
+      if (soarCount > 0) {
+        const isAct = activeStageSlug === "soar-response";
+        html += `
+          <span style="color:var(--soar-text-muted); font-size:12px;">•</span>
+          <button class="tactic-pill response-pill ${isAct ? 'active-tactic' : ''}" onclick="toggleStageFilter('soar-response')" title="Automated SOAR Case & Google ADK Verdict milestones">
+            SOAR &amp; ADK (${soarCount})
+          </button>
+        `;
+      }
+
+      if (activeStageSlug) {
+        html += `<button class="chip-btn" onclick="toggleStageFilter('')" style="padding:2px 7px; font-size:12px;">Reset Stage</button>`;
+      }
+
+      strip.innerHTML = html;
+    }
+
+    // =========================================================================
+    // Dynamic Y-Axis Rows & Segmented Piecewise Time Axis with Dwell Breaks
+    // =========================================================================
+    function buildActiveRows() {
+      const allEvents = payload.events || [];
+      if (yAxisMode === "PIPELINE") {
+        return PIPELINE_ROWS.map(r => ({
+          key: r.key,
+          label: r.label,
+          matchFn: ev => ev.lane === r.key
+        }));
+      }
+
+      if (yAxisMode === "ENTITY") {
+        if (Array.isArray(payload.entity_lanes) && payload.entity_lanes.length > 0) {
+          return payload.entity_lanes.map(el => ({
+            key: el.key,
+            label: el.label,
+            matchFn: ev => ev._entityKey === el.key
+          }));
+        }
+        const map = new Map();
+        allEvents.forEach(ev => {
+          if (!map.has(ev._entityKey)) {
+            map.set(ev._entityKey, { key: ev._entityKey, label: ev._entityLabel, isSoar: ev._entityKey === "SOAR_ADK" });
+          }
+        });
+        const arr = Array.from(map.values());
+        arr.sort((a, b) => (a.isSoar === b.isSoar ? 0 : (a.isSoar ? 1 : -1)));
+        return arr.slice(0, 7).map(r => ({
+          key: r.key,
+          label: r.label,
+          matchFn: ev => ev._entityKey === r.key
+        }));
+      }
+
+      // Default: "STAGE" (MITRE ATT&CK Kill-Chain Progression)
+      const presentSlugs = new Set(allEvents.map(ev => ev._stageSlug));
+      const rows = KILL_CHAIN_CANONICAL
+        .filter(st => presentSlugs.has(st.slug))
+        .map(st => ({
+          key: st.slug,
+          label: st.label,
+          matchFn: ev => ev._stageSlug === st.slug
+        }));
+      return rows.length > 0 ? rows : PIPELINE_ROWS.map(r => ({ key: r.key, label: r.label, matchFn: ev => ev.lane === r.key }));
+    }
+
+    function buildPiecewiseTimeScale(events, trackLeft, trackRight) {
+      const spanW = trackRight - trackLeft;
+      if (events.length === 0) {
+        return { mapX: () => (trackLeft + trackRight) / 2, breaks: [], ticks: [] };
+      }
+
+      const sortedEpochs = events.map(e => Number(e.epoch_ms || 0)).sort((a, b) => a - b);
+      const minMs = sortedEpochs[0];
+      const maxMs = sortedEpochs[sortedEpochs.length - 1];
+      const totalDur = maxMs - minMs;
+
+      if (totalDur <= 0) {
+        const cx = Math.round((trackLeft + trackRight) / 2);
+        return {
+          mapX: () => cx,
+          breaks: [],
+          ticks: [{ x: cx, label: formatUtcTick(minMs, true) + " UTC" }]
+        };
+      }
+
+      // Detect long silent dwell gaps (>= 25 min and >= 6% of total case span, max 2 breaks)
+      const MIN_GAP_MS = 25 * 60 * 1000;
+      const candidateGaps = [];
+      for (let i = 1; i < sortedEpochs.length; i++) {
+        const gap = sortedEpochs[i] - sortedEpochs[i - 1];
+        if (gap >= MIN_GAP_MS && gap >= totalDur * 0.06) {
+          candidateGaps.push({ splitAfter: sortedEpochs[i - 1], splitBefore: sortedEpochs[i], gapMs: gap });
+        }
+      }
+      candidateGaps.sort((a, b) => b.gapMs - a.gapMs);
+      const chosenGaps = candidateGaps.slice(0, 2).sort((a, b) => a.splitAfter - b.splitAfter);
+
+      // Partition sortedEpochs into active temporal segments
+      const segments = [];
+      let segStart = minMs;
+      chosenGaps.forEach(g => {
+        const segEvents = sortedEpochs.filter(t => t >= segStart && t <= g.splitAfter);
+        segments.push({
+          startMs: segEvents[0],
+          endMs: segEvents[segEvents.length - 1],
+          count: segEvents.length
+        });
+        segStart = g.splitBefore;
+      });
+      const tailEvents = sortedEpochs.filter(t => t >= segStart);
+      segments.push({
+        startMs: tailEvents[0],
+        endMs: tailEvents[tailEvents.length - 1],
+        count: tailEvents.length
+      });
+
+      const breakGutter = 58;
+      const usableW = Math.max(180, spanW - chosenGaps.length * breakGutter);
+
+      // Weight each active segment so single-point or <=5s micro-bursts stay compact (~52px) while multi-minute bursts get generous width
+      const weights = segments.map(s => {
+        if ((s.endMs - s.startMs) <= 5000 || s.count === 1) return 0.12;
+        return Math.max(0.32, Math.sqrt(s.count) * 0.42);
+      });
+      const weightSum = weights.reduce((a, b) => a + b, 0);
+
+      let cursorX = trackLeft;
+      const breaks = [];
+      segments.forEach((seg, idx) => {
+        const w = (weights[idx] / weightSum) * usableW;
+        seg.x0 = cursorX;
+        seg.x1 = cursorX + w;
+        cursorX = seg.x1;
+        if (idx < chosenGaps.length) {
+          const bStart = cursorX;
+          const bEnd = cursorX + breakGutter;
+          breaks.push({
+            x0: bStart,
+            x1: bEnd,
+            midX: (bStart + bEnd) / 2,
+            label: "+" + formatDurationCompact(chosenGaps[idx].gapMs)
+          });
+          cursorX = bEnd;
+        }
+      });
+
+      function mapX(epochMs) {
+        const t = Number(epochMs || minMs);
+        for (const seg of segments) {
+          if (t <= seg.endMs || seg === segments[segments.length - 1]) {
+            if (seg.endMs <= seg.startMs) {
+              return Math.round((seg.x0 + seg.x1) / 2);
+            }
+            const pad = Math.min(18, (seg.x1 - seg.x0) * 0.08);
+            const inner0 = seg.x0 + pad;
+            const inner1 = seg.x1 - pad;
+            const r = Math.max(0, Math.min(1, (t - seg.startMs) / (seg.endMs - seg.startMs)));
+            return Math.round(inner0 + r * (inner1 - inner0));
+          }
+        }
+        return Math.round(trackRight);
+      }
+
+      // Generate non-overlapping UTC time ticks across segments
+      const rawTicks = [];
+      segments.forEach((seg, idx) => {
+        const segW = seg.x1 - seg.x0;
+        const showSec = (seg.endMs - seg.startMs) < 3600 * 1000;
+        if (seg.endMs <= seg.startMs || segW < 95) {
+          rawTicks.push({
+            x: mapX(seg.startMs),
+            label: formatUtcTick(seg.startMs, showSec) + (idx === segments.length - 1 ? " UTC" : "")
+          });
+        } else {
+          rawTicks.push({ x: mapX(seg.startMs), label: formatUtcTick(seg.startMs, showSec) });
+          if (segW >= 240) {
+            const midMs = Math.round((seg.startMs + seg.endMs) / 2);
+            rawTicks.push({ x: mapX(midMs), label: formatUtcTick(midMs, showSec) });
+          }
+          rawTicks.push({
+            x: mapX(seg.endMs),
+            label: formatUtcTick(seg.endMs, showSec) + (idx === segments.length - 1 ? " UTC" : "")
+          });
+        }
+      });
+
+      const ticks = [];
+      rawTicks.forEach(tk => {
+        if (ticks.length === 0 || Math.abs(tk.x - ticks[ticks.length - 1].x) >= 84) {
+          ticks.push(tk);
+        } else if (tk.label.endsWith("UTC")) {
+          ticks[ticks.length - 1] = tk;
+        }
+      });
+
+      return { mapX, breaks, ticks, totalDur, gapCount: breaks.length };
+    }
+
+    function renderGlyphSvg(lane, cx, cy, st, isSel) {
+      const selHalo = isSel
+        ? `<circle cx="${cx}" cy="${cy}" r="13" fill="none" stroke="var(--soar-accent)" stroke-width="2"/>`
+        : "";
+
+      if (lane === "ALERT") {
+        const r = isSel ? 8 : 7;
+        const dx = (r * 0.866).toFixed(1);
+        const dy = (r * 0.5).toFixed(1);
+        const pts = `${cx},${cy - r} ${cx + Number(dx)},${cy - Number(dy)} ${cx + Number(dx)},${cy + Number(dy)} ${cx},${cy + r} ${cx - Number(dx)},${cy + Number(dy)} ${cx - Number(dx)},${cy - Number(dy)}`;
+        return `
+          ${selHalo}
+          <circle cx="${cx}" cy="${cy}" r="${r + 3.5}" fill="none" stroke="${st.stroke}" stroke-width="1.2" stroke-dasharray="2.5 2"/>
+          <polygon class="glyph-shape" points="${pts}" fill="${st.bg}" stroke="${st.stroke}" stroke-width="2.2"/>
+        `;
+      }
+
+      if (lane === "SILENT") {
+        const r = isSel ? 7.8 : 6.8;
+        const pts = `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`;
+        return `
+          ${selHalo}
+          <polygon class="glyph-shape" points="${pts}" fill="${st.bg}" stroke="${st.stroke}" stroke-width="2.1"/>
+        `;
+      }
+
+      if (lane === "SOAR_ADK") {
+        const half = isSel ? 6.5 : 5.6;
+        return `
+          ${selHalo}
+          <rect class="glyph-shape" x="${cx - half}" y="${cy - half}" width="${half * 2}" height="${half * 2}" rx="2.8" fill="${st.bg}" stroke="${st.stroke}" stroke-width="2.1"/>
+        `;
+      }
+
+      // Default: UDM Precursor circle
+      const r = isSel ? 6.8 : 5.6;
+      return `
+        ${selHalo}
+        <circle class="glyph-shape" cx="${cx}" cy="${cy}" r="${r}" fill="${st.bg}" stroke="${st.stroke}" stroke-width="2.1"/>
+      `;
+    }
+
+    function renderSwimlaneSvg(filtered) {
+      const svg = document.getElementById("swimlane-svg");
+      const spanSumEl = document.getElementById("span-summary");
+      if (!svg) return;
+
+      const rows = buildActiveRows();
+      const topPad = 34;
+      const rowGap = 33;
+      const axisPad = 30;
+      const svgH = Math.max(182, topPad + (rows.length - 1) * rowGap + axisPad + 12);
+      const axisY = topPad + (rows.length - 1) * rowGap + 18;
+      svg.setAttribute("viewBox", `0 0 880 ${svgH}`);
+      svg.style.height = `${svgH}px`;
+
+      const trackLeft = 166;
+      const trackRight = 852;
+      let html = "";
+
+      rows.forEach((row, idx) => {
+        row.y = topPad + idx * rowGap;
+        const hasMatch = filtered.some(ev => row.matchFn(ev));
+        const labelOpacity = (filtered.length > 0 && !hasMatch) ? "0.45" : "1";
+        const shortLabel = row.label.length > 22 ? row.label.slice(0, 20) + "..." : row.label;
+        html += `
+          <text x="10" y="${row.y + 4}" fill="var(--soar-text-secondary)" opacity="${labelOpacity}" style="font-size:12px; font-weight:600;">
+            ${escapeHtml(shortLabel)}
+          </text>
+          <line x1="${trackLeft}" y1="${row.y}" x2="${trackRight}" y2="${row.y}"
+                stroke="var(--soar-border)" stroke-width="1.3" stroke-dasharray="3 3"/>
+        `;
+      });
+
+      if (filtered.length === 0) {
+        currentClusters = [];
+        svg.innerHTML = html;
+        if (spanSumEl) spanSumEl.textContent = "0 matching milestones";
+        return;
+      }
+
+      const scale = buildPiecewiseTimeScale(filtered, trackLeft, trackRight);
+
+      // Update footer summary
+      if (spanSumEl) {
+        const durLabel = scale.totalDur > 0 ? formatDurationCompact(scale.totalDur) : "< 1s";
+        const breakNote = scale.gapCount > 0 ? ` • ${scale.gapCount} dwell break${scale.gapCount > 1 ? 's' : ''} compressed` : "";
+        spanSumEl.textContent = `Span: ${durLabel}${breakNote}`;
+      }
+
+      // Render vertical UTC time gridlines & bottom X-axis baseline
+      html += `<line x1="${trackLeft}" y1="${axisY}" x2="${trackRight}" y2="${axisY}" stroke="var(--soar-border-strong)" stroke-width="1"/>`;
+
+      scale.ticks.forEach(tk => {
+        html += `
+          <line x1="${tk.x}" y1="${topPad - 10}" x2="${tk.x}" y2="${axisY + 4}" stroke="var(--soar-grid-line)" stroke-width="1"/>
+          <text x="${tk.x}" y="${axisY + 16}" text-anchor="middle" fill="var(--soar-text-muted)"
+                style="font-family:var(--soar-font-mono); font-size:10.5px; font-variant-numeric:tabular-nums;">
+            ${escapeHtml(tk.label)}
+          </text>
+        `;
+      });
+
+      // Render Dwell-Time Axis Break corridors (pill anchored cleanly at top of break corridor so bottom UTC ticks never collide)
+      scale.breaks.forEach(br => {
+        const pillW = Math.max(44, br.label.length * 6.4 + 12);
+        html += `
+          <rect x="${br.x0 + 5}" y="${topPad - 12}" width="${br.x1 - br.x0 - 10}" height="${axisY - topPad + 12}"
+                fill="var(--soar-bg-subtle)" rx="3"/>
+          <line x1="${br.midX - 4}" y1="21" x2="${br.midX - 4}" y2="${axisY}" stroke="var(--soar-border-strong)" stroke-width="1" stroke-dasharray="3 3"/>
+          <line x1="${br.midX + 4}" y1="21" x2="${br.midX + 4}" y2="${axisY}" stroke="var(--soar-border-strong)" stroke-width="1" stroke-dasharray="3 3"/>
+          <path d="M ${br.midX - 5} ${axisY + 4} L ${br.midX - 1} ${axisY - 4} M ${br.midX + 1} ${axisY + 4} L ${br.midX + 5} ${axisY - 4}"
+                stroke="var(--soar-text-muted)" stroke-width="1.4" stroke-linecap="round"/>
+          <rect x="${br.midX - pillW / 2}" y="4" width="${pillW}" height="15" rx="4"
+                fill="var(--soar-bg-card)" stroke="var(--soar-border-strong)" stroke-width="1"/>
+          <text x="${br.midX}" y="14.5" text-anchor="middle" fill="var(--soar-text-secondary)"
+                style="font-family:var(--soar-font-mono); font-size:9.8px; font-weight:600; font-variant-numeric:tabular-nums;">
+            ${escapeHtml(br.label)}
+          </text>
+        `;
+      });
+
+      // Map events onto (row, x, y)
+      const mappedPoints = filtered.map(ev => {
+        const rowObj = rows.find(r => r.matchFn(ev)) || rows[0];
+        return {
+          ev,
+          rowKey: rowObj.key,
+          x: scale.mapX(ev.epoch_ms),
+          y: rowObj.y
+        };
+      });
+
+      // Coalesce nearby points on the same row (within 20px) into interactive Burst Clusters
+      const clusters = [];
+      mappedPoints.forEach(pt => {
+        const existing = clusters.find(c => c.rowKey === pt.rowKey && Math.abs(c.x - pt.x) <= 20);
+        if (existing) {
+          existing.events.push(pt.ev);
+          existing.sumX += pt.x;
+          existing.x = Math.round(existing.sumX / existing.events.length);
+        } else {
+          clusters.push({
+            rowKey: pt.rowKey,
+            x: pt.x,
+            y: pt.y,
+            sumX: pt.x,
+            events: [pt.ev]
+          });
+        }
+      });
+      currentClusters = clusters;
+
+      // Chronological progression polyline across cluster milestones
+      if (clusters.length >= 2) {
+        const pts = clusters.map(c => `${c.x},${c.y}`).join(" ");
+        html += `<polyline points="${pts}" fill="none" stroke="var(--soar-accent)" stroke-opacity="0.34" stroke-width="1.8" stroke-linejoin="round"/>`;
+      }
+
+      const tierPriority = { ALERT: 4, SILENT: 3, SOAR_ADK: 2, UDM: 1 };
+
+      clusters.forEach((cl, cIdx) => {
+        let topTone = sevTone(cl.events[0].severity);
+        let topLane = cl.events[0].lane;
+        cl.events.forEach(e => {
+          const t = sevTone(e.severity);
+          if (t.rank > topTone.rank) topTone = t;
+          if ((tierPriority[e.lane] || 0) > (tierPriority[topLane] || 0)) topLane = e.lane;
+        });
+
+        const isSel = cl.events.some(e => e.id === selectedEventId);
+        const count = cl.events.length;
+        const tipLines = count === 1
+          ? `${cl.events[0].display_time} — ${cl.events[0].title}`
+          : `${count} milestones (${cl.events[0].display_time}):\n` + cl.events.slice(0, 5).map(e => `• ${e.title}`).join("\n");
+
+        let badgeSvg = "";
+        if (count > 1) {
+          const bText = `${count}x`;
+          const bw = bText.length > 2 ? 24 : 20;
+          const bx = Math.min(868 - bw, cl.x + 7);
+          const by = cl.y - 16;
+          badgeSvg = `
+            <rect x="${bx}" y="${by}" width="${bw}" height="14" rx="7"
+                  fill="${isSel ? 'var(--soar-accent)' : 'var(--soar-bg-card)'}"
+                  stroke="${isSel ? 'var(--soar-accent)' : topTone.stroke}" stroke-width="1.4"/>
+            <text x="${bx + bw / 2}" y="${by + 10}" text-anchor="middle"
+                  fill="${isSel ? '#ffffff' : 'var(--soar-text-primary)'}"
+                  style="font-size:9.5px; font-weight:700; font-variant-numeric:tabular-nums;">
+              ${bText}
+            </text>
+          `;
+        }
+
+        html += `
+          <g class="marker-node" onclick="onClusterClick(${cIdx})">
+            <title>${escapeHtml(tipLines)}</title>
+            ${renderGlyphSvg(topLane, cl.x, cl.y, topTone, isSel)}
+            ${badgeSvg}
+          </g>
+        `;
+      });
+
+      svg.innerHTML = html;
+    }
+
+    function copyTextBtn(txt, btnEl) {
+      if (!txt) return;
+      navigator.clipboard.writeText(txt).then(() => {
+        const orig = btnEl.textContent;
+        btnEl.textContent = "Copied!";
+        setTimeout(() => { btnEl.textContent = orig; }, 1400);
+      }).catch(() => {});
+    }
+
+    // =========================================================================
+    // Synchronized Event Stream + Evidence Inspector with Burst Stepper
+    // =========================================================================
+    function renderListAndDetail(filtered, scrollFeed) {
+      const listEl = document.getElementById("event-list-pane");
+      const detEl = document.getElementById("detail-pane");
+      if (!listEl || !detEl) return;
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="empty-state">No timeline milestones match the active filter.</div>`;
+        detEl.innerHTML = `<div class="empty-state">Adjust swimlane, stage, or search filters to inspect events.</div>`;
+        return;
+      }
+
+      if (!filtered.some(e => e.id === selectedEventId)) {
+        selectedEventId = filtered[0].id;
+      }
+
+      const activeCluster = currentClusters.find(c => c.events.some(e => e.id === selectedEventId));
+      const clusterIds = new Set(activeCluster && activeCluster.events.length > 1 ? activeCluster.events.map(e => e.id) : []);
+      const selIdx = filtered.findIndex(e => e.id === selectedEventId);
+
+      const stickyHeader = `
+        <div class="feed-sticky-bar">
+          <span><strong>Timeline Feed</strong> (${selIdx + 1} of ${filtered.length})</span>
+          ${filtered.length > 5 ? `
+            <div style="display:inline-flex; gap:5px;">
+              <button class="feed-jump-btn" onclick="jumpFeedEdge('start')" title="Jump to earliest milestone">Earliest</button>
+              <button class="feed-jump-btn" onclick="jumpFeedEdge('end')" title="Jump to latest milestone">Latest</button>
+            </div>
+          ` : ""}
+        </div>
+      `;
+
+      listEl.innerHTML = stickyHeader + filtered.map(ev => {
+        const st = sevTone(ev.severity);
+        const isSel = ev.id === selectedEventId;
+        const inCluster = !isSel && clusterIds.has(ev.id);
+        const contextTag = yAxisMode === "ENTITY" ? ev._stageLabel : ev._entityLabel;
+        return `
+          <div id="feed-row-${escapeHtml(ev.id)}" class="event-row ${isSel ? 'selected' : (inCluster ? 'in-selected-cluster' : '')}" onclick="selectEvent('${escapeHtml(ev.id)}', false)">
+            <div style="min-width:0; display:flex; align-items:center; gap:7px; flex-wrap:wrap;">
+              <span style="font-family:var(--soar-font-mono); font-size:12px; color:var(--soar-text-muted); font-variant-numeric:tabular-nums;">
+                ${escapeHtml(ev.display_time)}
+              </span>
+              <span class="badge ${st.badge}">${escapeHtml(ev.lane_label)}</span>
+              <span style="font-size:12px; font-weight:600; color:var(--soar-text-primary); word-break:break-word;">
+                ${escapeHtml(ev.title)}
+              </span>
+            </div>
+            <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
+              ${contextTag && contextTag !== "SOAR & ADK" ? `<span class="badge badge-muted">${escapeHtml(contextTag)}</span>` : ""}
+              ${ev.mitre_id ? `<span class="badge badge-info">${escapeHtml(ev.mitre_id)}</span>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      if (scrollFeed) {
+        const rowDom = document.getElementById("feed-row-" + selectedEventId);
+        if (rowDom && listEl) {
+          const rowRect = rowDom.getBoundingClientRect();
+          const listRect = listEl.getBoundingClientRect();
+          const relTop = rowRect.top - listRect.top;
+          const targetScroll = listEl.scrollTop + relTop - (listEl.clientHeight / 2) + (rowDom.offsetHeight / 2);
+          listEl.scrollTop = Math.max(0, targetScroll);
+        }
+      }
+
+      const activeEv = filtered.find(e => e.id === selectedEventId) || filtered[0];
+      const st = sevTone(activeEv.severity);
+      const udmQuery = String(activeEv.udm_query || "");
+      const udmLink = udmQuery ? buildUdmSearchLink(udmQuery, payload.time_window, payload.secops_ui_base_url) : "";
+      const entList = Array.isArray(activeEv.entities) ? activeEv.entities : [];
+
+      let clusterBarHtml = "";
+      if (activeCluster && activeCluster.events.length > 1) {
+        const idxInCluster = activeCluster.events.findIndex(e => e.id === activeEv.id);
+        const pills = activeCluster.events.map((ce, i) => `
+          <button class="step-pill ${ce.id === activeEv.id ? 'active' : ''}" onclick="selectEvent('${escapeHtml(ce.id)}', true)" title="${escapeHtml(ce.title)}">
+            ${i + 1}
+          </button>
+        `).join("");
+        clusterBarHtml = `
+          <div class="cluster-stepper">
+            <span><strong>Burst Cluster:</strong> ${idxInCluster + 1} of ${activeCluster.events.length} at ${escapeHtml(activeEv.display_time)}</span>
+            <div class="step-pills">${pills}</div>
+          </div>
+        `;
+      }
+
+      detEl.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          ${clusterBarHtml}
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; padding-bottom:7px; border-bottom:1px solid var(--soar-border);">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span class="badge ${st.badge}">${escapeHtml(activeEv.lane_label)}</span>
+              <span class="badge badge-muted">${escapeHtml(activeEv._stageLabel)}</span>
+            </div>
+            <span style="font-family:var(--soar-font-mono); font-size:12px; color:var(--soar-text-muted); font-variant-numeric:tabular-nums;">
+              ${escapeHtml(activeEv.timestamp)}
+            </span>
+          </div>
+
+          <div style="font-size:13px; font-weight:700; color:var(--soar-text-primary);">
+            ${escapeHtml(activeEv.title)}
+          </div>
+
+          ${activeEv.mitre_id ? `
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <span class="badge badge-info">${escapeHtml(activeEv.mitre_id)} • ${escapeHtml(activeEv.mitre_name || activeEv.mitre_tactic)}</span>
+            </div>
+          ` : ""}
+
+          ${entList.length > 0 ? `
+            <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+              <span style="font-size:12px; font-weight:600; color:var(--soar-text-muted);">Entities:</span>
+              ${entList.map(ent => `
+                <button class="entity-chip" onclick="pivotOnEntity(${JSON.stringify(String(ent)).replace(/"/g, '&quot;')})" title="Click to pivot timeline on ${escapeHtml(ent)}">
+                  ${escapeHtml(ent)}
+                </button>
+              `).join("")}
+            </div>
+          ` : ""}
+
+          <div class="mono-detail">${escapeHtml(activeEv.detail)}</div>
+
+          ${activeEv.adk_annotation ? `
+            <div class="adk-note">
+              <strong>ADK Insight:</strong> ${escapeHtml(activeEv.adk_annotation)}
+            </div>
+          ` : ""}
+        </div>
+
+        ${udmLink ? `
+          <div style="display:flex; gap:8px; padding-top:8px; border-top:1px solid var(--soar-border);">
+            <a class="btn-primary" href="${escapeHtml(udmLink)}" target="_blank" rel="noopener noreferrer" onclick="return openExternalUrl(event, '${escapeHtml(udmLink)}')">
+              Open in UDM Search
+            </a>
+            <button class="btn-secondary" onclick="copyTextBtn(${JSON.stringify(udmQuery).replace(/"/g, '&quot;')}, this)">Copy Query</button>
+          </div>
+        ` : ""}
+      `;
+    }
+
+    function jumpFeedEdge(where) {
+      const filtered = getFilteredEvents();
+      if (filtered.length === 0) return;
+      const target = where === "end" ? filtered[filtered.length - 1] : filtered[0];
+      selectEvent(target.id, true);
+    }
+
+    window.addEventListener("keydown", evt => {
+      if (!evt || (evt.target && evt.target.tagName === "INPUT")) return;
+      if (evt.key === "ArrowDown" || evt.key === "ArrowUp") {
+        const filtered = getFilteredEvents();
+        if (filtered.length < 2) return;
+        const idx = filtered.findIndex(e => e.id === selectedEventId);
+        const nextIdx = evt.key === "ArrowDown"
+          ? Math.min(filtered.length - 1, idx + 1)
+          : Math.max(0, idx - 1);
+        if (nextIdx !== idx) {
+          evt.preventDefault();
+          selectEvent(filtered[nextIdx].id, true);
+        }
+      }
+    });
+
+    function renderAll(scrollFeed) {
+      const filtered = getFilteredEvents();
+      const listEl = document.getElementById("event-list-pane");
+      const savedScrollTop = (!scrollFeed && listEl) ? listEl.scrollTop : null;
+      renderTacticStrip();
+      renderSwimlaneSvg(filtered);
+      renderListAndDetail(filtered, scrollFeed);
+      if (savedScrollTop !== null && listEl) {
+        listEl.scrollTop = savedScrollTop;
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", initTimeline);
+  </script>
+</body>
+</html>

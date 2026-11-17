@@ -57,6 +57,8 @@ class PlaybookTelemetry:
     avg_duration_seconds: float = 0.0
     lookback_days: int = 30
     statuses: Dict[str, int] = field(default_factory=dict)
+    telemetry_available: bool = True
+    telemetry_error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -78,6 +80,8 @@ class PlaybookDecayReport:
     telemetry: PlaybookTelemetry
     mermaid_dag: str
     executive_brief: Optional[str] = None
+    narrative_source: str = "not_requested"
+    narrative_error: Optional[str] = None
     created_at_iso: Optional[str] = None
     modified_at_iso: Optional[str] = None
     step_count: int = 0
@@ -147,6 +151,8 @@ class PlaybookScoringEngine:
                 avg_duration_seconds=float(telemetry.get("avg_duration_seconds", 0.0)),
                 lookback_days=int(telemetry.get("lookback_days", 30)),
                 statuses=telemetry.get("statuses", {}),
+                telemetry_available=bool(telemetry.get("telemetry_available", True)),
+                telemetry_error=telemetry.get("telemetry_error"),
             )
 
         is_enabled = bool(playbook_raw.get("isEnabled", False))
@@ -458,7 +464,7 @@ class PlaybookScoringEngine:
         # -------------------------------------------------------------------
         # Telemetry-Driven Deductions (EXEC-01, EXEC-02, EXEC-03)
         # -------------------------------------------------------------------
-        if is_enabled and telemetry.total_runs == 0 and telemetry.lookback_days >= 30:
+        if telemetry.telemetry_available and is_enabled and telemetry.total_runs == 0 and telemetry.lookback_days >= 30:
             deduction = 5
             score -= deduction
             findings.append(PlaybookRuleFinding(
@@ -633,13 +639,13 @@ class PlaybookTelemetryAggregator:
     )
 
     @classmethod
-    def pull_telemetry_batch(
+    def pull_telemetry_batch_with_status(
         cls,
         engine: SecOpsEngine,
         lookback_days: int = 30,
         clear_cache: bool = True,
-    ) -> Dict[str, PlaybookTelemetry]:
-        """Pulls 30-day telemetry for all playbooks and returns map keyed by workflow UUID and name."""
+    ) -> Tuple[Dict[str, PlaybookTelemetry], bool, Optional[str]]:
+        """Pulls 30-day telemetry and returns (telemetry_map, telemetry_available, telemetry_error)."""
         telemetry_map: Dict[str, PlaybookTelemetry] = {}
 
         try:
@@ -651,8 +657,9 @@ class PlaybookTelemetryAggregator:
             )
             rows = res.rows or []
         except Exception as ex:
+            err_msg = f"{type(ex).__name__}: {ex}"
             logger.warning("Failed to pull 30-day playbook telemetry from Chronicle: %s", ex)
-            return telemetry_map
+            return telemetry_map, False, err_msg
 
         # Aggregate raw rows per playbook
         aggregates: Dict[str, Dict[str, Any]] = {}
@@ -708,8 +715,27 @@ class PlaybookTelemetryAggregator:
                 avg_duration_seconds=round(avg_dur, 1),
                 lookback_days=lookback_days,
                 statuses=agg["statuses"],
+                telemetry_available=True,
+                telemetry_error=None,
             )
 
+        return telemetry_map, True, None
+
+    @classmethod
+    def pull_telemetry_batch(
+        cls,
+        engine: SecOpsEngine,
+        lookback_days: int = 30,
+        clear_cache: bool = True,
+    ) -> Dict[str, PlaybookTelemetry]:
+        """Pulls 30-day telemetry for all playbooks and returns map keyed by workflow UUID and name."""
+        telemetry_map, telemetry_available, telemetry_error = cls.pull_telemetry_batch_with_status(
+            engine=engine,
+            lookback_days=lookback_days,
+            clear_cache=clear_cache,
+        )
+        if not telemetry_available:
+            raise RuntimeError(f"Playbook telemetry query failed: {telemetry_error}")
         return telemetry_map
 
 
@@ -753,14 +779,20 @@ class PlaybookBriefSynthesizer:
         )
 
         try:
+            if not project_id:
+                raise ValueError("Vertex AI project_id not configured")
             from google import genai
             client = genai.Client(vertexai=True, project=project_id, location="global")
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
+            report.narrative_source = "gemini"
+            report.narrative_error = None
             return response.text
         except Exception as ex:
+            report.narrative_source = "deterministic_fallback"
+            report.narrative_error = f"{type(ex).__name__}: {ex}"
             logger.debug("Vertex AI global executive brief synthesis failed, falling back to local synthesis: %s", ex)
             return cls._deterministic_brief_fallback(report)
 
@@ -817,10 +849,12 @@ class AuditPlaybookDecayWorkflow:
             Dictionary containing audit summary, inventory counts, and detailed reports.
         """
         # 1. Pull Telemetry Batch across tenant
-        telemetry_map = PlaybookTelemetryAggregator.pull_telemetry_batch(
-            engine=self.engine,
-            lookback_days=lookback_days,
-            clear_cache=True,
+        telemetry_map, telemetry_available, telemetry_error = (
+            PlaybookTelemetryAggregator.pull_telemetry_batch_with_status(
+                engine=self.engine,
+                lookback_days=lookback_days,
+                clear_cache=True,
+            )
         )
 
         # 2. Ingest Playbook Menu Cards
@@ -843,9 +877,11 @@ class AuditPlaybookDecayWorkflow:
 
         selected_cards = filtered_cards[:limit]
         reports: List[PlaybookDecayReport] = []
+        playbook_fetch_errors: Dict[str, str] = {}
 
-        from agents.core.evidence_store import get_evidence_store
-        evidence_store = get_evidence_store() if persist else None
+        from engine.ports import resolve_evidence_store
+
+        evidence_store = resolve_evidence_store(required=True) if persist else None
 
         for card in selected_cards:
             wf_id = card.get("identifier")
@@ -856,12 +892,21 @@ class AuditPlaybookDecayWorkflow:
                 # Fetch full DAG definition
                 full_info = self.engine.adapter.get_playbook_full_info(wf_id)
             except Exception as ex:
+                playbook_fetch_errors[str(wf_id)] = f"{type(ex).__name__}: {ex}"
                 logger.warning("Could not fetch full info for playbook %s: %s", wf_id, ex)
                 continue
 
             # Correlate telemetry
             name = full_info.get("name") or card.get("name") or wf_id
-            tel = telemetry_map.get(wf_id) or telemetry_map.get(name) or PlaybookTelemetry(lookback_days=lookback_days)
+            tel = (
+                telemetry_map.get(wf_id)
+                or telemetry_map.get(name)
+                or PlaybookTelemetry(
+                    lookback_days=lookback_days,
+                    telemetry_available=telemetry_available,
+                    telemetry_error=telemetry_error,
+                )
+            )
 
             # Evaluate Resilience Scoring Engine
             score, grade, findings = PlaybookScoringEngine.evaluate(
@@ -932,6 +977,9 @@ class AuditPlaybookDecayWorkflow:
                 "average_resilience_score": round(avg_score, 1),
                 "degraded_playbooks_count": degraded_count,
                 "lookback_days": lookback_days,
+                "telemetry_available": telemetry_available,
+                "telemetry_error": telemetry_error,
+                "playbook_fetch_errors": playbook_fetch_errors,
                 "evaluated_at": datetime.now(timezone.utc).isoformat(),
             },
             "playbooks": [r.to_dict() for r in reports],

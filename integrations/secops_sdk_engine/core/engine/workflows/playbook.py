@@ -594,26 +594,63 @@ class UpdatePlaybookWidgetWorkflow:
         if not isinstance(raw_pb, dict) or not raw_pb:
             raise RuntimeError(f"Unable to load raw playbook payload for '{identifier_or_id}'.")
 
+        if widget_index is not None and widget_index < 0:
+            raise ValueError(f"widget_index must be >= 0, got {widget_index}.")
+
         target_step_id: Optional[str] = None
         if step_name_or_id:
             q = step_name_or_id.strip().lower()
+            matched_step = False
             for s in raw_pb.get("steps", []):
                 s_id = str(s.get("identifier", ""))
                 s_orig = str(s.get("originalStepIdentifier", ""))
                 s_name = str(s.get("name", ""))
                 s_inst = str(s.get("instanceName", ""))
                 if q in (s_id.lower(), s_orig.lower(), s_name.lower(), s_inst.lower()):
+                    matched_step = True
                     target_step_id = s_id
                     if update_step_parameter is not None and update_step_parameter_value is not None:
                         for p in s.get("parameters", []):
                             if str(p.get("name", "")).lower() == update_step_parameter.strip().lower():
                                 p["value"] = update_step_parameter_value
                     break
+            if not matched_step or not target_step_id:
+                raise ValueError(
+                    f"Step '{step_name_or_id}' not found in playbook '{pb_detail.name}'."
+                )
+
+        unscoped_html_update = (
+            step_name_or_id is None and widget_title is None and widget_index is None
+        )
+        if unscoped_html_update:
+            html_widget_count = 0
+            for vt in raw_pb.get("viewsTemplates", []):
+                for card in vt.get("cards", []):
+                    wdef_raw = card.get("widgetDefinition")
+                    wdef_parsed: Dict[str, Any] = {}
+                    if isinstance(wdef_raw, str) and wdef_raw.strip():
+                        try:
+                            loaded = json.loads(wdef_raw)
+                            if isinstance(loaded, dict):
+                                wdef_parsed = loaded
+                        except Exception:
+                            wdef_parsed = {}
+                    elif isinstance(wdef_raw, dict):
+                        wdef_parsed = wdef_raw
+                    if "htmlContent" in wdef_parsed or card.get("type") == 3:
+                        html_widget_count += 1
+            if html_widget_count > 1:
+                raise ValueError(
+                    f"Playbook '{pb_detail.name}' contains {html_widget_count} HTML widgets; "
+                    "specify step_name_or_id, widget_title, or widget_index to avoid overwriting all widgets."
+                )
 
         updated_widgets = 0
         for vt in raw_pb.get("viewsTemplates", []):
             cards = vt.get("cards", [])
-            if widget_index is not None and 0 <= widget_index < len(cards):
+            if widget_index is not None:
+                if widget_index >= len(cards):
+                    continue
                 candidate_cards = [cards[widget_index]]
             else:
                 candidate_cards = cards
@@ -623,7 +660,9 @@ class UpdatePlaybookWidgetWorkflow:
                 wdef: Dict[str, Any] = {}
                 if isinstance(wdef_str, str) and wdef_str.strip():
                     try:
-                        wdef = json.loads(wdef_str)
+                        loaded = json.loads(wdef_str)
+                        if isinstance(loaded, dict):
+                            wdef = loaded
                     except Exception:
                         wdef = {}
                 elif isinstance(wdef_str, dict):
@@ -637,9 +676,9 @@ class UpdatePlaybookWidgetWorkflow:
                     matches = True
                 elif widget_title and widget_title.strip().lower() in card_title.lower():
                     matches = True
-                elif target_step_id and card_step_id == target_step_id:
-                    matches = True
-                elif not widget_title and not target_step_id and ("htmlContent" in wdef or card.get("type") == 3):
+                elif target_step_id is not None:
+                    matches = (card_step_id == target_step_id)
+                elif unscoped_html_update and ("htmlContent" in wdef or card.get("type") == 3):
                     matches = True
 
                 if matches:

@@ -75,34 +75,48 @@ class InvestigateCaseWorkflow:
                 )
             )
 
-        # Fetch involved entities for all alerts in parallel
+        # Fetch InvolvedEntities for all alerts in 1 wildcard API call if supported, else fall back to per-alert
         entities: List[InvolvedEntitySummary] = []
         seen_entity_keys: Set[str] = set()
 
+        def _append_raw_entities(ents_list: List[Dict[str, Any]]) -> None:
+            for e in ents_list:
+                identifier = e.get("identifier") or e.get("name") or ""
+                etype = e.get("entityType") or e.get("type")
+                dedup_key = f"{identifier}::{etype}"
+                if identifier and dedup_key not in seen_entity_keys:
+                    seen_entity_keys.add(dedup_key)
+                    entities.append(
+                        InvolvedEntitySummary(
+                            identifier=identifier,
+                            display_name=e.get("name") or identifier,
+                            entity_type=etype,
+                            role=e.get("role"),
+                            is_suspicious=bool(e.get("isSuspicious", False)),
+                            raw=e,
+                        )
+                    )
+
         if alert_names:
-            with ThreadPoolExecutor(max_workers=min(8, len(alert_names))) as executor:
-                entity_futures = {
-                    executor.submit(self.adapter.list_alert_entities, aname): aname
-                    for aname in alert_names
-                }
-                for f in as_completed(entity_futures):
-                    ents_raw = f.result()
-                    for e in ents_raw:
-                        identifier = e.get("identifier") or e.get("name") or ""
-                        etype = e.get("entityType") or e.get("type")
-                        dedup_key = f"{identifier}::{etype}"
-                        if identifier and dedup_key not in seen_entity_keys:
-                            seen_entity_keys.add(dedup_key)
-                            entities.append(
-                                InvolvedEntitySummary(
-                                    identifier=identifier,
-                                    display_name=e.get("name") or identifier,
-                                    entity_type=etype,
-                                    role=e.get("role"),
-                                    is_suspicious=bool(e.get("isSuspicious", False)),
-                                    raw=e,
-                                )
-                            )
+            used_wildcard = False
+            if hasattr(self.adapter, "list_case_entities"):
+                try:
+                    wildcard_ents = self.adapter.list_case_entities(clean_case_id)
+                    if isinstance(wildcard_ents, list):
+                        _append_raw_entities(wildcard_ents)
+                        used_wildcard = True
+                except Exception:
+                    used_wildcard = False
+
+            if not used_wildcard:
+                with ThreadPoolExecutor(max_workers=min(4, len(alert_names))) as executor:
+                    entity_futures = {
+                        executor.submit(self.adapter.list_alert_entities, aname): aname
+                        for aname in alert_names
+                    }
+                    for f in as_completed(entity_futures):
+                        ents_raw = f.result()
+                        _append_raw_entities(ents_raw)
 
         # Parse case comments using shared canonical parser
         from engine.workflows.case_wall import parse_case_comment_record

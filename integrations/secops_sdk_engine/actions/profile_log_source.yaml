@@ -1,0 +1,58 @@
+creator: Christopher Martin
+description: Profiles a Google SecOps log source partition to learn invariant raw log keys and critical UDM field completion baselines, saving automatically to a SecOps Data Table.
+dynamic_results_metadata:
+- result_example_path: resources/profile_log_source_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: SecOpsSDKEngine
+is_async: false
+name: Profile Log Source
+parameters:
+- default_value: ''
+  description: Google SecOps Log Type to profile (e.g., CS_EDR, OKTA, PAN_FIREWALL).
+  is_mandatory: true
+  name: Log Type
+  type: string
+- default_value: ''
+  description: Optional UDM Event Type to partition the baseline by (e.g., PROCESS_LAUNCH, USER_LOGIN). Leave blank if auto-discovering or profiling top-level.
+  is_mandatory: false
+  name: Event Type
+  type: string
+- default_value: 'false'
+  description: If true and Event Type is empty, automatically discovers active UDM event types from recent stream telemetry, profiles each, and populates the Data Table.
+  is_mandatory: false
+  name: Auto-Discover Event Types
+  type: boolean
+- default_value: 'true'
+  description: Persist learned baseline profiles into the Chronicle SIEM Data Table for scheduled drift monitoring.
+  is_mandatory: false
+  name: Save to Data Table
+  type: boolean
+- default_value: 'asoc_log_baselines'
+  description: Name of the Chronicle Data Table to store baseline profiles.
+  is_mandatory: false
+  name: Data Table Name
+  type: string
+- default_value: '24'
+  description: Hours of historical telemetry to analyze for establishing the baseline.
+  is_mandatory: false
+  name: Lookback Hours
+  type: string
+- default_value: '200'
+  description: Maximum number of UDM events to sample for profiling.
+  is_mandatory: false
+  name: Max UDM Events
+  type: string
+- default_value: '20'
+  description: Maximum number of raw log payloads to sample and decode for structural key discovery.
+  is_mandatory: false
+  name: Max Raw Samples
+  type: string
+- default_value: '0.20'
+  description: Minimum prevalence ratio (0.0 to 1.0) required for a raw key to be qualified into the invariant baseline.
+  is_mandatory: false
+  name: Min Key Prevalence
+  type: string
+simulation_data_json_result: '{}'
+type: 0
+version: 1.0

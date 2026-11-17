@@ -1,0 +1,45 @@
+creator: Christopher Martin
+description: Periodically evaluates active Google SecOps log source partitions against learned baselines, alerting on vendor schema drift or silent parser mapping failures.
+integration: SecOpsSDKEngine
+name: Detect Log Source Drift Job
+parameters:
+  - default_value: 'asoc_log_baselines'
+    description: Chronicle Data Table name from which to load active baseline profiles. If empty or table has no rows, falls back to Target Baselines JSON.
+    is_mandatory: false
+    name: Data Table Name
+    type: string
+  - default_value: 'true'
+    description: Automatically update the Data Table with the last evaluated timestamp and drift status (STABLE or ALERT).
+    is_mandatory: false
+    name: Update Drift Status in Table
+    type: boolean
+  - default_value: '[]'
+    description: Fallback JSON array of baseline profile objects to monitor if Data Table is not used.
+    is_mandatory: false
+    name: Target Baselines JSON
+    type: string
+  - default_value: '15'
+    description: Evaluation window in minutes to sample recent telemetry (e.g. 15, 30, 60).
+    is_mandatory: false
+    name: Evaluation Window Minutes
+    type: string
+  - default_value: '100'
+    description: Maximum number of UDM events to sample per partition.
+    is_mandatory: false
+    name: Max UDM Events Per Partition
+    type: string
+  - default_value: '15'
+    description: Maximum number of raw logs to fetch per partition for structural key verification.
+    is_mandatory: false
+    name: Max Raw Samples Per Partition
+    type: string
+  - default_value: '0.15'
+    description: Syntactic drift tolerance ratio threshold (0.0 to 1.0) before raising an alert.
+    is_mandatory: false
+    name: Drift Tolerance Threshold
+    type: string
+  - default_value: '10'
+    description: Minimum events required in the sample window before evaluation proceeds (avoids low volume skew).
+    is_mandatory: false
+    name: Min Events Required
+    type: string

@@ -1,3 +1,48 @@
+- description: "Added Gemini 4 (gemini-4-hydrogen, gemini-4-argon) ThinkingConfig compatibility by automatically mapping integer Thinking Budget parameters to thinking_level (LOW/MEDIUM/HIGH) with automatic fallback retry, routing all gemini-4* models to Vertex AI global endpoint, and preventing simulated fallback echoes from being cached as valid ADK reports."
+  version: 4.2
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-16"
+- description: "Added 3-tier ADK report recovery across ephemeral SOAR workers (SOAR Case Context DB persistence via ADK_AGENT_CACHED_RESULT, Case Wall comment fallback via list_case_comments, and protection against status-string overwrite of final_response) so playbook re-runs on Tier1:Triaged cases always preserve the full ADK Markdown report in Case Overview widgets."
+  version: 4.1
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-13"
+- description: "Added Auto Group Cases by Entity Job (auto_group_cases_job.py) and GroupCasesByEntityWorkflow for automated 24-hour high-signal entity overlap case grouping and merging with environment scoping (defaulting to Default Environment), single-host magnet case quarantine guardrails, and Dry Run mode."
+  version: 3.9
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-06"
+- description: "Synced type-aware entity sanitization in embedded SecOps SDK Engine (CorrelateSilentDetectionsWorkflow and RelatedCasesByEntityWorkflow) to block well-known Windows SIDs (e.g. S-1-0-0, S-1-5-18), default cloud/OS users, bare numeric PIDs, hex access bitmasks, timestamps, AWS-managed default policy ARNs, built-in discovery utilities, and misclassified HOSTNAME entities."
+  version: 3.8
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-01"
+- description: "Suppressed duplicate Case Wall comments (post_wall_comment=False) and raw UDM event entity extraction (extract_entities_from_events=False) inside the ADK correlate_silent_detections tool wrapper so the autonomous agent posts only its unified Stage 5 Triage Report and attaches only corroborated silent-detection entities."
+  version: 3.7
+  item_name: "GoogleADK"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-01"
 - description: "Fixed parameter alignment (dashboard_name / dashboard_title and comma-separated community_categories normalization) in Sync SecOps Homepage Dashboard Job and sync_secops_homepage_dashboard tool, and suppressed grpcio PQC FutureWarning."
   version: 3.6
   item_name: "GoogleADK"

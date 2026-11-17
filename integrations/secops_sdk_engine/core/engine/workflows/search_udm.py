@@ -393,7 +393,8 @@ class SearchUDMWorkflow:
         _notify_state()
 
         if _is_stats_query(request, val_res):
-            # Stats / SQL results arrive whole from the stats stream; poll until complete.
+            # Stats / SQL results arrive whole from the stats stream; poll until complete or deadline.
+            stats_deadline = time.monotonic() + max_poll_seconds
             while True:
                 if _is_cancelled(cancel_token):
                     session.lifecycle = LifecycleState.CANCELLING
@@ -402,6 +403,16 @@ class SearchUDMWorkflow:
                     return _finish(
                         LifecycleState.CANCELLED,
                         CompletenessState.PARTIAL if session.received_count > 0 else CompletenessState.EMPTY,
+                    )
+                if time.monotonic() > stats_deadline:
+                    try:
+                        self.adapter.cancel_operation(session.session_id)
+                    except Exception:
+                        pass
+                    return _finish(
+                        LifecycleState.FAILED,
+                        CompletenessState.PARTIAL if session.received_count > 0 else CompletenessState.EMPTY,
+                        f"Stats search polling timed out after {max_poll_seconds}s",
                     )
                 try:
                     stats_res = self.adapter.get_stats(

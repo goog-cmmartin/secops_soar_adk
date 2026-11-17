@@ -1533,10 +1533,24 @@ class CaseInvestigation:
     @property
     def is_incident(self) -> bool:
         return bool(
-            self.raw_case.get("isIncident", False)
+            self.raw_case.get("incident", False)
+            or self.raw_case.get("isIncident", False)
             or self.raw_case.get("is_incident", False)
             or str(self.stage).lower() == "incident"
         )
+
+    @property
+    def tags(self) -> List[str]:
+        raw_tags = self.raw_case.get("tags") or []
+        out: List[str] = []
+        for t in raw_tags:
+            if isinstance(t, str) and t.strip():
+                out.append(t.strip())
+            elif isinstance(t, dict):
+                dn = t.get("displayName") or t.get("tag") or t.get("name")
+                if dn and str(dn).strip():
+                    out.append(str(dn).strip())
+        return out
 
 
 @dataclass

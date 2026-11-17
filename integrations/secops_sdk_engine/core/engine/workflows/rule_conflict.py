@@ -195,6 +195,71 @@ def extract_udm_fields(rule_text: str) -> List[str]:
     return sorted(list(set(matches)))
 
 
+def _extract_deployments(dep_res: Any) -> List[Any]:
+    """Extracts deployment entries from either an adapter dict or a domain batch object."""
+    if isinstance(dep_res, dict):
+        items = dep_res.get("ruleDeployments")
+        return items if isinstance(items, list) else []
+    items = getattr(dep_res, "deployments", None)
+    return list(items) if items else []
+
+
+def _extract_deployment_fields(dep: Any) -> Tuple[str, str, bool, bool]:
+    """Returns (rule_id, name, enabled, archived) from a dict or domain deployment object."""
+    if isinstance(dep, dict):
+        name = str(dep.get("name") or "")
+        rid = str(dep.get("ruleId") or dep.get("rule_id") or "")
+        if not rid and "/rules/" in name:
+            tail = name.split("/rules/", 1)[1]
+            rid = tail.split("/")[0]
+        enabled = bool(dep.get("enabled", False))
+        archived = bool(dep.get("archived", False))
+        return rid, name, enabled, archived
+    name = str(getattr(dep, "name", "") or "")
+    rid = str(getattr(dep, "rule_id", "") or "")
+    if not rid and "/rules/" in name:
+        rid = name.split("/rules/", 1)[1].split("/")[0]
+    return rid, name, bool(getattr(dep, "enabled", False)), bool(getattr(dep, "archived", False))
+
+
+def _extract_rules_list(rules_res: Any) -> List[Any]:
+    """Extracts rule entries from either an adapter dict or a domain batch object."""
+    if isinstance(rules_res, dict):
+        items = rules_res.get("rules")
+        return items if isinstance(items, list) else []
+    items = getattr(rules_res, "rules", None)
+    return list(items) if items else []
+
+
+def _extract_rule_fields(rule: Any, fallback_id: str = "") -> Tuple[str, str, str]:
+    """Returns (rule_id, rule_name, rule_text) from a raw rule dict or domain Rule object."""
+    if isinstance(rule, dict):
+        name_path = str(rule.get("name") or "")
+        rid = (
+            str(rule.get("ruleId") or rule.get("rule_id") or "")
+            or (name_path.split("/")[-1] if name_path else "")
+            or fallback_id
+        )
+        rname = (
+            str(rule.get("displayName") or rule.get("ruleName") or rule.get("rule_name") or rule.get("display_name") or "")
+            or rid
+        )
+        rtext = str(rule.get("text") or rule.get("ruleText") or rule.get("rule_text") or "")
+        return rid, rname, rtext
+    name_path = str(getattr(rule, "name", "") or "")
+    rid = (
+        str(getattr(rule, "rule_id", "") or "")
+        or (name_path.split("/")[-1] if name_path else "")
+        or fallback_id
+    )
+    rname = (
+        str(getattr(rule, "rule_name", "") or getattr(rule, "display_name", "") or "")
+        or rid
+    )
+    rtext = str(getattr(rule, "rule_text", "") or getattr(rule, "text", "") or "")
+    return rid, rname, rtext
+
+
 class SyncRuleEmbeddingsWorkflow:
     """Synchronizes vector embeddings for all active tenant detection rules.
 
@@ -206,8 +271,9 @@ class SyncRuleEmbeddingsWorkflow:
         if store is not None:
             self.store = store
         else:
-            from agents.core.evidence_store import get_evidence_store
-            self.store = get_evidence_store()
+            from engine.ports import resolve_evidence_store
+
+            self.store = resolve_evidence_store(required=True)
 
     def execute(
         self,
@@ -227,18 +293,23 @@ class SyncRuleEmbeddingsWorkflow:
         archived_rule_ids: Set[str] = set()
         try:
             dep_res = self.adapter.list_rule_deployments()
-            for dep in dep_res.deployments:
-                if dep.archived:
-                    archived_rule_ids.add(dep.rule_id)
-                    archived_rule_ids.add(dep.name.split("/")[-2] if "deployment" in dep.name else dep.name)
+            for dep in _extract_deployments(dep_res):
+                rid, dep_name, _, archived = _extract_deployment_fields(dep)
+                if archived:
+                    if rid:
+                        archived_rule_ids.add(rid)
+                    if dep_name:
+                        archived_rule_ids.add(
+                            dep_name.split("/")[-2] if dep_name.endswith("/deployment") else dep_name.split("/")[-1]
+                        )
         except Exception as ex:
             logger.warning("Could not fetch deployments for archive filtering: %s", ex)
 
         # 2. List all customer rules
         rules_res = self.adapter.list_rules()
         active_rules = []
-        for r in rules_res.rules:
-            rid = getattr(r, "rule_id", "")
+        for r in _extract_rules_list(rules_res):
+            rid, _, _ = _extract_rule_fields(r)
             if rid in archived_rule_ids:
                 continue
             active_rules.append(r)
@@ -286,7 +357,7 @@ class SyncRuleEmbeddingsWorkflow:
             rules_to_embed: List[Any] = []
 
             for rule in chunk:
-                rid = getattr(rule, "rule_id", "") if not isinstance(rule, dict) else rule.get("rule_id", "")
+                rid, _, _ = _extract_rule_fields(rule)
                 if not force_refresh:
                     existing = self.store.get_rule_state(rid)
                     if existing and existing.get("embedding"):
@@ -304,10 +375,14 @@ class SyncRuleEmbeddingsWorkflow:
 
             records: List[Dict[str, Any]] = []
             for rule, summary, vec in zip(rules_to_embed, summaries_to_embed, vectors):
-                rid = getattr(rule, "rule_id", "") if not isinstance(rule, dict) else rule.get("rule_id", "")
-                rname = getattr(rule, "rule_name", "") or getattr(rule, "display_name", "") if not isinstance(rule, dict) else (rule.get("rule_name") or rule.get("display_name", ""))
-                sev = getattr(rule, "severity", "MEDIUM") if not isinstance(rule, dict) else rule.get("severity", "MEDIUM")
-                source = getattr(rule, "rule_source", "CUSTOMER") if not isinstance(rule, dict) else rule.get("rule_source", "GOOGLE_CURATED" if rid.startswith("ur_") else "CUSTOMER")
+                rid, rname, _ = _extract_rule_fields(rule)
+                if isinstance(rule, dict):
+                    sev_raw = rule.get("severity", "MEDIUM")
+                    sev = sev_raw.get("displayName", "MEDIUM") if isinstance(sev_raw, dict) else str(sev_raw or "MEDIUM")
+                    source = rule.get("rule_source", "GOOGLE_CURATED" if rid.startswith("ur_") else "CUSTOMER")
+                else:
+                    sev = getattr(rule, "severity", "MEDIUM")
+                    source = getattr(rule, "rule_source", "CUSTOMER")
 
                 records.append({
                     "rule_id": rid,
@@ -350,8 +425,9 @@ class FindSimilarRulesWorkflow:
         if store is not None:
             self.store = store
         else:
-            from agents.core.evidence_store import get_evidence_store
-            self.store = get_evidence_store()
+            from engine.ports import resolve_evidence_store
+
+            self.store = resolve_evidence_store(required=True)
 
     def execute(
         self,
@@ -376,9 +452,10 @@ class FindSimilarRulesWorkflow:
                 vecs = self.store.generate_rule_embeddings([summary])
                 if vecs:
                     if persist:
+                        _, resolved_name, _ = _extract_rule_fields(target_rule, fallback_id=rule_id)
                         self.store.save_rule_embeddings(rule_id, vecs[0], {
                             "rule_id": rule_id,
-                            "rule_name": getattr(target_rule, "rule_name", rule_id),
+                            "rule_name": resolved_name,
                             "summary": summary,
                         })
                     similar = self.store.find_similar_rules(target_rule_id=rule_id, embedding=vecs[0], limit=limit)
@@ -396,8 +473,9 @@ class AuditRuleConflictWorkflow:
         if store is not None:
             self.store = store
         else:
-            from agents.core.evidence_store import get_evidence_store
-            self.store = get_evidence_store()
+            from engine.ports import resolve_evidence_store
+
+            self.store = resolve_evidence_store(required=True)
 
     def execute(self, rule_id: str, limit: int = 6) -> RuleConflictAuditResult:
         """Audits target rule for conflicts and overlaps against similar tenant rules."""
@@ -405,8 +483,7 @@ class AuditRuleConflictWorkflow:
 
         # 1. Fetch target rule detail
         target_rule = self.adapter.get_rule(rule_id)
-        target_name = getattr(target_rule, "rule_name", "") or getattr(target_rule, "display_name", "") or rule_id
-        target_text = getattr(target_rule, "rule_text", "") or getattr(target_rule, "text", "")
+        _, target_name, target_text = _extract_rule_fields(target_rule, fallback_id=rule_id)
         target_sections = extract_yaral_sections(target_text)
         target_fields = set(extract_udm_fields(target_text))
 
@@ -414,13 +491,14 @@ class AuditRuleConflictWorkflow:
         is_live = False
         try:
             dep_res = self.adapter.list_rule_deployments()
-            for dep in dep_res.deployments:
-                if dep.rule_id == rule_id or dep.name.endswith(f"/rules/{rule_id}/deployment"):
+            for dep in _extract_deployments(dep_res):
+                dep_rid, dep_name, dep_enabled, _ = _extract_deployment_fields(dep)
+                if dep_rid == rule_id or dep_name.endswith(f"/rules/{rule_id}/deployment"):
                     # Only `enabled` means the rule runs; alerting without enabled produces nothing.
-                    is_live = bool(dep.enabled)
+                    is_live = dep_enabled
                     break
-        except Exception:
-            pass
+        except Exception as ex:
+            logger.warning("Could not fetch rule deployments for %s: %s", rule_id, ex)
 
         # Check silent status from decay records
         is_silent = False
@@ -453,7 +531,7 @@ class AuditRuleConflictWorkflow:
 
             try:
                 cand_rule = self.adapter.get_rule(cand_id)
-                cand_text = getattr(cand_rule, "rule_text", "") or getattr(cand_rule, "text", "")
+                _, _, cand_text = _extract_rule_fields(cand_rule, fallback_id=cand_id)
             except Exception as ex:
                 logger.debug("Could not fetch candidate rule %s for full text diff: %s", cand_id, ex)
                 cand_text = ""
@@ -461,7 +539,7 @@ class AuditRuleConflictWorkflow:
             cand_sections = extract_yaral_sections(cand_text)
             cand_fields = set(extract_udm_fields(cand_text))
 
-            c_type, c_sev, expl, strat, rec = self._compare_rules(
+            c_type, c_sev, expl, strat, rec, narrative_source, narrative_error = self._compare_rules(
                 target_name=target_name,
                 target_text=target_text,
                 target_sections=target_sections,
@@ -514,6 +592,8 @@ class AuditRuleConflictWorkflow:
                 events_overlap=events_comp,
                 match_overlap=match_comp,
                 condition_overlap=condition_comp,
+                narrative_source=narrative_source,
+                narrative_error=narrative_error,
             )
             conflict_pairs.append(pair)
 
@@ -607,15 +687,20 @@ class AuditRuleConflictWorkflow:
         cand_sections: Dict[str, str],
         cand_fields: Set[str],
         sim_score: float,
-    ) -> Tuple[str, str, str, str, str]:
+    ) -> Tuple[str, str, str, str, str, str, Optional[str]]:
         """Compares two rules using Gemini if available, falling back to deterministic AST heuristics."""
         try:
-            from google import genai
+            adapter_pid = getattr(self.adapter, "project_id", None)
+            clean_adapter_pid = adapter_pid.strip() if isinstance(adapter_pid, str) else ""
             pid = (
-                os.getenv("GCP_PROJECT_ID")
+                clean_adapter_pid
+                or os.getenv("GCP_PROJECT_ID")
                 or os.getenv("SECOPS_PROJECT_ID")
                 or os.getenv("GOOGLE_CLOUD_PROJECT")
             )
+            if not pid:
+                raise ValueError("Vertex AI project_id not configured")
+            from google import genai
             client = genai.Client(vertexai=True, project=pid, location="global")
 
             prompt = (
@@ -652,10 +737,10 @@ class AuditRuleConflictWorkflow:
             expl = parsed.get("explanation", "")
             strat = parsed.get("consolidation_strategy", "")
             rec = parsed.get("recommendation", "")
-            return c_type, c_sev, expl, strat, rec
+            return c_type, c_sev, expl, strat, rec, "gemini", None
         except Exception as ex:
             logger.debug("Vertex AI rule comparison fallback used: %s", ex)
-            return self._deterministic_comparison_fallback(
+            c_type, c_sev, expl, strat, rec = self._deterministic_comparison_fallback(
                 target_name=target_name,
                 target_sections=target_sections,
                 target_fields=target_fields,
@@ -664,6 +749,7 @@ class AuditRuleConflictWorkflow:
                 cand_fields=cand_fields,
                 sim_score=sim_score,
             )
+            return c_type, c_sev, expl, strat, rec, "deterministic_fallback", f"{type(ex).__name__}: {ex}"
 
     def _deterministic_comparison_fallback(
         self,
@@ -724,8 +810,9 @@ class BatchAuditRuleConflictsWorkflow:
         if store is not None:
             self.store = store
         else:
-            from agents.core.evidence_store import get_evidence_store
-            self.store = get_evidence_store()
+            from engine.ports import resolve_evidence_store
+
+            self.store = resolve_evidence_store(required=True)
         self.audit_wf = AuditRuleConflictWorkflow(adapter=self.adapter, store=self.store)
 
     def execute(
@@ -740,14 +827,21 @@ class BatchAuditRuleConflictsWorkflow:
         archived_ids: Set[str] = set()
         try:
             dep_res = self.adapter.list_rule_deployments()
-            for dep in dep_res.deployments:
-                if dep.archived:
-                    archived_ids.add(dep.rule_id)
-        except Exception:
-            pass
+            for dep in _extract_deployments(dep_res):
+                dep_rid, dep_name, _, dep_archived = _extract_deployment_fields(dep)
+                if dep_archived:
+                    if dep_rid:
+                        archived_ids.add(dep_rid)
+                    if dep_name and dep_name.endswith("/deployment"):
+                        archived_ids.add(dep_name.split("/")[-2])
+        except Exception as ex:
+            logger.warning("Could not fetch deployments for batch conflict audit: %s", ex)
 
         rules_res = self.adapter.list_rules()
-        active_rules = [r for r in rules_res.rules if getattr(r, "rule_id", "") not in archived_ids]
+        active_rules = [
+            r for r in _extract_rules_list(rules_res)
+            if _extract_rule_fields(r)[0] not in archived_ids
+        ]
 
         rules_to_scan = active_rules[:limit]
         total_scanned = len(rules_to_scan)
@@ -768,7 +862,7 @@ class BatchAuditRuleConflictsWorkflow:
         audited_results: List[RuleConflictAuditResult] = []
 
         for rule in rules_to_scan:
-            rid = getattr(rule, "rule_id", "")
+            rid, _, _ = _extract_rule_fields(rule)
             try:
                 res = self.audit_wf.execute(rule_id=rid, limit=6)
                 audited_results.append(res)

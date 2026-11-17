@@ -56,7 +56,7 @@ Eliminates static service account keys by using ambient GKE cluster credentials 
 
 1. **Configure Integration Instance**:
    - **Workload Identity Email**: Set to your target GCP service account (e.g. `sa-chronicle-api@<PROJECT_ID>.iam.gserviceaccount.com`).
-   - **GCP Project ID**: Set to your Google Cloud project ID (e.g. `sdl-preview-americas`).
+   - **GCP Project ID**: Set to your Google Cloud project ID (e.g. `your-gcp-project-id`).
 2. **Grant IAM Token Creator Role**:
    Grant the Chronicle SOAR host runner service account permission to generate tokens on behalf of your target service account:
    ```bash

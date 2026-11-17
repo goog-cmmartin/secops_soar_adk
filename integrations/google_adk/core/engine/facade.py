@@ -366,12 +366,14 @@ from engine.workflows.curated_detections import (
 )
 from engine.workflows.detection_tuning import (
     AnalyzeEntityCardinalityWorkflow,
+    AutonomousCaseDetectionTuningWorkflow,
     CrossReferenceRuleCasesWorkflow,
     DiagnoseAndTuneDetectionWorkflow,
     FindTopNoisyRulesWorkflow,
     ManageFindingsRefinementsWorkflow,
     QueryRuleCaseEnvironmentsWorkflow,
     SampleDetectionEventsWorkflow,
+    SyncDetectionTuningDashboardWorkflow,
     SynthesizeMultiFactorExclusionWorkflow,
     SynthesizeTuningProposalWorkflow,
     TestFindingsRefinementWorkflow,
@@ -4014,6 +4016,19 @@ class SecOpsEngine:
                 evidence_path="evidence/mitre/coverage_report",
             )
         )
+        self.registry.register(
+            WorkflowCapability(
+                capability_id="platform_health.run_check",
+                name="Run Comprehensive SecOps Platform Health Check & Ledger Sync",
+                description="Audits Playbook Failures, YARA-L/Curated Detection Rule Errors, CBN Parser Errors, Data Feeds, SOAR Jobs/Agents, Ingestion Timestamp Skew, and Cloud Logging Errors; reconciles state into a Chronicle Data Table ledger and publishes a Native Dashboard.",
+                category="operational_intelligence",
+                handler=self.run_platform_health_check,
+                mcp_tool_name="run_platform_health_check",
+                composed=True,
+                side_effects=["write_data_table", "update_dashboard"],
+                evidence_path="evidence/platform_health/check",
+            )
+        )
 
 
     def execute(
@@ -4402,6 +4417,10 @@ class SecOpsEngine:
         """Executes the Case Investigation Workspace workflow."""
         return self._investigate_case_wf.execute(case_id=_normalize_case_id(case_id))
 
+    def get_case(self, case_id: Union[str, int], expand: Optional[str] = "tags") -> Dict[str, Any]:
+        """Fetches raw SOAR case metadata (including tags and alertCount) by case ID."""
+        return self.adapter.get_case(_normalize_case_id(case_id), expand=expand)
+
     def get_alert_playbook_status(
         self, case_id: Union[str, int], alert_id: Optional[str] = None
     ) -> List[AlertPlaybookStatus]:
@@ -4610,7 +4629,7 @@ class SecOpsEngine:
     def correlate_silent_detections(
         self,
         case_id: Union[str, int],
-        lookback_hours: int = 24,
+        lookback_hours: int = 48,
         attach_to_case: bool = False,
         attach_entities: bool = True,
         post_wall_comment: bool = True,
@@ -4689,6 +4708,106 @@ class SecOpsEngine:
     def set_case_incident(self, case_id: Union[str, int], incident: bool = True) -> CaseUpdateResult:
         """Executes the Set Case Incident workflow."""
         return self._set_case_incident_wf.execute(case_id=_normalize_case_id(case_id), incident=incident)
+
+    def add_case_tag(
+        self,
+        case_id: Union[str, int],
+        tags: Union[str, List[str]],
+    ) -> Dict[str, Any]:
+        """Attaches one or more tags to a SOAR case via the :addTag RPC."""
+        cid = _normalize_case_id(case_id)
+        if isinstance(tags, str):
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        else:
+            tag_list = [str(t).strip() for t in (tags or []) if str(t).strip()]
+        # Safeguard against CASE_TAG_ADDED reaction trigger loops:
+        # If Run_Case_Correlation is still stuck on the case when adding non-trigger tags
+        # (e.g. Tier1:Triaged, Verdict:*, Disp:*), remove Run_Case_Correlation first so
+        # "[Case.Tags] CONTAINS Run_Case_Correlation" does not fire for every tag added.
+        pre_cleared_trigger_tag = False
+        if tag_list and "Run_Case_Correlation" not in tag_list:
+            try:
+                pre_case = self.adapter.get_case(cid, expand="tags")
+                pre_tags = set()
+                for rt in pre_case.get("tags") or []:
+                    if isinstance(rt, dict):
+                        dn = rt.get("displayName") or rt.get("tag")
+                        if dn:
+                            pre_tags.add(str(dn).strip())
+                    elif isinstance(rt, str):
+                        pre_tags.add(rt.strip())
+                if "Run_Case_Correlation" in pre_tags:
+                    self.adapter.remove_case_tag(case_id=cid, tag="Run_Case_Correlation")
+                    pre_cleared_trigger_tag = True
+            except Exception:
+                pass
+        added = []
+        errors = []
+        for t in tag_list:
+            try:
+                self.adapter.add_case_tag(case_id=cid, tag=t)
+                added.append(t)
+            except Exception as err:
+                errors.append({"tag": t, "error": str(err)})
+        confirmed_tags = []
+        try:
+            raw_case = self.adapter.get_case(cid, expand="tags")
+            for rt in raw_case.get("tags") or []:
+                if isinstance(rt, dict):
+                    dn = rt.get("displayName") or rt.get("tag")
+                    if dn:
+                        confirmed_tags.append(str(dn))
+                elif isinstance(rt, str):
+                    confirmed_tags.append(rt)
+        except Exception:
+            confirmed_tags = added
+        return {
+            "case_id": cid,
+            "tags_requested": tag_list,
+            "tags_added": added,
+            "confirmed_case_tags": confirmed_tags,
+            "pre_cleared_run_case_correlation": pre_cleared_trigger_tag,
+            "errors": errors,
+        }
+
+    def remove_case_tag(
+        self,
+        case_id: Union[str, int],
+        tags: Union[str, List[str]],
+    ) -> Dict[str, Any]:
+        """Removes one or more tags from a SOAR case via the :removeTag RPC."""
+        cid = _normalize_case_id(case_id)
+        if isinstance(tags, str):
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        else:
+            tag_list = [str(t).strip() for t in (tags or []) if str(t).strip()]
+        removed = []
+        errors = []
+        for t in tag_list:
+            try:
+                self.adapter.remove_case_tag(case_id=cid, tag=t)
+                removed.append(t)
+            except Exception as err:
+                errors.append({"tag": t, "error": str(err)})
+        confirmed_tags = []
+        try:
+            raw_case = self.adapter.get_case(cid, expand="tags")
+            for rt in raw_case.get("tags") or []:
+                if isinstance(rt, dict):
+                    dn = rt.get("displayName") or rt.get("tag")
+                    if dn:
+                        confirmed_tags.append(str(dn))
+                elif isinstance(rt, str):
+                    confirmed_tags.append(rt)
+        except Exception:
+            pass
+        return {
+            "case_id": cid,
+            "tags_requested": tag_list,
+            "tags_removed": removed,
+            "confirmed_case_tags": confirmed_tags,
+            "errors": errors,
+        }
 
     def update_case_alert(
         self,
@@ -5749,6 +5868,48 @@ class SecOpsEngine:
             rule_id=rule_id,
             lookback_days=lookback_days,
             dominance_threshold=dominance_threshold,
+        )
+
+    def tune_case_detections(
+        self,
+        case_id: Optional[Union[str, int]] = None,
+        rule_id: Optional[str] = None,
+        lookback_days: int = 14,
+        dominance_threshold: float = 0.15,
+        apply_tuning: bool = False,
+        ttl_days: int = 30,
+        record_to_data_table: bool = True,
+        post_wall_comment: bool = True,
+        actor: str = "chris.martin@1823127835827.altostrat.com",
+    ) -> Dict[str, Any]:
+        """Executes AutonomousCaseDetectionTuningWorkflow for a SOAR Case and/or SIEM Rule."""
+        wf = AutonomousCaseDetectionTuningWorkflow(self.adapter)
+        return wf.execute(
+            case_id=str(case_id) if case_id is not None else None,
+            rule_id=rule_id,
+            lookback_days=lookback_days,
+            dominance_threshold=dominance_threshold,
+            apply_tuning=apply_tuning,
+            ttl_days=ttl_days,
+            record_to_data_table=record_to_data_table,
+            post_wall_comment=post_wall_comment,
+            actor=actor,
+        )
+
+    def sync_detection_tuning_dashboard(
+        self,
+        dashboard_title: str = "Detection Tuning & FP Reduction Command Center",
+        dashboard_id: Optional[str] = None,
+        lookback_days: int = 7,
+        top_rules_limit: int = 5,
+    ) -> Dict[str, Any]:
+        """Creates or updates the 'Detection Tuning & FP Reduction Command Center' Native Dashboard."""
+        wf = SyncDetectionTuningDashboardWorkflow(self.adapter)
+        return wf.execute(
+            dashboard_title=dashboard_title,
+            dashboard_id=dashboard_id,
+            lookback_days=lookback_days,
+            top_rules_limit=top_rules_limit,
         )
 
     # --- Milestone 5.8: Content Hub Marketplace Response Integrations Methods ---
@@ -7570,4 +7731,121 @@ class SecOpsEngine:
             include_tenant_health=include_tenant_health,
             ai_executive_summary=ai_executive_summary,
         )
+
+    def group_cases_by_entity(
+        self,
+        environments: Optional[List[str]] = None,
+        lookback_hours: int = 24,
+        grouping_window_hours: int = 24,
+        min_shared_entities: int = 1,
+        max_cases: int = 100,
+        max_distinct_hosts_per_case: int = 1,
+        min_case_age_minutes: int = 5,
+        include_enriched_entities: bool = False,
+        require_shared_host_when_both_have_hosts: bool = True,
+        dry_run: bool = True,
+        post_wall_comment: bool = True,
+        trigger_correlation_tag: bool = True,
+        target_case_ids: Optional[List[Union[str, int]]] = None,
+        profile_cache: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Any:
+        """Scans open SOAR cases, computes high-signal entity overlaps within grouping_window_hours, and either returns a dry-run merge plan or executes cases:merge."""
+        from engine.workflows.case_grouping import GroupCasesByEntityWorkflow
+        wf = GroupCasesByEntityWorkflow(adapter=self.adapter)
+        return wf.execute(
+            environments=environments,
+            lookback_hours=lookback_hours,
+            grouping_window_hours=grouping_window_hours,
+            min_shared_entities=min_shared_entities,
+            max_cases=max_cases,
+            max_distinct_hosts_per_case=max_distinct_hosts_per_case,
+            min_case_age_minutes=min_case_age_minutes,
+            include_enriched_entities=include_enriched_entities,
+            require_shared_host_when_both_have_hosts=require_shared_host_when_both_have_hosts,
+            dry_run=dry_run,
+            post_wall_comment=post_wall_comment,
+            trigger_correlation_tag=trigger_correlation_tag,
+            target_case_ids=target_case_ids,
+            profile_cache=profile_cache,
+        )
+
+    def run_platform_health_check(
+        self,
+        lookback_days: int = 7,
+        sync_data_table: bool = True,
+        sync_dashboard: bool = True,
+        data_table_name: str = "secops_platform_health_ledger",
+        dashboard_title: str = "SecOps Platform Health & Operations Center",
+        dashboard_id: Optional[str] = None,
+        ai_executive_summary: Optional[str] = None,
+        include_cloud_logging: bool = True,
+    ) -> Dict[str, Any]:
+        """Executes the 7-Pillar SecOps Platform Health Check Agent, reconciles NEW/RECURRING/RESOLVED state into a Chronicle Data Table ledger, and publishes the SecOps Platform Health & Operations Center Native Dashboard."""
+        from engine.workflows.platform_health_agent import PlatformHealthCheckWorkflow
+        wf = PlatformHealthCheckWorkflow(engine=self)
+        return wf.execute(
+            lookback_days=lookback_days,
+            sync_data_table=sync_data_table,
+            data_table_id=data_table_name,
+            sync_dashboard=sync_dashboard,
+            dashboard_title=dashboard_title,
+            dashboard_id=dashboard_id,
+            include_additional_pillars=include_cloud_logging,
+            ai_executive_summary=ai_executive_summary,
+        )
+
+    def sync_platform_health_dashboard(
+        self,
+        lookback_days: int = 7,
+        sync_data_table: bool = True,
+        data_table_name: str = "secops_platform_health_ledger",
+        dashboard_title: str = "SecOps Platform Health & Operations Center",
+        dashboard_id: Optional[str] = None,
+        ai_executive_summary: Optional[str] = None,
+        include_cloud_logging: bool = True,
+    ) -> Dict[str, Any]:
+        """Alias for run_platform_health_check with sync_dashboard=True."""
+        return self.run_platform_health_check(
+            lookback_days=lookback_days,
+            sync_data_table=sync_data_table,
+            sync_dashboard=True,
+            data_table_name=data_table_name,
+            dashboard_title=dashboard_title,
+            dashboard_id=dashboard_id,
+            ai_executive_summary=ai_executive_summary,
+            include_cloud_logging=include_cloud_logging,
+        )
+
+    def sync_log_source_inventory(
+        self,
+        lookback_days: int = 7,
+        sync_data_table: bool = True,
+        data_table_name: str = "asoc_log_source_inventory",
+        sync_dashboard: bool = True,
+        dashboard_title: str = "Log Source Inventory & Collector Health",
+        dashboard_id: Optional[str] = None,
+        bindplane_api_url: Optional[str] = None,
+        bindplane_api_key: Optional[str] = None,
+        include_multi_host_udm: bool = True,
+    ) -> Dict[str, Any]:
+        """Executes the Unified Log Source Inventory & Collector Health workflow, reconciling Bindplane OTel downstream pipelines, Chronicle Feeds, Ingestion API telemetry, and Multi-Host Feed UDM device autodetection into a Chronicle Data Table and Native Dashboard."""
+        try:
+            from engine.workflows.log_source_inventory import LogSourceInventoryWorkflow
+        except ImportError:
+            from log_source_inventory import LogSourceInventoryWorkflow
+
+        wf = LogSourceInventoryWorkflow(engine=self)
+        return wf.execute(
+            lookback_days=lookback_days,
+            sync_data_table=sync_data_table,
+            data_table_id=data_table_name,
+            sync_dashboard=sync_dashboard,
+            dashboard_title=dashboard_title,
+            dashboard_id=dashboard_id,
+            bindplane_api_url=bindplane_api_url,
+            bindplane_api_key=bindplane_api_key,
+            include_multi_host_discovery=include_multi_host_udm,
+        )
+
+
 

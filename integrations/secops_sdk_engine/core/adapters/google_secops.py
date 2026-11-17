@@ -6,6 +6,7 @@ Google SecOps (Chronicle) REST & Long Running Operation (LRO) APIs.
 
 import base64
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -200,6 +201,7 @@ class GoogleSecOpsAdapter:
         location: Optional[str] = None,
         api_base: Optional[str] = None,
         credential_provider: Optional[CredentialProvider] = None,
+        verify_ssl: bool = True,
     ):
         if config is not None:
             self.config = config
@@ -217,6 +219,7 @@ class GoogleSecOpsAdapter:
         self.customer_id = self.config.customer_id
         self.location = self.config.location
         self.api_base = self.config.api_base
+        self.verify_ssl = bool(verify_ssl)
         self.default_timeout = 35.0
         self._credential_provider = credential_provider or CredentialProvider()
         self._retry_lock = threading.Lock()
@@ -233,6 +236,118 @@ class GoogleSecOpsAdapter:
         ``engine/auth.py`` for the full resolution contract.
         """
         return self._credential_provider.get_token()
+
+    def _resolve_instance_resource(
+        self,
+        raw_value: str,
+        expected_collection: str,
+        *,
+        use_project_number: bool = False,
+        strip_trailing_segment: Optional[str] = None,
+        allow_nested_collections: Tuple[str, ...] = (),
+        enforce_tenant_match: bool = True,
+    ) -> str:
+        """Validates a short resource ID or full Chronicle resource name against
+        this adapter's configured instance and expected collection.
+        """
+        if not raw_value or not isinstance(raw_value, str) or not raw_value.strip():
+            raise ValueError(f"Resource identifier for '{expected_collection}' must be a non-empty string.")
+        clean = raw_value.strip().lstrip("/")
+        if any(ch in clean for ch in ("?", "#", "\\")) or any(ch.isspace() for ch in clean):
+            raise ValueError(
+                f"Invalid characters in '{expected_collection}' identifier: '{raw_value}'."
+            )
+
+        proj_default = (
+            getattr(self, "project_number", None) or getattr(self, "project_id", None)
+            if use_project_number
+            else getattr(self, "project_id", None) or getattr(self, "project_number", None)
+        )
+        allowed_projects = {
+            str(p)
+            for p in (getattr(self, "project_id", None), getattr(self, "project_number", None))
+            if p is not None and str(p).strip()
+        }
+        expected_loc = str(getattr(self, "location", "") or "")
+        expected_inst = str(getattr(self, "customer_id", "") or "")
+
+        if clean.startswith("projects/"):
+            parts = clean.split("/")
+            if strip_trailing_segment and len(parts) >= 9 and parts[-1] == strip_trailing_segment:
+                parts = parts[:-1]
+                clean = "/".join(parts)
+            if (
+                len(parts) < 8
+                or parts[0] != "projects"
+                or parts[2] != "locations"
+                or parts[4] != "instances"
+                or any(seg in ("", ".", "..") for seg in parts)
+            ):
+                raise ValueError(
+                    f"Malformed Chronicle resource name '{raw_value}' for collection '{expected_collection}'."
+                )
+            if enforce_tenant_match and expected_loc and parts[3] != expected_loc:
+                raise ValueError(
+                    f"Resource '{raw_value}' targets location '{parts[3]}', expected '{expected_loc}'."
+                )
+            if enforce_tenant_match and expected_inst and parts[5] != expected_inst:
+                raise ValueError(
+                    f"Resource '{raw_value}' targets instance '{parts[5]}', expected '{expected_inst}'."
+                )
+            if enforce_tenant_match and allowed_projects and parts[1] not in allowed_projects:
+                if (
+                    parts[1].isdigit()
+                    and not any(p.isdigit() for p in allowed_projects)
+                    and expected_inst
+                    and parts[5] == expected_inst
+                ):
+                    self.project_number = parts[1]
+                    if getattr(self, "config", None) is not None:
+                        self.config.project_number = parts[1]
+                    allowed_projects.add(parts[1])
+                else:
+                    raise ValueError(
+                        f"Resource '{raw_value}' targets project '{parts[1]}', which does not match configured tenant {sorted(allowed_projects)}."
+                    )
+            tail = parts[6:]
+            expected_chain = (expected_collection,) + tuple(allow_nested_collections)
+            if len(tail) != len(expected_chain) * 2:
+                raise ValueError(
+                    f"Resource '{raw_value}' does not match expected collection structure "
+                    f"'{'/*/'.join(expected_chain)}/*'."
+                )
+            for idx, col_name in enumerate(expected_chain):
+                if tail[idx * 2] != col_name:
+                    raise ValueError(
+                        f"Resource '{raw_value}' has collection '{tail[idx * 2]}', expected '{col_name}'."
+                    )
+            if tail[-1] == "-":
+                raise ValueError(
+                    f"Wildcard '-' is not permitted for addressed '{expected_collection}' resource '{raw_value}'."
+                )
+            return clean
+
+        # Relative path or bare ID
+        if allow_nested_collections and "/" in clean:
+            rel_parts = clean.split("/")
+            expected_chain = (expected_collection,) + tuple(allow_nested_collections)
+            if (
+                len(rel_parts) == len(expected_chain) * 2
+                and all(rel_parts[i * 2] == col for i, col in enumerate(expected_chain))
+                and all(seg not in ("", ".", "..") for seg in rel_parts)
+                and rel_parts[-1] != "-"
+            ):
+                return f"projects/{proj_default}/locations/{expected_loc}/instances/{expected_inst}/{clean}"
+            raise ValueError(
+                f"Invalid relative resource path '{raw_value}' for '{'/'.join(expected_chain)}'."
+            )
+
+        if "/" in clean or clean in (".", "..", "-"):
+            raise ValueError(
+                f"Invalid '{expected_collection}' identifier '{raw_value}'; expected a single resource ID or valid resource name."
+            )
+        encoded_id = urllib.parse.quote(clean, safe="@._-")
+        return f"projects/{proj_default}/locations/{expected_loc}/instances/{expected_inst}/{expected_collection}/{encoded_id}"
 
     # ------------------------------------------------------------------
     # Retry visibility. _request silently retried 429/5xx/network errors up to
@@ -282,6 +397,145 @@ class GoogleSecOpsAdapter:
             if e["seq"] > marker and (not current_thread_only or e["thread"] == tid)
         ]
 
+    @staticmethod
+    def _expect_dict(res: Any, method_name: str) -> Dict[str, Any]:
+        """Validates that a read API response is a JSON object (dict)."""
+        if not isinstance(res, dict):
+            raise RuntimeError(
+                f"Unexpected {method_name} response shape: expected dict, got {type(res).__name__}"
+            )
+        return res
+
+    @staticmethod
+    def _expect_list_field(
+        res: Any,
+        field_name: str,
+        method_name: str,
+        *,
+        accept_top_level_list: bool = False,
+    ) -> List[Any]:
+        """Validates a collection read response and returns its list field."""
+        if accept_top_level_list and isinstance(res, list):
+            return res
+        if not isinstance(res, dict):
+            raise RuntimeError(
+                f"Unexpected {method_name} response shape: expected dict, got {type(res).__name__}"
+            )
+        if field_name not in res or res[field_name] is None:
+            return []
+        val = res[field_name]
+        if not isinstance(val, list):
+            raise RuntimeError(
+                f"Unexpected {method_name}.{field_name} field type: expected list, got {type(val).__name__}"
+            )
+        return val
+
+    @staticmethod
+    def _validate_segment(
+        value: Any,
+        field_name: str = "id",
+        *,
+        allow_wildcard: bool = False,
+        strip_resource_prefix: bool = True,
+    ) -> str:
+        """Validates a single URL path segment and optionally strips a valid resource prefix."""
+        raw = str(value).strip() if value is not None else ""
+        if not raw:
+            raise ValueError(f"{field_name} must be a non-empty string.")
+        if allow_wildcard and raw == "-":
+            return "-"
+        if (
+            any(ord(c) < 0x20 or ord(c) == 0x7F for c in raw)
+            or any(c in raw for c in ("?", "#", "\\"))
+        ):
+            raise ValueError(f"Invalid {field_name} '{value}': contains forbidden URL/control characters.")
+        if "/" in raw:
+            if not strip_resource_prefix:
+                raise ValueError(f"Invalid {field_name} '{value}': unexpected '/'.")
+            parts = raw.split("/")
+            if any(p in ("", ".", "..") for p in parts):
+                raise ValueError(f"Invalid resource path for {field_name}: '{value}'.")
+            seg = parts[-1]
+        else:
+            seg = raw
+        if seg in ("", ".", ".."):
+            raise ValueError(f"Invalid {field_name}: '{value}'.")
+        if seg == "-" and not allow_wildcard:
+            raise ValueError(f"Wildcard '-' is not permitted for {field_name}.")
+        return seg
+
+    @classmethod
+    def _encode_segment(
+        cls,
+        value: Any,
+        field_name: str = "id",
+        *,
+        allow_wildcard: bool = False,
+        strip_resource_prefix: bool = True,
+    ) -> str:
+        """Validates and percent-encodes a single URL path segment."""
+        seg = cls._validate_segment(
+            value,
+            field_name=field_name,
+            allow_wildcard=allow_wildcard,
+            strip_resource_prefix=strip_resource_prefix,
+        )
+        if seg == "-":
+            return "-"
+        return urllib.parse.quote(seg, safe="")
+
+    @staticmethod
+    def _escape_filter_literal(
+        value: Any,
+        field_name: str = "filter_value",
+        *,
+        quote: str = '"',
+    ) -> str:
+        """Escapes a string literal embedded inside an AIP-160 filter expression."""
+        raw = str(value) if value is not None else ""
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in raw):
+            raise ValueError(f"Invalid control character in {field_name}.")
+        escaped = raw.replace("\\", "\\\\")
+        if quote:
+            escaped = escaped.replace(quote, f"\\{quote}")
+        return escaped
+
+    _IDEMPOTENT_POST_SUFFIXES = (
+        ":legacyFetchUdmSearchView",
+        ":cancel",
+        ":searchRawLogs",
+        ":getOrCreateCaseSummary",
+        ":legacyCaseSearchEverything",
+        ":legacyGetCasesFilterValues",
+        ":legacyGetWorkflowMenuCardsWithEnvFilter",
+        ":legacyGetPlaybookStatsMap",
+        ":legacyGetWorkflowInstancesCards",
+        ":legacyGetWorkflowInstance",
+        ":legacyExportWorkflows",
+        ":countAllCuratedRuleSetDetections",
+        ":testFindingsRefinement",
+        ":execute",
+        ":executeQuery",
+        ":runParser",
+        ":translateUdmQuery",
+        ":verifyRuleText",
+        ":verifyRule",
+        ":validateQuery",
+        ":streamSearch",
+        "entries:list",
+    )
+
+    @classmethod
+    def _is_idempotent_request(cls, method: str, path: str) -> bool:
+        """Returns True only when retrying after a transient failure cannot duplicate a write."""
+        method_upper = (method or "GET").upper()
+        if method_upper in ("GET", "HEAD", "OPTIONS"):
+            return True
+        if method_upper == "POST":
+            clean_path = (path or "").split("?", 1)[0]
+            return clean_path.endswith(cls._IDEMPOTENT_POST_SUFFIXES)
+        return False
+
     def _request(
         self,
         method: str,
@@ -289,8 +543,9 @@ class GoogleSecOpsAdapter:
         params: Optional[Any] = None,
         body: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
+        idempotent: Optional[bool] = None,
     ) -> Any:
-        """Executes an authenticated REST request against Google SecOps APIs with transient retry."""
+        """Executes an authenticated REST request against Google SecOps APIs with bounded idempotent retry."""
         if path.startswith("https://"):
             url = path
         else:
@@ -302,7 +557,22 @@ class GoogleSecOpsAdapter:
 
         data = json.dumps(body).encode("utf-8") if body is not None else None
         effective_timeout = timeout if timeout is not None else getattr(self, "default_timeout", 35.0)
-        max_retries = 5
+        is_idempotent = (
+            bool(idempotent)
+            if idempotent is not None
+            else self._is_idempotent_request(method, path)
+        )
+        max_retries = 5 if is_idempotent else 1
+        retry_budget_s = getattr(self, "max_retry_budget_seconds", None)
+        if retry_budget_s is None:
+            retry_budget_s = max(15.0, min(float(effective_timeout) * 3.0, 90.0))
+        retry_deadline = time.monotonic() + float(retry_budget_s)
+
+        urlopen_kwargs: Dict[str, Any] = {"timeout": effective_timeout}
+        if not getattr(self, "verify_ssl", True):
+            import ssl
+            urlopen_kwargs["context"] = ssl._create_unverified_context()
+
         for attempt in range(1, max_retries + 1):
             token = self._get_auth_token()
             headers = {
@@ -312,7 +582,7 @@ class GoogleSecOpsAdapter:
             }
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
+                with urllib.request.urlopen(req, **urlopen_kwargs) as resp:
                     resp_data = resp.read().decode("utf-8")
                     if not resp_data.strip():
                         return {}
@@ -320,18 +590,42 @@ class GoogleSecOpsAdapter:
             except urllib.error.HTTPError as e:
                 if e.code == 401 and attempt == 1 and hasattr(self._credential_provider, "invalidate"):
                     self._credential_provider.invalidate()
+                    if not is_idempotent:
+                        token = self._get_auth_token()
+                        headers["Authorization"] = f"Bearer {token}"
+                        req_retry = urllib.request.Request(url, data=data, headers=headers, method=method)
+                        try:
+                            with urllib.request.urlopen(req_retry, **urlopen_kwargs) as resp:
+                                resp_data = resp.read().decode("utf-8")
+                                return json.loads(resp_data) if resp_data.strip() else {}
+                        except urllib.error.HTTPError as retry_http_err:
+                            error_body = retry_http_err.read().decode("utf-8")
+                            raise SecOpsApiError(retry_http_err.code, _extract_error_message(error_body)) from retry_http_err
+                        except (TimeoutError, urllib.error.URLError) as retry_net_err:
+                            raise RuntimeError(f"Network error connecting to Google SecOps: {retry_net_err}") from retry_net_err
                     continue
-                if e.code in [429, 502, 503, 504] and attempt < max_retries:
-                    self._record_retry(e.code, attempt, 2.5 * attempt, url)
-                    time.sleep(2.5 * attempt)
+                sleep_s = 2.5 * attempt
+                if (
+                    is_idempotent
+                    and e.code in (429, 502, 503, 504)
+                    and attempt < max_retries
+                    and (time.monotonic() + sleep_s <= retry_deadline)
+                ):
+                    self._record_retry(e.code, attempt, sleep_s, url)
+                    time.sleep(sleep_s)
                     continue
                 error_body = e.read().decode("utf-8")
                 err_msg = _extract_error_message(error_body)
                 raise SecOpsApiError(e.code, err_msg) from e
             except (TimeoutError, urllib.error.URLError) as e:
-                if attempt < max_retries:
-                    self._record_retry(f"network:{type(e).__name__}", attempt, 1.0 * attempt, url)
-                    time.sleep(1.0 * attempt)
+                sleep_s = 1.0 * attempt
+                if (
+                    is_idempotent
+                    and attempt < max_retries
+                    and (time.monotonic() + sleep_s <= retry_deadline)
+                ):
+                    self._record_retry(f"network:{type(e).__name__}", attempt, sleep_s, url)
+                    time.sleep(sleep_s)
                     continue
                 raise RuntimeError(f"Network error connecting to Google SecOps: {e}") from e
 
@@ -364,7 +658,8 @@ class GoogleSecOpsAdapter:
             "rawQuery": query,
         }
         res = self._request("GET", path, params=params)
-        return parse_validate_query_response(res, dialect=resolved_dialect, accepted_types=UDM_SEARCH_QUERY_TYPES)
+        accepted = None if resolved_dialect == "DIALECT_SQL" else UDM_SEARCH_QUERY_TYPES
+        return parse_validate_query_response(res, dialect=resolved_dialect, accepted_types=accepted)
 
     def start_search(
         self,
@@ -447,10 +742,8 @@ class GoogleSecOpsAdapter:
         Returns normalized SearchBatchResult.
         """
         # operation_id is full path or relative operation ID
-        if operation_id.startswith("projects/"):
-            path = f"/v1alpha/{operation_id}:streamSearch"
-        else:
-            path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/operations/{operation_id}:streamSearch"
+        op_res = self._resolve_instance_resource(operation_id, "operations", use_project_number=True)
+        path = f"/v1alpha/{op_res}:streamSearch"
 
         end_index = start_index + batch_size - 1
         params = {
@@ -568,10 +861,8 @@ class GoogleSecOpsAdapter:
 
         Returns normalized StatsSearchResult.
         """
-        if operation_id.startswith("projects/"):
-            path = f"/v1alpha/{operation_id}:streamSearch"
-        else:
-            path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/operations/{operation_id}:streamSearch"
+        op_res = self._resolve_instance_resource(operation_id, "operations", use_project_number=True)
+        path = f"/v1alpha/{op_res}:streamSearch"
 
         end_index = start_index + batch_size - 1
         params = {
@@ -749,17 +1040,23 @@ class GoogleSecOpsAdapter:
 
     def cancel_operation(self, operation_id: str) -> None:
         """Translates search.cancel domain operation to :cancel API."""
-        if operation_id.startswith("projects/"):
-            path = f"/v1alpha/{operation_id}:cancel"
-        else:
-            path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/operations/{operation_id}:cancel"
+        op_res = self._resolve_instance_resource(operation_id, "operations", use_project_number=True)
+        path = f"/v1alpha/{op_res}:cancel"
 
         try:
             self._request("POST", path, body={})
         except RuntimeError as e:
-            # If the operation is already done/cancelled/expired (HTTP 404 or not found), cancellation is idempotent
+            # If the operation is already done/cancelled/expired (HTTP 404 or not found),
+            # or is a legacyFetchUdmSearchView stream ID (s-udm-*) rejected by standard LRO :cancel,
+            # client-side stream termination remains idempotent.
             err_str = str(e).lower()
-            if "404" in err_str or "not found" in err_str or "already finished" in err_str:
+            if (
+                "404" in err_str
+                or "not found" in err_str
+                or "already finished" in err_str
+                or ("/operations/s-udm-" in op_res and "parsing operation id" in err_str)
+            ):
+                logger.debug("Server-side LRO cancel skipped for %s: %s", op_res, e)
                 return
             logger.warning(f"Error cancelling operation {operation_id}: {e}")
             raise
@@ -769,10 +1066,10 @@ class GoogleSecOpsAdapter:
         # Convert standard base64 to RFC 4648 section 5 URL-safe unpadded base64
         b64url_id = event_id.rstrip("=").replace("+", "-").replace("/", "_")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/events/{b64url_id}:fetchEnrichedEvent"
-        res = self._request("GET", path)
-        if isinstance(res, dict) and "udm" in res:
+        res = self._expect_dict(self._request("GET", path), "fetch_enriched_event")
+        if "udm" in res and isinstance(res["udm"], dict):
             return res["udm"]
-        return res if isinstance(res, dict) else {}
+        return res
 
     def get_raw_log(self, event_id: str, log_token: Optional[str] = None) -> RawLogPayload:
         """Fetches and decodes the unparsed raw log associated with an event ID."""
@@ -825,7 +1122,7 @@ class GoogleSecOpsAdapter:
             "timeRange.endTime": end_time,
         }
         res = self._request("GET", path, params=params)
-        return res if isinstance(res, dict) else {}
+        return self._expect_dict(res, "query_product_source_stats")
 
     def validate_raw_log_query(
         self,
@@ -848,7 +1145,7 @@ class GoogleSecOpsAdapter:
             "rawQuery": raw_query,
         }
         res = self._request("GET", path, params=params)
-        return res if isinstance(res, dict) else {}
+        return self._expect_dict(res, "validate_raw_log_query")
 
     def search_raw_logs(
         self,
@@ -874,18 +1171,61 @@ class GoogleSecOpsAdapter:
         res = self._request("POST", path, body=body)
         if isinstance(res, list):
             return [x for x in res if isinstance(x, dict)]
-        elif isinstance(res, dict):
-            return [res]
-        return []
+        if isinstance(res, dict):
+            return [res] if res else []
+        raise RuntimeError(
+            f"Unexpected search_raw_logs response shape: expected list or dict, got {type(res).__name__}"
+        )
 
-    def get_case(self, case_id: str) -> Dict[str, Any]:
+    def get_case(self, case_id: str, expand: Optional[str] = "tags") -> Dict[str, Any]:
         """Fetches raw case metadata by case ID."""
-        case_id_clean = case_id.split("/")[-1]
+        case_id_clean = self._encode_segment(case_id, "case_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}"
-        res = self._request("GET", path)
+        params = {"expand": expand} if expand else None
+        res = self._request("GET", path, params=params)
         if not isinstance(res, dict) or "name" not in res:
             raise RuntimeError(f"Case '{case_id}' not found or invalid response from SecOps.")
         return res
+
+    def add_case_tag(self, case_id: str, tag: str) -> Dict[str, Any]:
+        """Attaches a tag to a SOAR case via the :addTag RPC."""
+        raw_id = str(case_id).strip().split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}:addTag"
+        res = self._request("POST", path, body={"tag": str(tag).strip()})
+        return res if isinstance(res, dict) else {}
+
+    def remove_case_tag(self, case_id: str, tag: str) -> Dict[str, Any]:
+        """Removes a tag from a SOAR case via the :removeTag RPC."""
+        raw_id = str(case_id).strip().split("/")[-1]
+        case_id_clean = urllib.parse.quote(raw_id, safe="")
+        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}:removeTag"
+        res = self._request("POST", path, body={"tag": str(tag).strip()})
+        return res if isinstance(res, dict) else {}
+
+    def merge_cases(
+        self,
+        case_ids: List[Union[str, int]],
+        target_case_id: Union[str, int],
+    ) -> Dict[str, Any]:
+        """Merges multiple SOAR cases into a single target case via the :merge RPC."""
+        cleaned_ids: List[Union[str, int]] = []
+        for cid in case_ids:
+            raw_c = str(cid).strip().split("/")[-1]
+            if raw_c:
+                cleaned_ids.append(int(raw_c) if raw_c.isdigit() else raw_c)
+        raw_target = str(target_case_id).strip().split("/")[-1]
+        target_val: Union[str, int] = int(raw_target) if raw_target.isdigit() else raw_target
+        if target_val not in cleaned_ids:
+            cleaned_ids.insert(0, target_val)
+
+        body = {
+            "casesIds": cleaned_ids,
+            "caseToMergeWith": target_val,
+        }
+        path = f"/v1beta/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases:merge"
+        res = self._request("POST", path, body=body)
+        return res if isinstance(res, dict) else {"result": res}
 
     def update_case(
         self,
@@ -926,9 +1266,7 @@ class GoogleSecOpsAdapter:
         if page_size:
             params["pageSize"] = page_size
         res = self._request("GET", path, params=params if params else None)
-        if isinstance(res, dict):
-            return res.get("caseAlerts", [])
-        return []
+        return self._expect_list_field(res, "caseAlerts", "list_case_alerts")
 
     def list_cases(
         self,
@@ -979,9 +1317,9 @@ class GoogleSecOpsAdapter:
 
     def get_case_alert(self, alert_name: str) -> Dict[str, Any]:
         """Fetches specific alert details by resource name."""
-        clean_name = alert_name.lstrip("/")
-        if not clean_name.startswith("projects/"):
-            clean_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/{clean_name}"
+        clean_name = self._resolve_instance_resource(
+            alert_name, "cases", allow_nested_collections=("caseAlerts",)
+        )
         path = f"/v1alpha/{clean_name}"
         res = self._request("GET", path)
         if not isinstance(res, dict) or "name" not in res:
@@ -1153,7 +1491,9 @@ class GoogleSecOpsAdapter:
         if filter:
             params["filter"] = filter
         elif case_id is not None:
-            raw_case_id = str(case_id).split("/")[-1]
+            raw_case_id = self._validate_segment(case_id, "case_id")
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", raw_case_id):
+                raise ValueError(f"Invalid case_id for filter: {case_id!r}")
             params["filter"] = f"caseId = {raw_case_id}"
         if page_size is not None:
             params["pageSize"] = int(page_size)
@@ -1235,14 +1575,22 @@ class GoogleSecOpsAdapter:
 
     def list_alert_entities(self, alert_name: str) -> List[Dict[str, Any]]:
         """Lists all involved entities for a specific alert."""
-        clean_name = alert_name.lstrip("/")
-        if not clean_name.startswith("projects/"):
-            clean_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/{clean_name}"
+        clean_name = self._resolve_instance_resource(
+            alert_name, "cases", allow_nested_collections=("caseAlerts",)
+        )
         path = f"/v1alpha/{clean_name}/involvedEntities"
-        res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res.get("involvedEntities", [])
-        return []
+        res = self._request("GET", path, params={"pageSize": 1000})
+        return self._expect_list_field(res, "involvedEntities", "list_alert_entities")
+
+    def list_case_entities(self, case_id: Union[str, int], page_size: int = 1000) -> List[Dict[str, Any]]:
+        """Lists all involved entities across all alerts of a case in a single API call using the '-' caseAlerts wildcard."""
+        clean_case_id = self._encode_segment(case_id, "case_id")
+        path = (
+            f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/"
+            f"cases/{clean_case_id}/caseAlerts/-/involvedEntities"
+        )
+        res = self._request("GET", path, params={"pageSize": min(int(page_size or 1000), 1000)})
+        return self._expect_list_field(res, "involvedEntities", "list_case_entities")
 
     def add_case_alert_entity(
         self,
@@ -1254,8 +1602,8 @@ class GoogleSecOpsAdapter:
         """Manually attaches an involved entity to a specific case alert."""
         if not identifier or not str(identifier).strip():
             raise ValueError("Entity identifier cannot be empty.")
-        clean_case_id = str(case_id).strip().split("/")[-1]
-        clean_alert_id = str(case_alert_id).strip().split("/")[-1]
+        clean_case_id = self._encode_segment(case_id, "case_id")
+        clean_alert_id = self._encode_segment(case_alert_id, "case_alert_id")
         path = (
             f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/"
             f"cases/{clean_case_id}/caseAlerts/{clean_alert_id}/involvedEntities"
@@ -1284,23 +1632,21 @@ class GoogleSecOpsAdapter:
         if page_token and str(page_token).strip():
             params["pageToken"] = str(page_token).strip()
         res = self._request("GET", path, params=params)
-        return res if isinstance(res, dict) else {}
+        return self._expect_dict(res, "search_unique_entities")
 
 
     def list_case_comments(self, case_id: str) -> List[Dict[str, Any]]:
         """Lists all comments associated with a case."""
-        case_id_clean = case_id.split("/")[-1]
+        case_id_clean = self._encode_segment(case_id, "case_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseComments"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res.get("caseComments", [])
-        return []
+        return self._expect_list_field(res, "caseComments", "list_case_comments")
 
     def create_case_comment(self, case_id: str, comment: str) -> Dict[str, Any]:
         """Posts a new comment to a case and returns the confirmed comment record."""
         if not comment or not comment.strip():
             raise ValueError("Comment text cannot be empty.")
-        case_id_clean = case_id.split("/")[-1]
+        case_id_clean = self._encode_segment(case_id, "case_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseComments"
         body = {"comment": comment.strip()}
         res = self._request("POST", path, body=body)
@@ -1317,7 +1663,8 @@ class GoogleSecOpsAdapter:
         order_by: str = "createTime desc",
     ) -> Dict[str, Any]:
         """Lists activity records from the case activity wall."""
-        case_id_clean = case_id.split("/")[-1]
+        raw_case_id = self._validate_segment(case_id, "case_id")
+        case_id_clean = self._encode_segment(case_id, "case_id")
         query_params = {
             "pageSize": str(page_size),
             "orderBy": order_by,
@@ -1325,16 +1672,16 @@ class GoogleSecOpsAdapter:
         if filter_str:
             query_params["filter"] = filter_str
         else:
-            query_params["filter"] = f"caseId = {case_id_clean}"
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", raw_case_id):
+                raise ValueError(f"Invalid case_id for filter: {case_id!r}")
+            query_params["filter"] = f"caseId = {raw_case_id}"
 
         if page_token:
             query_params["pageToken"] = page_token
 
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/cases/{case_id_clean}/caseWallRecords"
         res = self._request("GET", path, params=query_params)
-        if isinstance(res, dict):
-            return res
-        return {"caseWallRecords": []}
+        return self._expect_dict(res, "list_case_wall_records")
 
     def search_cases(
         self,
@@ -1384,9 +1731,7 @@ class GoogleSecOpsAdapter:
 
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/legacySearches:legacyCaseSearchEverything"
         res = self._request("POST", path, body=payload)
-        if not isinstance(res, dict):
-            return {"results": [], "totalCount": 0, "pageSize": page_size}
-        return res
+        return self._expect_dict(res, "search_cases")
 
     def get_case_filter_values(
         self,
@@ -1402,9 +1747,7 @@ class GoogleSecOpsAdapter:
         }
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/legacySearches:legacyGetCasesFilterValues"
         res = self._request("POST", path, body=payload)
-        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], list):
-            return res["payload"]
-        return []
+        return self._expect_list_field(res, "payload", "get_case_filter_values")
 
     def get_playbook_menu_cards(
         self,
@@ -1414,41 +1757,39 @@ class GoogleSecOpsAdapter:
         types = playbook_types or ["NESTED", "REGULAR"]
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyGetWorkflowMenuCardsWithEnvFilter"
         res = self._request("POST", path, body={"legacyPayload": types})
-        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], list):
-            return res["payload"]
-        elif isinstance(res, list):
-            return res
-        return []
+        return self._expect_list_field(
+            res, "payload", "get_playbook_menu_cards", accept_top_level_list=True
+        )
 
     def get_playbook_categories(self) -> List[Dict[str, Any]]:
         """Lists all SOAR Playbook categories/folders."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyGetWorkflowCategories"
         res = self._request("GET", path)
-        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], list):
-            return res["payload"]
-        elif isinstance(res, list):
-            return res
-        return []
+        return self._expect_list_field(
+            res, "payload", "get_playbook_categories", accept_top_level_list=True
+        )
 
     def get_playbook_full_info(self, workflow_identifier: str) -> Dict[str, Any]:
         """Fetches complete playbook definition by UUID identifier."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyGetWorkflowFullInfoWithEnvFilterByIdentifier"
-        res = self._request("GET", path, params={"workflowIdentifier": workflow_identifier})
-        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], dict):
+        res = self._expect_dict(
+            self._request("GET", path, params={"workflowIdentifier": workflow_identifier}),
+            "get_playbook_full_info",
+        )
+        if "payload" in res and isinstance(res["payload"], dict):
             return res["payload"]
-        elif isinstance(res, dict):
-            return res
-        return {}
+        return res
 
     def get_playbook_stats(self, original_workflow_identifier: str) -> Dict[str, Any]:
         """Fetches execution statistics for a playbook workflow."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyGetPlaybookStatsMap"
-        res = self._request("POST", path, body={"originalWorkflowIdentifier": original_workflow_identifier})
-        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], dict):
+        res = self._expect_dict(
+            self._request("POST", path, body={"originalWorkflowIdentifier": original_workflow_identifier}),
+            "get_playbook_stats",
+        )
+        if "payload" in res and isinstance(res["payload"], dict):
             return res["payload"]
-        elif isinstance(res, dict):
-            return res
-        return {}
+        return res
 
     def get_workflow_instances_cards(
         self,
@@ -1463,11 +1804,9 @@ class GoogleSecOpsAdapter:
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyGetWorkflowInstancesCards"
         body = {"caseId": str(case_id), "alertIdentifier": alert_identifier}
         res = self._request("POST", path, body=body)
-        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], list):
-            return res["payload"]
-        elif isinstance(res, list):
-            return res
-        return []
+        return self._expect_list_field(
+            res, "payload", "get_workflow_instances_cards", accept_top_level_list=True
+        )
 
     def get_workflow_instance(
         self,
@@ -1492,12 +1831,10 @@ class GoogleSecOpsAdapter:
             "collapseBlocks": bool(collapse_blocks),
             "loopsRequestedIterations": loops_requested_iterations or [],
         }
-        res = self._request("POST", path, body=body)
-        if isinstance(res, dict) and "payload" in res and isinstance(res["payload"], dict):
+        res = self._expect_dict(self._request("POST", path, body=body), "get_workflow_instance")
+        if "payload" in res and isinstance(res["payload"], dict):
             return res["payload"]
-        elif isinstance(res, dict):
-            return res
-        return {}
+        return res
 
     def save_playbook(
         self,
@@ -1541,9 +1878,7 @@ class GoogleSecOpsAdapter:
         """
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacyPlaybooks:legacyExportWorkflows"
         res = self._request("POST", path, body={"identifiers": list(identifiers)})
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "export_playbooks")
 
     def import_playbooks(
         self,
@@ -1582,11 +1917,9 @@ class GoogleSecOpsAdapter:
         if filter_expr:
             params["filter"] = filter_expr
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "integrations" in res and isinstance(res["integrations"], list):
-            return res["integrations"]
-        elif isinstance(res, list):
-            return res
-        return []
+        return self._expect_list_field(
+            res, "integrations", "list_integrations", accept_top_level_list=True
+        )
 
     def list_integration_instances(
         self,
@@ -1602,13 +1935,12 @@ class GoogleSecOpsAdapter:
             path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/-/integrationInstances"
         params: Dict[str, Any] = {"pageSize": page_size}
         if environment:
-            params["filter"] = f"environment = '{environment}'"
+            esc_env = self._escape_filter_literal(environment, "environment", quote="'")
+            params["filter"] = f"environment = '{esc_env}'"
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "integrationInstances" in res and isinstance(res["integrationInstances"], list):
-            return res["integrationInstances"]
-        elif isinstance(res, list):
-            return res
-        return []
+        return self._expect_list_field(
+            res, "integrationInstances", "list_integration_instances", accept_top_level_list=True
+        )
 
     def get_integration_instance(
         self,
@@ -1620,9 +1952,7 @@ class GoogleSecOpsAdapter:
         clean_inst = urllib.parse.quote(instance_id.strip().split("/")[-1], safe="")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/integrationInstances/{clean_inst}"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_integration_instance")
 
     def get_integration_instance_affected_items(
         self,
@@ -1634,9 +1964,7 @@ class GoogleSecOpsAdapter:
         clean_inst = urllib.parse.quote(instance_id.strip().split("/")[-1], safe="")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/integrationInstances/{clean_inst}:fetchAffectedItems"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_integration_instance_affected_items")
 
     def delete_integration_instance(
         self,
@@ -1652,39 +1980,6 @@ class GoogleSecOpsAdapter:
             return res
         return {}
 
-
-    def list_remote_agents(
-        self,
-        state_filter: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Lists remote proxy execution agents."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/remoteAgents"
-        params: Dict[str, Any] = {"pageSize": 100}
-        if state_filter:
-            params["filter"] = f'agentState = "{state_filter}"'
-        res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "remoteAgents" in res and isinstance(res["remoteAgents"], list):
-            return res["remoteAgents"]
-        elif isinstance(res, list):
-            return res
-        return []
-
-    def get_marketplace_integration(
-        self,
-        identifier: str,
-    ) -> Optional[Dict[str, Any]]:
-        """Retrieves marketplace metadata and documentation for an integration."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/marketplaceIntegrations"
-        params = {
-            "filter": f"identifier = '{identifier}'",
-            "pageSize": 50,
-        }
-        res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "marketplaceIntegrations" in res:
-            mp_list = res.get("marketplaceIntegrations", [])
-            if mp_list and isinstance(mp_list, list):
-                return mp_list[0]
-        return None
     # =========================================================================
     # Milestone 5.5: SOAR Scheduled Jobs, Instances & Execution Logs
     # =========================================================================
@@ -1697,20 +1992,20 @@ class GoogleSecOpsAdapter:
         page_size: int = 1000,
     ) -> List[Dict[str, Any]]:
         """Lists SOAR scheduled job definitions."""
-        int_segment = integration or "-"
+        int_segment = (
+            self._encode_segment(integration, "integration", allow_wildcard=True)
+            if integration
+            else "-"
+        )
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{int_segment}/jobs"
         params: Dict[str, Any] = {
             "excludeStaging": str(exclude_staging).lower(),
             "pageSize": page_size,
         }
         if enabled is not None:
-            params["filter"] = f"enabled = {str(enabled).lower()}"
+            params["filter"] = f"enabled = {'true' if bool(enabled) else 'false'}"
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "jobs" in res and isinstance(res["jobs"], list):
-            return res["jobs"]
-        elif isinstance(res, list):
-            return res
-        return []
+        return self._expect_list_field(res, "jobs", "list_jobs", accept_top_level_list=True)
 
     def get_job(
         self,
@@ -1718,11 +2013,11 @@ class GoogleSecOpsAdapter:
         job_id: str,
     ) -> Dict[str, Any]:
         """Retrieves a specific SOAR job definition."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{integration}/jobs/{job_id}"
+        clean_int = self._encode_segment(integration, "integration")
+        clean_job = self._encode_segment(job_id, "job_id")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/jobs/{clean_job}"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_job")
 
     def list_job_instances(
         self,
@@ -1731,16 +2026,22 @@ class GoogleSecOpsAdapter:
         page_size: int = 1000,
     ) -> List[Dict[str, Any]]:
         """Lists runtime job instances across environments."""
-        int_segment = integration or "-"
-        job_segment = job_id or "-"
+        int_segment = (
+            self._encode_segment(integration, "integration", allow_wildcard=True)
+            if integration
+            else "-"
+        )
+        job_segment = (
+            self._encode_segment(job_id, "job_id", allow_wildcard=True)
+            if job_id
+            else "-"
+        )
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{int_segment}/jobs/{job_segment}/jobInstances"
         params: Dict[str, Any] = {"pageSize": page_size}
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and "jobInstances" in res and isinstance(res["jobInstances"], list):
-            return res["jobInstances"]
-        elif isinstance(res, list):
-            return res
-        return []
+        return self._expect_list_field(
+            res, "jobInstances", "list_job_instances", accept_top_level_list=True
+        )
 
     def get_job_instance(
         self,
@@ -1749,11 +2050,12 @@ class GoogleSecOpsAdapter:
         instance_id: str,
     ) -> Dict[str, Any]:
         """Retrieves a specific runtime job instance."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{integration}/jobs/{job_id}/jobInstances/{instance_id}"
+        clean_int = self._encode_segment(integration, "integration", allow_wildcard=True)
+        clean_job = self._encode_segment(job_id, "job_id", allow_wildcard=True)
+        clean_inst = self._encode_segment(instance_id, "instance_id")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_int}/jobs/{clean_job}/jobInstances/{clean_inst}"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_job_instance")
 
     def get_job_instance_logs(
         self,
@@ -1762,15 +2064,14 @@ class GoogleSecOpsAdapter:
         order_by: str = "endTime desc",
     ) -> Dict[str, Any]:
         """Retrieves execution logs for a specific job instance."""
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/-/jobs/-/jobInstances/{instance_id}/logs"
+        clean_inst = self._encode_segment(instance_id, "instance_id")
+        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/-/jobs/-/jobInstances/{clean_inst}/logs"
         params: Dict[str, Any] = {
             "pageSize": page_size,
             "orderBy": order_by,
         }
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"logs": [], "totalSize": 0}
+        return self._expect_dict(res, "get_job_instance_logs")
 
     def update_job(
         self,
@@ -1842,9 +2143,7 @@ class GoogleSecOpsAdapter:
         if query_filter:
             params["filter"] = query_filter
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"contentPacks": [], "totalSize": 0}
+        return self._expect_dict(res, "list_content_packs")
 
     def get_content_pack(
         self,
@@ -1853,15 +2152,13 @@ class GoogleSecOpsAdapter:
     ) -> Dict[str, Any]:
         """Retrieves a specific Content Pack from Content Hub by identifier or resource name."""
         # Strip resource name prefix if passed
-        clean_id = pack_id.split("/")[-1]
+        clean_id = self._encode_segment(pack_id, "pack_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/contentHub/contentPacks/{clean_id}"
         params: Dict[str, Any] = {
             "expand": expand or "playbooks,testCases,connectorInstances,connectorDefinitions,integrations,detectionRules,searchQueries,dashboards,ruleSets",
         }
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_content_pack")
 
     # --- Milestone 5.7: Curated Detections Methods ---
 
@@ -1869,9 +2166,7 @@ class GoogleSecOpsAdapter:
         """Lists all Curated Rule Set categories."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRuleSetCategories"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {"curatedRuleSetCategories": []}
+        return self._expect_dict(res, "list_curated_ruleset_categories")
 
     def list_curated_rulesets(
         self,
@@ -1880,25 +2175,35 @@ class GoogleSecOpsAdapter:
         page_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lists Curated Rule Sets across all categories or within a specific category."""
-        cat_token = category_id.split("/")[-1] if category_id else "-"
+        cat_token = (
+            self._encode_segment(category_id, "category_id", allow_wildcard=True)
+            if category_id
+            else "-"
+        )
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRuleSetCategories/{cat_token}/curatedRuleSets"
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
             params["pageToken"] = page_token
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"curatedRuleSets": []}
+        return self._expect_dict(res, "list_curated_rulesets")
 
     def get_curated_ruleset(self, ruleset_id_or_name: str) -> Dict[str, Any]:
         """Gets one Curated Rule Set by ID (category wildcard ``-``) or full resource name."""
         clean = ruleset_id_or_name.strip()
         if clean.startswith("projects/"):
-            path = f"/v1alpha/{clean}"
+            res_name = self._resolve_instance_resource(
+                clean,
+                "curatedRuleSetCategories",
+                use_project_number=True,
+                allow_nested_collections=("curatedRuleSets",),
+            )
+            path = f"/v1alpha/{res_name}"
         else:
+            if "/" in clean or clean in ("", ".", "..", "-") or any(c.isspace() for c in clean):
+                raise ValueError(f"Invalid curated ruleset ID '{ruleset_id_or_name}'.")
             path = (
                 f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}"
-                f"/curatedRuleSetCategories/-/curatedRuleSets/{clean.split('/')[-1]}"
+                f"/curatedRuleSetCategories/-/curatedRuleSets/{urllib.parse.quote(clean, safe='@._-')}"
             )
         return self._request("GET", path)
 
@@ -1927,11 +2232,15 @@ class GoogleSecOpsAdapter:
         if not clean_name.startswith("projects/"):
             # If a simple ID was given, we cannot reliably reconstruct full path without category
             raise ValueError(f"Full resource name required for deployment status: '{curated_ruleset_name}'")
+        clean_name = self._resolve_instance_resource(
+            clean_name,
+            "curatedRuleSetCategories",
+            use_project_number=True,
+            allow_nested_collections=("curatedRuleSets",),
+        )
         path = f"/v1alpha/{clean_name}/curatedRuleSetDeployments"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {"curatedRuleSetDeployments": []}
+        return self._expect_dict(res, "get_curated_ruleset_deployments")
 
     def update_curated_ruleset_deployment(
         self,
@@ -1944,6 +2253,12 @@ class GoogleSecOpsAdapter:
         clean_name = deployment_name.strip()
         if not clean_name.startswith("projects/"):
             raise ValueError(f"Full resource name required for deployment update: '{deployment_name}'")
+        clean_name = self._resolve_instance_resource(
+            clean_name,
+            "curatedRuleSetCategories",
+            use_project_number=True,
+            allow_nested_collections=("curatedRuleSets", "curatedRuleSetDeployments"),
+        )
 
         path = f"/v1alpha/{clean_name}"
         body: Dict[str, Any] = {"name": clean_name}
@@ -1977,6 +2292,10 @@ class GoogleSecOpsAdapter:
         """Updates multiple Curated Rule Set deployments in a single batch request."""
         if not parent:
             parent = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRuleSetCategories/-/curatedRuleSets/-"
+        else:
+            parent = parent.strip()
+            if any(c in parent for c in ("?", "#", "\\")) or any(p in ("", ".", "..") for p in parent.split("/")):
+                raise ValueError(f"Invalid parent resource name: {parent!r}")
         path = f"/v1alpha/{parent}/curatedRuleSetDeployments:batchUpdate"
         body = {"requests": requests}
         res = self._request("POST", path, body=body)
@@ -1991,18 +2310,19 @@ class GoogleSecOpsAdapter:
         if page_token:
             params["pageToken"] = page_token
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"curatedRules": []}
+        return self._expect_dict(res, "list_curated_rules")
 
     def get_featured_content_rule(self, rule_id: str) -> Dict[str, Any]:
         """Retrieves a Curated Rule and its executable YARA-L logic from Content Hub."""
-        clean_id = rule_id.split("/")[-1]
+        clean_id = self._escape_filter_literal(
+            self._validate_segment(rule_id, "rule_id"), "rule_id", quote='"'
+        )
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/contentHub/featuredContentRules"
         params = {"filter": f'rule_id:"{clean_id}"'}
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict) and res.get("featuredContentRules"):
-            return res["featuredContentRules"][0]
+        items = self._expect_list_field(res, "featuredContentRules", "get_featured_content_rule")
+        if items and isinstance(items[0], dict):
+            return items[0]
         return {}
 
     def list_featured_content_rules(
@@ -2019,9 +2339,7 @@ class GoogleSecOpsAdapter:
         if filter_expr:
             params["filter"] = filter_expr
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"featuredContentRules": []}
+        return self._expect_dict(res, "list_featured_content_rules")
 
     def count_curated_ruleset_detections(
         self,
@@ -2038,17 +2356,13 @@ class GoogleSecOpsAdapter:
             }
         }
         res = self._request("POST", path, body=body, timeout=timeout)
-        if isinstance(res, dict):
-            return res
-        return {"curatedRuleSetCounts": []}
+        return self._expect_dict(res, "count_curated_ruleset_detections")
 
     def get_tenant_rule_metrics(self) -> Dict[str, Any]:
         """Retrieves tenant-wide rule counts and chronicle rules quota usage."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacy:legacyGetRuleCounts"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_tenant_rule_metrics")
 
     # --- Findings Refinements & Detection Tuning ---
 
@@ -2063,13 +2377,11 @@ class GoogleSecOpsAdapter:
         if page_token:
             params["pageToken"] = page_token
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"findingsRefinements": []}
+        return self._expect_dict(res, "list_findings_refinements")
 
     def get_findings_refinement(self, refinement_id: str) -> Dict[str, Any]:
         """Retrieves details of a specific UDM findings refinement exclusion."""
-        clean_id = refinement_id.split("/")[-1].strip()
+        clean_id = self._encode_segment(refinement_id, "refinement_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/findingsRefinements/{clean_id}"
         return self._request("GET", path)
 
@@ -2089,22 +2401,24 @@ class GoogleSecOpsAdapter:
         }
         curated_rule_ids = parse_id_list(curated_rule_ids, "curated_rule_ids")
         if curated_rule_ids:
-            formatted_rules = []
-            for r in curated_rule_ids:
-                clean_r = r.split("/")[-1].strip()
-                if r.startswith("projects/"):
-                    formatted_rules.append(r)
-                else:
-                    formatted_rules.append(
-                        f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRules/{clean_r}"
-                    )
+            formatted_rules = [
+                self._resolve_instance_resource(
+                    r,
+                    "curatedRules",
+                    use_project_number=True,
+                    enforce_tenant_match=False,
+                )
+                for r in curated_rule_ids
+            ]
             body["detectionExclusionApplication"] = {"curatedRules": formatted_rules}
         return self._request("POST", path, body=body)
 
     def delete_findings_refinement(self, refinement_id: str) -> Dict[str, Any]:
         """Deletes an active UDM findings refinement exclusion."""
-        clean_id = refinement_id.split("/")[-1].strip()
-        path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/findingsRefinements/{clean_id}"
+        res_name = self._resolve_instance_resource(
+            refinement_id, "findingsRefinements", use_project_number=True
+        )
+        path = f"/v1alpha/{res_name}"
         return self._request("DELETE", path)
 
     def test_findings_refinement(
@@ -2118,15 +2432,15 @@ class GoogleSecOpsAdapter:
     ) -> List[Dict[str, Any]]:
         """Simulates and dry-runs an exclusion query against historical detections."""
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}:testFindingsRefinement"
-        formatted_rules = []
-        for r in parse_id_list(curated_rule_ids, "curated_rule_ids"):
-            clean_r = r.split("/")[-1].strip()
-            if r.startswith("projects/"):
-                formatted_rules.append(r)
-            else:
-                formatted_rules.append(
-                    f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/curatedRules/{clean_r}"
-                )
+        formatted_rules = [
+            self._resolve_instance_resource(
+                r,
+                "curatedRules",
+                use_project_number=True,
+                enforce_tenant_match=False,
+            )
+            for r in parse_id_list(curated_rule_ids, "curated_rule_ids")
+        ]
         body = {
             "detectionExclusionApplication": {
                 "curatedRules": formatted_rules
@@ -2141,9 +2455,11 @@ class GoogleSecOpsAdapter:
         res = self._request("POST", path, body=body, timeout=timeout)
         if isinstance(res, list):
             return res
-        if isinstance(res, dict) and res:
-            return [res]
-        return []
+        if isinstance(res, dict):
+            return [res] if res else []
+        raise RuntimeError(
+            f"Unexpected test_findings_refinement response shape: expected list or dict, got {type(res).__name__}"
+        )
 
 
 
@@ -2165,36 +2481,28 @@ class GoogleSecOpsAdapter:
         if order_by:
             params["orderBy"] = order_by
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"marketplaceIntegrations": [], "totalSize": 0}
+        return self._expect_dict(res, "list_marketplace_integrations")
 
     def get_marketplace_integration(self, identifier: str) -> Dict[str, Any]:
         """Retrieves full details for a Marketplace Response Integration."""
-        clean_id = identifier.split("/")[-1]
+        clean_id = self._encode_segment(identifier, "identifier")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/marketplaceIntegrations/{clean_id}"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_marketplace_integration")
 
     def get_marketplace_integration_diff(self, identifier: str) -> Dict[str, Any]:
         """Retrieves commercial version diff comparing installed vs latest marketplace version."""
-        clean_id = identifier.split("/")[-1]
+        clean_id = self._encode_segment(identifier, "identifier")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/marketplaceIntegrations/{clean_id}:fetchCommercialDiff"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_marketplace_integration_diff")
 
     def get_integration_affected_items(self, identifier: str) -> Dict[str, Any]:
         """Retrieves downstream environment instances and playbooks affected by an integration."""
         clean_id = urllib.parse.quote(identifier.split("/")[-1], safe="")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/integrations/{clean_id}:fetchAffectedItems"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_integration_affected_items")
 
     # ==========================================
     # Milestone 5.9: Native Dashboards Adapters
@@ -2211,18 +2519,14 @@ class GoogleSecOpsAdapter:
         if page_token:
             params["pageToken"] = page_token
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"nativeDashboards": []}
+        return self._expect_dict(res, "list_native_dashboards")
 
     def get_native_dashboard(self, dashboard_id: str) -> Dict[str, Any]:
         """Retrieves complete definition of a native dashboard."""
-        clean_id = dashboard_id.split("/")[-1]
+        clean_id = self._encode_segment(dashboard_id, "dashboard_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_native_dashboard")
 
     def batch_get_dashboard_charts(self, chart_names: List[str]) -> Dict[str, Any]:
         """Retrieves multiple dashboard charts in a single batch request."""
@@ -2231,35 +2535,33 @@ class GoogleSecOpsAdapter:
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts:batchGet"
         params = [("names", name) for name in chart_names]
         res = self._request("GET", path, params=params)
-        if isinstance(res, dict):
-            return res
-        return {"dashboardCharts": []}
+        return self._expect_dict(res, "batch_get_dashboard_charts")
 
     def get_dashboard_chart(self, chart_id: str) -> Dict[str, Any]:
         """Retrieves a single DashboardChart resource by ID or resource name."""
-        clean_id = str(chart_id).strip().split("/")[-1]
-        full_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_id}"
+        raw_id = self._validate_segment(chart_id, "chart_id")
+        clean_id = self._encode_segment(chart_id, "chart_id")
+        full_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{raw_id}"
         try:
-            path = f"/v1alpha/{full_name}"
-            res = self._request("GET", path)
-            if isinstance(res, dict) and res.get("name"):
+            path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_id}"
+            res = self._expect_dict(self._request("GET", path), "get_dashboard_chart")
+            if res.get("name"):
                 return res
-        except Exception:
-            pass
+        except SecOpsApiError as api_err:
+            if api_err.status not in (400, 404, 405, 501):
+                raise
         batch_res = self.batch_get_dashboard_charts([full_name])
-        charts = batch_res.get("dashboardCharts", []) if isinstance(batch_res, dict) else []
+        charts = self._expect_list_field(batch_res, "dashboardCharts", "get_dashboard_chart")
         if charts and isinstance(charts[0], dict):
             return charts[0]
         return {}
 
     def get_dashboard_query(self, query_id: str) -> Dict[str, Any]:
         """Retrieves definition of a dashboard query."""
-        clean_id = query_id.split("/")[-1]
+        clean_id = self._encode_segment(query_id, "query_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardQueries/{clean_id}"
         res = self._request("GET", path)
-        if isinstance(res, dict):
-            return res
-        return {}
+        return self._expect_dict(res, "get_dashboard_query")
 
     def execute_dashboard_query(
         self,
@@ -2312,11 +2614,28 @@ class GoogleSecOpsAdapter:
 
         if target_text is None and target_name is not None:
             stripped = target_name.strip()
-            if "\n" in target_name or stripped.startswith("$") or "match:" in target_name or "outcome:" in target_name:
+            upper_stripped = stripped.upper()
+            if (
+                "\n" in target_name
+                or stripped.startswith("$")
+                or "match:" in target_name
+                or "outcome:" in target_name
+                or "|>" in target_name
+                or upper_stripped.startswith(("FROM ", "SELECT ", "WITH "))
+            ):
                 target_text = target_name
                 target_name = None
 
         if target_text:
+            effective_dialect = dialect
+            upper_target = target_text.strip().upper()
+            if effective_dialect == "YL2" and (
+                "|>" in target_text or upper_target.startswith(("FROM ", "SELECT ", "WITH "))
+            ):
+                effective_dialect = "SQL"
+            elif effective_dialect in ("DIALECT_SQL", "SQL"):
+                effective_dialect = "SQL"
+
             if start_time and end_time:
                 input_payload = {
                     "timeWindow": {
@@ -2333,15 +2652,14 @@ class GoogleSecOpsAdapter:
                 }
             query_payload = {
                 "query": target_text,
-                "dialect": dialect,
+                "dialect": effective_dialect,
                 "input": input_payload,
             }
             query_label = "inline_dashboard_query"
         elif target_name:
-            full_query_name = target_name
-            if not target_name.startswith("projects/"):
-                clean_id = target_name.split("/")[-1]
-                full_query_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardQueries/{clean_id}"
+            full_query_name = self._resolve_instance_resource(
+                target_name, "dashboardQueries", use_project_number=True
+            )
             query_payload = {"name": full_query_name}
             query_label = target_name
         else:
@@ -2505,7 +2823,7 @@ class GoogleSecOpsAdapter:
         update_mask: str,
     ) -> Dict[str, Any]:
         """Updates a Native Dashboard's metadata, filters, or chart layouts via PATCH."""
-        clean_id = str(dashboard_id).strip().split("/")[-1]
+        clean_id = self._encode_segment(dashboard_id, "dashboard_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}"
         params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
         res = self._request("PATCH", path, params=params, body=dashboard_payload)
@@ -2518,7 +2836,7 @@ class GoogleSecOpsAdapter:
         dashboard_id: str,
     ) -> Dict[str, Any]:
         """Deletes a Native Dashboard by ID or resource name."""
-        clean_id = str(dashboard_id).strip().split("/")[-1]
+        clean_id = self._encode_segment(dashboard_id, "dashboard_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}"
         res = self._request("DELETE", path)
         if isinstance(res, dict):
@@ -2533,7 +2851,7 @@ class GoogleSecOpsAdapter:
         dashboard_type: str = "CUSTOM",
     ) -> Dict[str, Any]:
         """Duplicates an existing Native Dashboard under a new display name."""
-        clean_id = str(dashboard_id).strip().split("/")[-1]
+        clean_id = self._encode_segment(dashboard_id, "dashboard_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}:duplicate"
         inner: Dict[str, Any] = {
             "displayName": display_name,
@@ -2554,7 +2872,7 @@ class GoogleSecOpsAdapter:
         chart_layout: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Adds a new chart (and optional query + layout) to a Native Dashboard."""
-        clean_id = str(dashboard_id).strip().split("/")[-1]
+        clean_id = self._encode_segment(dashboard_id, "dashboard_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_id}:addChart"
         body: Dict[str, Any] = {"dashboardChart": dashboard_chart}
         if dashboard_query is not None:
@@ -2572,8 +2890,8 @@ class GoogleSecOpsAdapter:
         chart_id: str,
     ) -> Dict[str, Any]:
         """Removes a chart from a Native Dashboard."""
-        clean_dash = str(dashboard_id).strip().split("/")[-1]
-        clean_chart = str(chart_id).strip().split("/")[-1]
+        clean_dash = self._encode_segment(dashboard_id, "dashboard_id")
+        clean_chart = self._validate_segment(chart_id, "chart_id")
         full_chart_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_chart}"
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/nativeDashboards/{clean_dash}:removeChart"
         res = self._request("POST", path, body={"dashboardChart": full_chart_name})
@@ -2589,7 +2907,7 @@ class GoogleSecOpsAdapter:
         dashboard_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Updates an existing DashboardChart resource via nativeDashboards:editChart."""
-        clean_id = str(chart_id).strip().split("/")[-1]
+        clean_id = self._validate_segment(chart_id, "chart_id")
         full_chart_name = f"projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardCharts/{clean_id}"
         existing_chart = self.get_dashboard_chart(clean_id)
         resolved_dash = dashboard_id
@@ -2597,7 +2915,7 @@ class GoogleSecOpsAdapter:
             resolved_dash = existing_chart.get("nativeDashboard", "")
         if not resolved_dash:
             raise ValueError(f"Could not resolve nativeDashboard for chart '{clean_id}'.")
-        clean_dash = str(resolved_dash).strip().split("/")[-1]
+        clean_dash = self._encode_segment(resolved_dash, "dashboard_id")
 
         merged_chart: Dict[str, Any] = dict(existing_chart) if existing_chart else {"name": full_chart_name}
         merged_chart.update(chart_payload)
@@ -2640,7 +2958,7 @@ class GoogleSecOpsAdapter:
         update_mask: str,
     ) -> Dict[str, Any]:
         """Updates an existing DashboardQuery resource via PATCH."""
-        clean_id = str(query_id).strip().split("/")[-1]
+        clean_id = self._encode_segment(query_id, "query_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dashboardQueries/{clean_id}"
         params: Dict[str, Any] = {"updateMask": update_mask} if update_mask else {}
         res = self._request("PATCH", path, params=params, body=query_payload)
@@ -2690,7 +3008,7 @@ class GoogleSecOpsAdapter:
 
     def get_feed(self, feed_id: str) -> Dict[str, Any]:
         """Retrieves full configuration details for a specific ingestion feed."""
-        clean_id = feed_id.split("/")[-1]
+        clean_id = self._encode_segment(feed_id, "feed_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/feeds/{clean_id}"
         return self._request("GET", path)
 
@@ -2708,7 +3026,7 @@ class GoogleSecOpsAdapter:
 
     def get_log_processing_pipeline(self, pipeline_id: str) -> Dict[str, Any]:
         """Retrieves full configuration and transforms for a Data Processing Pipeline."""
-        clean_id = pipeline_id.split("/")[-1]
+        clean_id = self._encode_segment(pipeline_id, "pipeline_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logProcessingPipelines/{clean_id}"
         return self._request("GET", path)
 
@@ -2729,7 +3047,7 @@ class GoogleSecOpsAdapter:
         omit_details_fields: bool = True,
     ) -> Dict[str, Any]:
         """Lists log type schemas for a feed source type, with lean payload handling."""
-        clean_source = feed_source_type.split("/")[-1]
+        clean_source = self._encode_segment(feed_source_type, "feed_source_type")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/feedSourceTypeSchemas/{clean_source}/logTypeSchemas"
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
@@ -2767,7 +3085,7 @@ class GoogleSecOpsAdapter:
         page_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lists parsers across all log types or for a specific log type."""
-        clean_lt = log_type.split("/")[-1] if log_type != "-" else "-"
+        clean_lt = self._encode_segment(log_type, "log_type", allow_wildcard=True)
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logTypes/{clean_lt}/parsers"
         params: Dict[str, Any] = {
             "pageSize": page_size,
@@ -2786,8 +3104,10 @@ class GoogleSecOpsAdapter:
         view: str = "FULL_VIEW",
     ) -> Dict[str, Any]:
         """Retrieves a single parser with full CBN configuration."""
-        clean_lt = log_type.split("/")[-1]
-        clean_id = parser_id.split("/")[-1]
+        raw_lt = self._validate_segment(log_type, "log_type")
+        raw_id = self._validate_segment(parser_id, "parser_id")
+        clean_lt = self._encode_segment(log_type, "log_type")
+        clean_id = self._encode_segment(parser_id, "parser_id")
         # First attempt direct GET if parser resource endpoint is available
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logTypes/{clean_lt}/parsers/{clean_id}"
         try:
@@ -2799,12 +3119,12 @@ class GoogleSecOpsAdapter:
             if not any(code in err_msg for code in ("[400]", "[404]", "[405]", "[501]")):
                 raise
             # Fallback to list with FULL_VIEW and matching ID
-            res = self.list_parsers(log_type=clean_lt, view=view, page_size=1000)
+            res = self.list_parsers(log_type=raw_lt, view=view, page_size=1000)
             for p in res.get("parsers", []):
                 p_name = p.get("name", "")
-                if p_name.endswith(clean_id) or p_name.split("/")[-1] == clean_id:
+                if p_name.endswith(raw_id) or p_name.split("/")[-1] == raw_id:
                     return p
-            raise ValueError(f"Parser '{clean_id}' not found for log type '{clean_lt}'") from e
+            raise ValueError(f"Parser '{raw_id}' not found for log type '{raw_lt}'") from e
 
     def run_parser(
         self,
@@ -2813,7 +3133,7 @@ class GoogleSecOpsAdapter:
         raw_log_text: str,
     ) -> Dict[str, Any]:
         """Runs a Logstash CBN parser configuration against a raw log string via :runParser API."""
-        clean_lt = log_type.split("/")[-1]
+        clean_lt = self._encode_segment(log_type, "log_type")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logTypes/{clean_lt}:runParser"
         log_b64 = base64.b64encode(raw_log_text.encode("utf-8")).decode("utf-8")
         body = {
@@ -2831,7 +3151,7 @@ class GoogleSecOpsAdapter:
         page_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lists parser extensions across all log types or for a specific log type."""
-        clean_lt = log_type.split("/")[-1] if log_type != "-" else "-"
+        clean_lt = self._encode_segment(log_type, "log_type", allow_wildcard=True)
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logTypes/{clean_lt}/parserExtensions"
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
@@ -2844,8 +3164,8 @@ class GoogleSecOpsAdapter:
         extension_id: str,
     ) -> Dict[str, Any]:
         """Retrieves detailed configuration for a parser extension."""
-        clean_lt = log_type.split("/")[-1]
-        clean_id = extension_id.split("/")[-1]
+        clean_lt = self._validate_segment(log_type, "log_type")
+        clean_id = self._validate_segment(extension_id, "extension_id")
         # Query extensions for the specific log type and locate matching extension
         res = self.list_parser_extensions(log_type=clean_lt, page_size=1000)
         for ext in res.get("parserExtensions", []):
@@ -2859,7 +3179,7 @@ class GoogleSecOpsAdapter:
         log_type: str,
     ) -> Dict[str, Any]:
         """Retrieves autonomous parsing extraction settings for a specific log type."""
-        clean_lt = log_type.split("/")[-1]
+        clean_lt = self._encode_segment(log_type, "log_type")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/logTypes/{clean_lt}/logTypeSetting"
         return self._request("GET", path)
 
@@ -2881,7 +3201,7 @@ class GoogleSecOpsAdapter:
 
     def get_preview_feature(self, feature_id: str) -> Dict[str, Any]:
         """Retrieves specific preview feature configuration."""
-        clean_id = feature_id.split("/")[-1]
+        clean_id = self._encode_segment(feature_id, "feature_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/features/{clean_id}"
         return self._request("GET", path)
 
@@ -2899,7 +3219,7 @@ class GoogleSecOpsAdapter:
 
     def get_data_access_scope(self, scope_id: str) -> Dict[str, Any]:
         """Retrieves specific Data Access Scope deep configuration."""
-        clean_id = scope_id.split("/")[-1]
+        clean_id = self._encode_segment(scope_id, "scope_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dataAccessScopes/{clean_id}"
         return self._request("GET", path)
 
@@ -2917,7 +3237,7 @@ class GoogleSecOpsAdapter:
 
     def get_data_access_label(self, label_id: str) -> Dict[str, Any]:
         """Retrieves specific Data Access Label deep configuration."""
-        clean_id = label_id.split("/")[-1]
+        clean_id = self._encode_segment(label_id, "label_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/dataAccessLabels/{clean_id}"
         return self._request("GET", path)
 
@@ -2959,7 +3279,7 @@ class GoogleSecOpsAdapter:
 
     def get_enrichment_control(self, control_id: str) -> Dict[str, Any]:
         """Retrieves specific deployed enrichment control configuration."""
-        clean_id = control_id.split("/")[-1]
+        clean_id = self._encode_segment(control_id, "control_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/enrichmentControls/{clean_id}"
         return self._request("GET", path)
 
@@ -2988,13 +3308,15 @@ class GoogleSecOpsAdapter:
 
     def get_investigation(self, investigation_id: str) -> Dict[str, Any]:
         """Retrieves a specific Gemini TINA investigation report by ID or resource name."""
-        clean_id = urllib.parse.quote(investigation_id.split("/")[-1], safe="")
+        clean_id = self._encode_segment(investigation_id, "investigation_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/investigations/{clean_id}"
         return self._request("GET", path)
 
     def get_alert_latest_investigation(self, alert_id: str) -> Optional[Dict[str, Any]]:
         """Retrieves the latest Gemini TINA investigation associated with a specific alert ID."""
-        clean_alert_id = alert_id.split("/")[-1]
+        clean_alert_id = self._escape_filter_literal(
+            self._validate_segment(alert_id, "alert_id"), "alert_id", quote='"'
+        )
         filter_expr = f'alert_id = "{clean_alert_id}"'
         res = self.list_investigations(page_size=1, filter=filter_expr, order_by="start_time desc")
         investigations = res.get("investigations", [])
@@ -3035,7 +3357,7 @@ class GoogleSecOpsAdapter:
 
     def get_soar_user(self, user_id: str) -> Dict[str, Any]:
         """Retrieves specific SOAR user details."""
-        clean_id = user_id.split("/")[-1]
+        clean_id = self._encode_segment(user_id, "user_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/legacySoarUsers/{clean_id}"
         return self._request("GET", path)
 
@@ -3132,7 +3454,7 @@ class GoogleSecOpsAdapter:
 
     def get_view(self, view_id: str) -> Dict[str, Any]:
         """Retrieves deep inspection of a specific layout view template and widgets."""
-        clean_id = view_id.split("/")[-1]
+        clean_id = self._encode_segment(view_id, "view_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/views/{clean_id}"
         return self._request("GET", path)
 
@@ -3150,7 +3472,7 @@ class GoogleSecOpsAdapter:
 
     def get_custom_field(self, field_id: str) -> Dict[str, Any]:
         """Retrieves deep inspection of a single custom field definition."""
-        clean_id = field_id.split("/")[-1]
+        clean_id = self._encode_segment(field_id, "field_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/customFields/{clean_id}"
         return self._request("GET", path)
 
@@ -3168,7 +3490,7 @@ class GoogleSecOpsAdapter:
 
     def get_calculated_field(self, definition_id: str) -> Dict[str, Any]:
         """Retrieves deep inspection of a single calculated field definition."""
-        clean_id = definition_id.split("/")[-1]
+        clean_id = self._encode_segment(definition_id, "definition_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/calculatedFieldDefinitions/{clean_id}"
         return self._request("GET", path)
 
@@ -3188,7 +3510,7 @@ class GoogleSecOpsAdapter:
 
     def get_alert_grouping_rule(self, rule_id: str) -> Dict[str, Any]:
         """Retrieves deep inspection of a single alert grouping rule."""
-        clean_id = rule_id.split("/")[-1]
+        clean_id = self._encode_segment(rule_id, "rule_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/alertGroupingRules/{clean_id}"
         return self._request("GET", path)
 
@@ -3217,7 +3539,7 @@ class GoogleSecOpsAdapter:
 
     def get_environment(self, env_id: str) -> Dict[str, Any]:
         """Retrieves deep configuration of a single multi-tenancy environment."""
-        clean_id = env_id.split("/")[-1]
+        clean_id = self._encode_segment(env_id, "env_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/environments/{clean_id}"
         return self._request("GET", path)
 
@@ -3248,12 +3570,14 @@ class GoogleSecOpsAdapter:
         if filter_expr:
             params["filter"] = filter_expr
         elif state_filter:
-            params["filter"] = f'agentState = "{state_filter}"'
-        return self._request("GET", path, params=params)
+            esc_state = self._escape_filter_literal(state_filter, "state_filter", quote='"')
+            params["filter"] = f'agentState = "{esc_state}"'
+        res = self._request("GET", path, params=params)
+        return self._expect_dict(res, "list_remote_agents")
 
     def get_remote_agent(self, agent_id: str) -> Dict[str, Any]:
         """Retrieves deep configuration of a single remote agent."""
-        clean_id = agent_id.split("/")[-1]
+        clean_id = self._encode_segment(agent_id, "agent_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/remoteAgents/{clean_id}"
         return self._request("GET", path)
 
@@ -3286,7 +3610,7 @@ class GoogleSecOpsAdapter:
 
     def get_soar_network(self, network_id: str) -> Dict[str, Any]:
         """Retrieves configuration of a single customer-defined CIDR network."""
-        clean_id = network_id.split("/")[-1]
+        clean_id = self._encode_segment(network_id, "network_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/soarNetworks/{clean_id}"
         return self._request("GET", path)
 
@@ -3304,7 +3628,7 @@ class GoogleSecOpsAdapter:
 
     def get_soar_domain(self, domain_id: str) -> Dict[str, Any]:
         """Retrieves configuration of a single approved customer domain."""
-        clean_id = domain_id.split("/")[-1]
+        clean_id = self._encode_segment(domain_id, "domain_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/soarDomains/{clean_id}"
         return self._request("GET", path)
 
@@ -3322,7 +3646,7 @@ class GoogleSecOpsAdapter:
 
     def get_soar_custom_list(self, list_id: str) -> Dict[str, Any]:
         """Retrieves configuration of a single SOAR custom list entry."""
-        clean_id = list_id.split("/")[-1]
+        clean_id = self._encode_segment(list_id, "list_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/customLists/{clean_id}"
         return self._request("GET", path)
 
@@ -3340,7 +3664,7 @@ class GoogleSecOpsAdapter:
 
     def get_email_template(self, template_id: str) -> Dict[str, Any]:
         """Retrieves complete email template content and parameters."""
-        clean_id = template_id.split("/")[-1]
+        clean_id = self._encode_segment(template_id, "template_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/emailTemplates/{clean_id}"
         return self._request("GET", path)
 
@@ -3358,7 +3682,7 @@ class GoogleSecOpsAdapter:
 
     def get_entities_blocklist(self, blocklist_id: str) -> Dict[str, Any]:
         """Retrieves configuration of a single entity blocklist rule."""
-        clean_id = blocklist_id.split("/")[-1]
+        clean_id = self._encode_segment(blocklist_id, "blocklist_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/entitiesBlocklists/{clean_id}"
         return self._request("GET", path)
 
@@ -3376,7 +3700,7 @@ class GoogleSecOpsAdapter:
 
     def get_sla_definition(self, sla_id: str) -> Dict[str, Any]:
         """Retrieves configuration of a single SLA definition."""
-        clean_id = sla_id.split("/")[-1]
+        clean_id = self._encode_segment(sla_id, "sla_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/slaDefinitions/{clean_id}"
         return self._request("GET", path)
 
@@ -3394,7 +3718,7 @@ class GoogleSecOpsAdapter:
 
     def get_request_template(self, template_id: str) -> Dict[str, Any]:
         """Retrieves configuration of a single manual case request form template."""
-        clean_id = template_id.split("/")[-1]
+        clean_id = self._encode_segment(template_id, "template_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/requestTemplates/{clean_id}"
         return self._request("GET", path)
 
@@ -3410,9 +3734,11 @@ class GoogleSecOpsAdapter:
         page_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Discovers configured SOAR ingestion connector instances across integrations."""
+        clean_int = self._encode_segment(integration, "integration", allow_wildcard=True)
+        clean_conn = self._encode_segment(connector_id, "connector_id", allow_wildcard=True)
         path = (
             f"/v1alpha/projects/{self.project_number}/locations/{self.location}/"
-            f"instances/{self.customer_id}/integrations/{integration}/connectors/{connector_id}/connectorInstances"
+            f"instances/{self.customer_id}/integrations/{clean_int}/connectors/{clean_conn}/connectorInstances"
         )
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
@@ -3426,10 +3752,12 @@ class GoogleSecOpsAdapter:
         connector_id: str = "-",
     ) -> Dict[str, Any]:
         """Retrieves configuration of a single SOAR ingestion connector instance."""
-        clean_id = instance_id.split("/")[-1]
+        clean_id = self._encode_segment(instance_id, "instance_id")
+        clean_int = self._encode_segment(integration, "integration", allow_wildcard=True)
+        clean_conn = self._encode_segment(connector_id, "connector_id", allow_wildcard=True)
         path = (
             f"/v1alpha/projects/{self.project_number}/locations/{self.location}/"
-            f"instances/{self.customer_id}/integrations/{integration}/connectors/{connector_id}/connectorInstances/{clean_id}"
+            f"instances/{self.customer_id}/integrations/{clean_int}/connectors/{clean_conn}/connectorInstances/{clean_id}"
         )
         return self._request("GET", path)
 
@@ -3447,7 +3775,7 @@ class GoogleSecOpsAdapter:
 
     def get_soar_webhook(self, webhook_id: str) -> Dict[str, Any]:
         """Retrieves configuration and JSON schema mapping for a single SOAR webhook."""
-        clean_id = webhook_id.split("/")[-1]
+        clean_id = self._encode_segment(webhook_id, "webhook_id")
         path = f"/v1alpha/projects/{self.project_number}/locations/{self.location}/instances/{self.customer_id}/webhooks/{clean_id}"
         return self._request("GET", path)
 
@@ -3563,7 +3891,7 @@ class GoogleSecOpsAdapter:
 
     def get_data_table(self, table_name_or_id: str) -> Dict[str, Any]:
         """Gets metadata and schema for a specific Chronicle SIEM Data Table."""
-        clean_id = table_name_or_id.split("/")[-1]
+        clean_id = self._encode_segment(table_name_or_id, "table_name_or_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
         return self._request("GET", path)
 
@@ -3577,7 +3905,7 @@ class GoogleSecOpsAdapter:
         scope_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Creates a new structured Data Table in Chronicle SIEM."""
-        clean_id = table_id.split("/")[-1]
+        clean_id = self._validate_segment(table_id, "table_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables"
         params = {"dataTableId": clean_id}
         body: Dict[str, Any] = {
@@ -3601,10 +3929,11 @@ class GoogleSecOpsAdapter:
         update_mask: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Updates metadata, TTL, or scope info for an existing Data Table."""
-        clean_id = table_name_or_id.split("/")[-1]
+        raw_id = self._validate_segment(table_name_or_id, "table_name_or_id")
+        clean_id = self._encode_segment(table_name_or_id, "table_name_or_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
         body: Dict[str, Any] = {
-            "name": f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
+            "name": f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{raw_id}"
         }
         mask_parts = []
         if description is not None:
@@ -3627,7 +3956,7 @@ class GoogleSecOpsAdapter:
 
     def delete_data_table(self, table_name_or_id: str) -> Dict[str, Any]:
         """Deletes a Chronicle SIEM Data Table."""
-        clean_id = table_name_or_id.split("/")[-1]
+        clean_id = self._encode_segment(table_name_or_id, "table_name_or_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
         return self._request("DELETE", path)
 
@@ -3639,7 +3968,7 @@ class GoogleSecOpsAdapter:
         filter_expr: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lists rows contained within a Chronicle SIEM Data Table."""
-        clean_id = table_name_or_id.split("/")[-1]
+        clean_id = self._encode_segment(table_name_or_id, "table_name_or_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}/dataTableRows"
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
@@ -3654,17 +3983,22 @@ class GoogleSecOpsAdapter:
         rows: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Creates data table rows in bulk in Chronicle SIEM."""
-        clean_id = table_name_or_id.split("/")[-1]
-        path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}/dataTableRows:bulkCreate"
+        clean_id = self._encode_segment(table_name_or_id, "table_name_or_id")
+        parent = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_id}"
+        path = f"/v1alpha/{parent}/dataTableRows:bulkCreate"
         # Each row can be {"values": [...]} or raw list of values
         requests = []
         for r in rows:
-            if isinstance(r, dict) and "values" in r:
-                requests.append({"row": r})
+            if isinstance(r, dict) and "dataTableRow" in r:
+                req_item = dict(r)
+                req_item.setdefault("parent", parent)
+                requests.append(req_item)
+            elif isinstance(r, dict) and "values" in r:
+                requests.append({"parent": parent, "dataTableRow": {"values": [str(v) for v in r["values"]]}})
             elif isinstance(r, (list, tuple)):
-                requests.append({"row": {"values": [str(v) for v in r]}})
+                requests.append({"parent": parent, "dataTableRow": {"values": [str(v) for v in r]}})
             elif isinstance(r, dict):
-                requests.append({"row": r})
+                requests.append({"parent": parent, "dataTableRow": r})
         body = {"requests": requests}
         return self._request("POST", path, body=body)
 
@@ -3674,8 +4008,8 @@ class GoogleSecOpsAdapter:
         row_id: str,
     ) -> Dict[str, Any]:
         """Deletes a specific row from a Chronicle SIEM Data Table."""
-        clean_table_id = table_name_or_id.split("/")[-1]
-        clean_row_id = row_id.split("/")[-1]
+        clean_table_id = self._encode_segment(table_name_or_id, "table_name_or_id")
+        clean_row_id = self._encode_segment(row_id, "row_id")
         path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/dataTables/{clean_table_id}/dataTableRows/{clean_row_id}"
         return self._request("DELETE", path)
 
@@ -3707,11 +4041,8 @@ class GoogleSecOpsAdapter:
         view: str = "FULL",
     ) -> Dict[str, Any]:
         """Retrieves full details of a custom Chronicle SIEM detection rule."""
-        clean_id = rule_id_or_name.strip()
-        if clean_id.startswith("projects/"):
-            path = f"/v1alpha/{clean_id}"
-        else:
-            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+        res_name = self._resolve_instance_resource(rule_id_or_name, "rules")
+        path = f"/v1alpha/{res_name}"
         params = {"view": view} if view else None
         return self._request("GET", path, params=params)
 
@@ -3734,13 +4065,8 @@ class GoogleSecOpsAdapter:
         update_mask: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Updates a custom detection rule with new YARA-L text."""
-        clean_id = rule_id_or_name.strip()
-        if clean_id.startswith("projects/"):
-            path = f"/v1alpha/{clean_id}"
-            res_name = clean_id
-        else:
-            res_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
-            path = f"/v1alpha/{res_name}"
+        res_name = self._resolve_instance_resource(rule_id_or_name, "rules")
+        path = f"/v1alpha/{res_name}"
         body = {
             "name": res_name,
             "text": rule_text,
@@ -3754,11 +4080,8 @@ class GoogleSecOpsAdapter:
 
     def delete_rule(self, rule_id_or_name: str) -> Dict[str, Any]:
         """Deletes a custom detection rule from Chronicle SIEM."""
-        clean_id = rule_id_or_name.strip()
-        if clean_id.startswith("projects/"):
-            path = f"/v1alpha/{clean_id}"
-        else:
-            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+        res_name = self._resolve_instance_resource(rule_id_or_name, "rules")
+        path = f"/v1alpha/{res_name}"
         return self._request("DELETE", path)
 
     def list_rule_revisions(
@@ -3768,11 +4091,8 @@ class GoogleSecOpsAdapter:
         page_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lists all revisions/version history of a custom detection rule."""
-        clean_id = rule_id_or_name.strip()
-        if clean_id.startswith("projects/"):
-            path = f"/v1alpha/{clean_id}:listRevisions"
-        else:
-            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}:listRevisions"
+        res_name = self._resolve_instance_resource(rule_id_or_name, "rules")
+        path = f"/v1alpha/{res_name}:listRevisions"
         params: Dict[str, Any] = {"pageSize": page_size}
         if page_token:
             params["pageToken"] = page_token
@@ -3792,11 +4112,10 @@ class GoogleSecOpsAdapter:
 
     def get_rule_deployment(self, rule_id_or_name: str) -> Dict[str, Any]:
         """Gets deployment, frequency, and alerting status for a detection rule."""
-        clean_id = rule_id_or_name.strip()
-        if clean_id.startswith("projects/"):
-            path = f"/v1alpha/{clean_id}/deployment"
-        else:
-            path = f"/v1alpha/projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}/deployment"
+        res_name = self._resolve_instance_resource(
+            rule_id_or_name, "rules", strip_trailing_segment="deployment"
+        )
+        path = f"/v1alpha/{res_name}/deployment"
         return self._request("GET", path)
 
     def update_rule_deployment(
@@ -3808,13 +4127,11 @@ class GoogleSecOpsAdapter:
         update_mask: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Updates deployment properties (enabled, alerting, runFrequency) of a rule."""
-        clean_id = rule_id_or_name.strip()
-        if clean_id.startswith("projects/"):
-            deployment_name = f"{clean_id}/deployment"
-            path = f"/v1alpha/{deployment_name}"
-        else:
-            deployment_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}/deployment"
-            path = f"/v1alpha/{deployment_name}"
+        res_name = self._resolve_instance_resource(
+            rule_id_or_name, "rules", strip_trailing_segment="deployment"
+        )
+        deployment_name = f"{res_name}/deployment"
+        path = f"/v1alpha/{deployment_name}"
 
         body: Dict[str, Any] = {"name": deployment_name}
         mask_parts = []
@@ -3850,14 +4167,12 @@ class GoogleSecOpsAdapter:
         if rule_id_or_name:
             if "curatedRules/" in rule_id_or_name:
                 filter_key = "curated_rule"
-                full_name = rule_id_or_name
-            elif rule_id_or_name.startswith("projects/"):
-                filter_key = "rule"
-                full_name = rule_id_or_name
+                full_name = self._resolve_instance_resource(
+                    rule_id_or_name, "curatedRules", use_project_number=True
+                )
             else:
                 filter_key = "rule"
-                clean_id = rule_id_or_name.split("/")[-1]
-                full_name = f"projects/{self.project_id}/locations/{self.location}/instances/{self.customer_id}/rules/{clean_id}"
+                full_name = self._resolve_instance_resource(rule_id_or_name, "rules")
             params["filter"] = f'{filter_key} = "{full_name}"'
         return self._request("GET", path, params=params)
 

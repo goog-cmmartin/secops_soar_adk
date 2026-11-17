@@ -18,6 +18,7 @@ from engine.domain import (
     CaseAiInvestigationResult,
     CaseInvestigation,
     CaseSummary,
+    LifecycleState,
     SearchRequest,
 )
 from engine.workflows.case_actions import (
@@ -148,6 +149,7 @@ class InvestigateCaseWithAIWorkflow:
 
         # Stage 4: Autonomous UDM threat hunt across historical event telemetry
         hunt_results: Dict[str, int] = {}
+        hunt_errors: Dict[str, str] = {}
         now = datetime.now(timezone.utc)
         start_time = (now - timedelta(days=hunt_lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -166,9 +168,12 @@ class InvestigateCaseWithAIWorkflow:
             )
             try:
                 session = self.search_udm_workflow.execute(req)
+                if getattr(session, "lifecycle", None) == LifecycleState.FAILED:
+                    session.raise_for_failure()
                 hunt_results[ip] = session.received_count
-            except Exception:
+            except Exception as exc:
                 hunt_results[ip] = -1
+                hunt_errors[ip] = f"{type(exc).__name__}: {exc}"
 
         for user in users:
             esc_user = _escape_udm(user)
@@ -181,9 +186,12 @@ class InvestigateCaseWithAIWorkflow:
             )
             try:
                 session = self.search_udm_workflow.execute(req)
+                if getattr(session, "lifecycle", None) == LifecycleState.FAILED:
+                    session.raise_for_failure()
                 hunt_results[user] = session.received_count
-            except Exception:
+            except Exception as exc:
                 hunt_results[user] = -1
+                hunt_errors[user] = f"{type(exc).__name__}: {exc}"
 
         for file_hash in hashes:
             esc_hash = _escape_udm(file_hash.lower())
@@ -201,9 +209,12 @@ class InvestigateCaseWithAIWorkflow:
             )
             try:
                 session = self.search_udm_workflow.execute(req)
+                if getattr(session, "lifecycle", None) == LifecycleState.FAILED:
+                    session.raise_for_failure()
                 hunt_results[file_hash] = session.received_count
-            except Exception:
+            except Exception as exc:
                 hunt_results[file_hash] = -1
+                hunt_errors[file_hash] = f"{type(exc).__name__}: {exc}"
 
         # Stage 5: Escalations & Audit Logging
         incident_marked = False
@@ -255,6 +266,7 @@ class InvestigateCaseWithAIWorkflow:
             "case_id": clean_case_id,
             "lookback_days": hunt_lookback_days,
             "indicators_hunted": len(hunt_results),
+            "hunt_errors": dict(hunt_errors),
             "dry_run": dry_run,
         }
 
@@ -266,6 +278,7 @@ class InvestigateCaseWithAIWorkflow:
             extracted_users=users,
             extracted_hashes=hashes,
             hunt_results=hunt_results,
+            hunt_errors=hunt_errors,
             primary_alert_id=primary_alert_id,
             incident_marked=incident_marked,
             alert_escalated=alert_escalated,

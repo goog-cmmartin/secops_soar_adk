@@ -6,7 +6,7 @@ categories:
   - "Simulation"
   - "Threat Intelligence"
 author: "Christopher Martin"
-version: 2.9
+version: 3.0
 python_version: "3.11"
 is_custom: true
 svg_logo_path: resources/logo.svg
@@ -48,13 +48,13 @@ parameters:
     integration_identifier: LogJammer
     is_mandatory: false
     type: string
-    default_value: "37679061640"
+    default_value: ""
   - name: "SecOps Customer ID"
     description: "Google SecOps Customer ID GUID for log ingestion."
     integration_identifier: LogJammer
     is_mandatory: false
     type: string
-    default_value: "a556547c-1cff-43ef-a2e4-cf5b12a865df"
+    default_value: ""
   - name: "SecOps Region"
     description: "Google SecOps instance region (e.g. us, europe, asia-southeast1)."
     integration_identifier: LogJammer

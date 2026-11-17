@@ -1,0 +1,58 @@
+creator: Christopher Martin
+description: Builds a chronological multi-lane MITRE ATT&CK Kill-Chain Swimlane storyboard separating unalerted Precursor UDM telemetry, Silent (NOT_ALERTING) YARA-L rules, Alerting detections, and Google ADK Agent synthesis milestones.
+dynamic_results_metadata:
+- result_example_path: resources/build_kill_chain_timeline_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: SecOpsSDKEngine
+is_async: false
+name: Build Kill Chain Timeline
+parameters:
+- default_value: ''
+  description: Case ID or Chronicle Case identifier to inspect. If left empty, uses the active SOAR Case context.
+  is_mandatory: false
+  name: Case ID
+  type: string
+- default_value: '48'
+  description: Number of hours prior to case creation / alert time to correlate in Chronicle UDM.
+  is_mandatory: false
+  name: Lookback Hours
+  type: string
+- default_value: true
+  description: If true, correlates unalerted precursor and pivot UDM events in addition to Silent and Alerting YARA-L rules.
+  is_mandatory: false
+  name: Include UDM Precursor Events
+  type: boolean
+- default_value: '50'
+  description: Maximum number of chronological timeline events to serialize into JsonResult.
+  is_mandatory: false
+  name: Max Timeline Events
+  type: string
+- default_value: ''
+  description: Optional comma-separated list of SOAR Entity Types (e.g., DESTINATIONURL, FILENAME, PROCESS, ADDRESS, HOSTNAME, USERUNIQNAME) or specific entity identifiers to filter.
+  is_mandatory: false
+  name: Entity Filter
+  type: string
+- default_value: Filter Out (Exclude)
+  description: Determines whether unprefixed entries in Entity Filter are excluded (Filter Out) or strictly required (Filter In).
+  is_mandatory: false
+  name: Entity Filter Mode
+  type: ddl
+  optional_values:
+  - Filter Out (Exclude)
+  - Filter In (Include)
+- default_value: ''
+  description: Optional Google ADK Agent JsonResult payload (e.g. [GoogleADK_Run ADK Agent_1.JsonResult]). If left empty, automatically discovers ADK findings from SOAR Case Context or the Case Wall.
+  is_mandatory: false
+  name: ADK Result JSON
+  type: string
+- default_value: false
+  description: If true, posts a concise Kill-Chain Swimlane summary note to the SOAR Case Wall.
+  is_mandatory: false
+  name: Post Wall Comment
+  type: boolean
+- default_value: ''
+  description: Optional SecOps UI base URL for 1-click Chronicle UDM Search links. If left empty, the HTML widget resolves the active SecOps origin automatically.
+  is_mandatory: false
+  name: SecOps UI Base URL
+  type: string

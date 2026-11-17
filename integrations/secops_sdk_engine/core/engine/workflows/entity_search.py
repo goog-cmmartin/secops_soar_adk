@@ -11,6 +11,7 @@ from engine.domain import (
     EntityInvestigationReport,
     EntitySummaryResult,
     EntityType,
+    LifecycleState,
     SearchBatchResult,
     SearchRequest,
     SearchSession,
@@ -251,8 +252,12 @@ class InvestigateEntityWorkflow:
         resolved_end = end_time or now.strftime("%Y-%m-%dT%H:%M:%SZ")
         resolved_start = start_time or (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        stage_errors: Dict[str, str] = {}
+        attempted_stages = 0
+
         # 1. Search Entity Graph
         graph_events: List[Dict[str, Any]] = []
+        attempted_stages += 1
         try:
             session = self.search_graph_wf.execute(
                 indicator_or_field=indicator,
@@ -261,12 +266,15 @@ class InvestigateEntityWorkflow:
                 receive_limit=max_events,
                 batch_size=max_events,
             )
+            if getattr(session, "lifecycle", None) == LifecycleState.FAILED:
+                session.raise_for_failure()
             graph_events = session.events
-        except Exception:
-            pass
+        except Exception as exc:
+            stage_errors["entity_graph"] = f"{type(exc).__name__}: {exc}"
 
         # 2. Search Historical UDM Events
         udm_events: List[Dict[str, Any]] = []
+        attempted_stages += 1
         try:
             session_udm = self.search_from_entity_wf.execute(
                 entity_type=detected.entity_type,
@@ -276,13 +284,16 @@ class InvestigateEntityWorkflow:
                 receive_limit=max_events,
                 batch_size=max_events,
             )
+            if getattr(session_udm, "lifecycle", None) == LifecycleState.FAILED:
+                session_udm.raise_for_failure()
             udm_events = session_udm.events
-        except Exception:
-            pass
+        except Exception as exc:
+            stage_errors["udm_events"] = f"{type(exc).__name__}: {exc}"
 
         # 3. Search Enterprise IoCs if applicable
         ioc_matches: List[EnterpriseIocMatch] = []
         if detected.ioc_value_type:
+            attempted_stages += 1
             try:
                 batch = self.search_iocs_wf.execute(
                     value=detected.raw_value,
@@ -291,12 +302,13 @@ class InvestigateEntityWorkflow:
                     end_time=end_time,
                 )
                 ioc_matches = batch.matches
-            except Exception:
-                pass
+            except Exception as exc:
+                stage_errors["enterprise_iocs"] = f"{type(exc).__name__}: {exc}"
 
         # 4. Search Related SOAR Cases
         related_cases: List[Any] = []
         if include_cases and self.search_cases_wf:
+            attempted_stages += 1
             try:
                 case_batch = self.search_cases_wf.execute(
                     CaseSearchQuery(
@@ -305,8 +317,8 @@ class InvestigateEntityWorkflow:
                     )
                 )
                 related_cases = case_batch.items
-            except Exception:
-                pass
+            except Exception as exc:
+                stage_errors["related_cases"] = f"{type(exc).__name__}: {exc}"
 
         # 5. Summarize Entity if a graph entity identifier was discovered
         entity_summary: Optional[EntitySummaryResult] = None
@@ -330,14 +342,21 @@ class InvestigateEntityWorkflow:
                     entity_id = str(candidate)
                     break
             if entity_id:
+                attempted_stages += 1
                 try:
                     entity_summary = self.summarize_entity_wf.execute(
                         entity_id=entity_id,
                         start_time=resolved_start,
                         end_time=resolved_end,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    stage_errors["entity_summary"] = f"{type(exc).__name__}: {exc}"
+
+        if attempted_stages > 0 and len(stage_errors) >= attempted_stages:
+            raise RuntimeError(
+                f"Entity investigation for '{detected.raw_value}' failed across all "
+                f"{attempted_stages} stages: {stage_errors}"
+            )
 
         return EntityInvestigationReport(
             indicator=detected.raw_value,
@@ -352,4 +371,6 @@ class InvestigateEntityWorkflow:
             ioc_matches=ioc_matches,
             related_cases=related_cases,
             entity_summary=entity_summary,
+            partial=bool(stage_errors),
+            stage_errors=stage_errors,
         )

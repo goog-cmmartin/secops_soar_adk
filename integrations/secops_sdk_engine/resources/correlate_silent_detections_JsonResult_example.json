@@ -8,6 +8,12 @@
   "attached_count": 4,
   "attached_entities_count": 2,
   "entities_count": 6,
+  "rules_triggered": [
+    "Unusual user access to AWS through third-party VPN"
+  ],
+  "detections_truncated": false,
+  "events_truncated": false,
+  "max_result_records": 50,
   "correlate_detections": true,
   "correlate_udm_events": false,
   "attach_udm_events": false,

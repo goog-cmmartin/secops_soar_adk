@@ -1,0 +1,50 @@
+creator: Christopher Martin
+description: Synthesizes compiler-verified multi-factor false-positive exclusions (YARA-L diffs for custom rules and UDM Findings Refinements for curated rules), dry-runs blast-radius metrics, logs proposals to the asoc_detection_tuning Data Table with a TTL expiration, and optionally applies Curated Findings Refinements live.
+dynamic_results_metadata:
+- result_example_path: resources/autonomous_detection_tuning_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: SecOpsSDKEngine
+is_async: false
+name: Autonomous Detection Tuning
+parameters:
+- default_value: ''
+  description: Case ID to inspect for false-positive rules and entity factors. If left empty, uses the active SOAR Case context.
+  is_mandatory: false
+  name: Case ID
+  type: string
+- default_value: ''
+  description: Optional comma-separated YARA-L or Curated Rule IDs (e.g. ur_..., ru_...). If left empty, automatically extracts rules from the Case alerts.
+  is_mandatory: false
+  name: Rule ID
+  type: string
+- default_value: '14'
+  description: Retrospective lookback window in days for entity cardinality and blast-radius dry-run calculation.
+  is_mandatory: false
+  name: Lookback Days
+  type: string
+- default_value: '30'
+  description: Expiration Time-To-Live (TTL) in days recorded in asoc_detection_tuning for governance review.
+  is_mandatory: false
+  name: TTL Days
+  type: string
+- default_value: false
+  description: If true (or if the Case carries tag 'Tune:Approve'), deploys the synthesized Curated Rule Findings Refinement exclusion live to Google SecOps.
+  is_mandatory: false
+  name: Apply Tuning
+  type: boolean
+- default_value: true
+  description: If true, records the tuning proposal and TTL expiration to the asoc_detection_tuning Data Table.
+  is_mandatory: false
+  name: Record to Data Table
+  type: boolean
+- default_value: true
+  description: If true, posts a Markdown Blast-Radius and Unified Diff report to the SOAR Case Wall.
+  is_mandatory: false
+  name: Post Wall Comment
+  type: boolean
+- default_value: false
+  description: If true, also refreshes the 'Detection Tuning & FP Reduction Command Center' Native Dashboard in Google SecOps.
+  is_mandatory: false
+  name: Sync Tuning Dashboard
+  type: boolean
