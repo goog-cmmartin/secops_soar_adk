@@ -1,0 +1,17 @@
+action_identifier: Evaluate Decisions
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 620
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: full_width
+description: Renders Gemini Decision 1 calibrated probabilities, binary (noul) verdicts, routing (choice) distributions, rubric (score) gauges, and confidence gating with automatic Dark/Light theme adaptation.
+scope: alert
+title: Gemini Decisions Analysis
+type: html

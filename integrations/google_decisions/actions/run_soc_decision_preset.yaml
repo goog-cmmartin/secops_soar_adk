@@ -1,0 +1,50 @@
+creator: Christopher Martin
+description: Executes a curated Google SecOps decision pack (Tier-1 Alert Triage, Phishing & Email Gate, Command-Line & Script Risk, DLP & Exfiltration Gate, or Case Closure & FP Gate) in a single forward pass using Gemini Decision 1 (gemini-decision-1).
+dynamic_results_metadata:
+- result_example_path: resources/run_soc_decision_preset_JsonResult_example.json
+  result_name: JsonResult
+  show_result: true
+integration_identifier: GoogleDecisions
+is_async: false
+name: Run SOC Decision Preset
+parameters:
+- default_value: Tier-1 Alert Triage & Routing
+  description: Curated SecOps decision pack to evaluate ("Tier-1 Alert Triage & Routing", "Phishing & Email Security Gate", "Command-Line & Script Risk Assessment", "DLP & Data Exfiltration Policy Gate", or "Case Closure & False Positive Gate").
+  is_mandatory: true
+  name: Decision Preset
+  type: string
+- default_value: ''
+  description: Additional telemetry, command lines, email body, or analyst context to evaluate alongside the active SOAR Alert context.
+  is_mandatory: false
+  name: Additional Context or Telemetry
+  type: string
+- default_value: true
+  description: Automatically serialize and include the active SOAR Alert metadata, security events, and entities in the shared input context.
+  is_mandatory: false
+  name: Include Alert Context
+  type: boolean
+- default_value: ''
+  description: Optional JSON map of additional custom questions (noul, choice, or score) to merge into the preset evaluation in the same single-pass API call.
+  is_mandatory: false
+  name: Additional Custom Questions JSON
+  type: string
+- default_value: ''
+  description: Optional inline base64 data or HTTPS URI for multimodal inspection (e.g., phishing screenshot or PDF attachment).
+  is_mandatory: false
+  name: Media Input (Base64 or HTTPS URI)
+  type: string
+- default_value: ''
+  description: Optional MIME type when Media Input is provided (e.g., image/png, application/pdf).
+  is_mandatory: false
+  name: Media MIME Type
+  type: string
+- default_value: '0.80'
+  description: Minimum calibrated confidence threshold (0.0 to 1.0) required for all_confident=true before automated playbook branching.
+  is_mandatory: false
+  name: Confidence Threshold
+  type: string
+- default_value: '60000'
+  description: Maximum character budget for the shared input context before smart JSON telemetry compaction and head/tail truncation are applied to stay safely within the 262,144 token limit.
+  is_mandatory: false
+  name: Max Input Characters
+  type: string

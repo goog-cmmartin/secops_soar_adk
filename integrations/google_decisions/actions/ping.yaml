@@ -1,0 +1,12 @@
+creator: Christopher Martin
+description: Tests connectivity to the Google Gemini Decisions API (gemini-decision-1) and verifies API Key or Workload Identity authentication.
+dynamic_results_metadata: []
+integration_identifier: GoogleDecisions
+is_async: false
+name: Ping
+parameters:
+- default_value: ''
+  description: Optional Gemini Decision model identifier override (defaults to gemini-decision-1).
+  is_mandatory: false
+  name: Model Name
+  type: string

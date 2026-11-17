@@ -1,0 +1,17 @@
+action_identifier: Run SOC Decision Preset
+condition_group:
+  conditions:
+  - field_name: '[{stepInstanceName}.JsonResult]'
+    match_type: not_contains
+    value: '{stepInstanceName}'
+  logical_operator: and
+data_definition:
+  html_height: 620
+  safe_rendering: false
+  type: html
+  widget_definition_scope: both
+default_size: full_width
+description: Renders SOC Decision Preset results from Gemini Decision 1 (Tier-1 Triage, Phishing Gate, Command-Line Risk, DLP Gate, and Case Closure Gate) with calibrated probabilities and confidence gating.
+scope: alert
+title: SOC Decision Preset Analysis
+type: html

@@ -1,0 +1,27 @@
+- description: "v1.4: Removed hardcoded GCP Project ID fallback defaults so project resolution uses the SOAR Integration Instance configuration, Workload Identity Email, Service Account JSON, or Application Default Credentials."
+  version: 1.4
+  item_name: "GoogleDecisions"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-17"
+- description: "Initial v1.0 release of the GoogleDecisions SOAR integration powered by Gemini Decision 1 (gemini-decision-1). Includes 3-tier hybrid authentication (Gemini API Key, Workload Identity Federation with automatic GCP API Keys resolution, and scoped OAuth2), Evaluate Decisions action with multimodal support, Run SOC Decision Preset action with 5 bundled SecOps triage packs, and adaptive Dark/Light HTML widgets."
+  version: 1.0
+  item_name: "GoogleDecisions"
+  item_type: "Integration"
+  new: true
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-12"
+- description: "v1.3: Added question-aware 262,144 token budget guardrails, smart embedded JSON telemetry compaction, 70/30 head+tail truncation, Max Input Characters action parameter, automatic retry on HTTP 400 token-limit responses, and 1:1 SOAR theme alignment in HTML widgets."
+  version: 1.3
+  item_name: "GoogleDecisions"
+  item_type: "Integration"
+  new: false
+  deprecated: false
+  regressive: false
+  removed: false
+  publish_time: "2026-11-14"

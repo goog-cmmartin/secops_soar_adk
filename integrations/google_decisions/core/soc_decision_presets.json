@@ -1,0 +1,256 @@
+{
+  "Tier-1 Alert Triage & Routing": {
+    "description": "Comprehensive SOC Tier-1 alert evaluation covering true/false positive probability, malicious intent, queue routing, containment urgency, and severity scoring.",
+    "questions": {
+      "is_true_positive": {
+        "type": "noul",
+        "instructions": "Does the security alert and associated telemetry represent unauthorized, suspicious, or malicious activity rather than benign administrative or operational noise?",
+        "criteria": {
+          "true_description": "Indicators of compromise, suspicious command execution, policy violation, unauthorized access, or anomalous behavior requiring security investigation.",
+          "false_description": "Routine administrative activity, known scanner/health check, expected scheduled job, or benign baseline user behavior."
+        }
+      },
+      "malicious_intent_detected": {
+        "type": "noul",
+        "instructions": "Are there explicit signs of attacker tradecraft such as obfuscation, privilege escalation, credential theft, C2 communication, or living-off-the-land (LOLBin) abuse?",
+        "criteria": {
+          "true_description": "Encoded/obfuscated scripts, payload downloads, credential dumping, persistence mechanisms, lateral movement, or known malicious IOCs.",
+          "false_description": "Standard administrative tools used normally without evasion or malicious indicators."
+        }
+      },
+      "recommended_queue": {
+        "type": "choice",
+        "instructions": "Which SOC operational queue is best suited to handle this alert based on the observed evidence?",
+        "criteria": {
+          "auto_close_benign": "Clearly benign operational noise or verified false positive requiring no analyst action.",
+          "tier1_standard_triage": "Ambiguous or low-to-medium severity activity requiring initial Tier-1 analyst verification.",
+          "tier2_incident_response": "High-confidence malicious activity, active compromise, malware execution, or lateral movement requiring immediate Tier-2 IR.",
+          "threat_hunting": "Complex behavioral anomaly or subtle precursor activity suited for proactive Threat Hunting correlation.",
+          "vulnerability_management": "Misconfiguration or unpatched exposure without active exploitation."
+        }
+      },
+      "containment_action": {
+        "type": "choice",
+        "instructions": "What immediate automated or analyst-approved containment action is most appropriate?",
+        "criteria": {
+          "no_action_needed": "Activity appears benign; no containment required.",
+          "monitor_and_enrich": "Gather additional SIEM telemetry and entity enrichment before taking disruptive action.",
+          "isolate_endpoint": "Active host compromise or malware execution requiring network isolation of the endpoint.",
+          "suspend_user_identity": "Compromised credentials, impossible travel, or IAM abuse requiring account suspension/password reset.",
+          "block_external_ioc": "Outbound C2 or malicious external IP/domain communication requiring firewall/EDR block."
+        }
+      },
+      "severity_rubric": {
+        "type": "score",
+        "instructions": "Rate the operational security severity of this alert against the SOC rubric.",
+        "criteria": [
+          "Informational / Benign: Expected operational behavior or non-security event.",
+          "Low Severity: Minor policy deviation or isolated reconnaissance with no system impact.",
+          "Medium Severity: Suspicious execution, anomalous authentication, or unverified threat indicator requiring investigation.",
+          "High / Critical Severity: Active exploitation, malware execution, credential compromise, or data exfiltration."
+        ]
+      },
+      "requires_deep_adk_investigation": {
+        "type": "noul",
+        "instructions": "Does this case exhibit multi-stage attack progression, silent YARA-L detections, suspicious command lines, or ambiguity that warrants a deep multi-turn AI investigation?",
+        "criteria": {
+          "true_description": "Multi-stage attack indicators, silent YARA-L detections, lateral movement, or investigative ambiguity requiring deep multi-turn analysis.",
+          "false_description": "Single isolated false-positive or routine benign activity with zero correlated silent detections."
+        }
+      }
+    }
+  },
+  "Phishing & Email Security Gate": {
+    "description": "Evaluates reported emails, headers, URLs, and rendered screenshots for credential harvesting, BEC impersonation, payload delivery, and quarantine disposition.",
+    "questions": {
+      "is_credential_harvesting": {
+        "type": "noul",
+        "instructions": "Does the message attempt to deceive the recipient into entering credentials, MFA codes, or session tokens on an external or lookalike site?",
+        "criteria": {
+          "true_description": "Contains deceptive login links, fake SSO prompts, urgent password expiry claims, or brand impersonation targeting credentials.",
+          "false_description": "No credential solicitation or deceptive login links present."
+        }
+      },
+      "is_bec_or_impersonation": {
+        "type": "noul",
+        "instructions": "Does the message exhibit Business Email Compromise (BEC), executive impersonation, or fraudulent invoice/wire transfer requests?",
+        "criteria": {
+          "true_description": "Impersonates an executive, vendor, or colleague requesting urgent financial transfers, gift cards, payroll changes, or sensitive documents.",
+          "false_description": "Standard business correspondence, marketing newsletter, or non-impersonation message."
+        }
+      },
+      "contains_malicious_link_or_attachment": {
+        "type": "noul",
+        "instructions": "Are there suspicious URLs, shortened/redirected links, executable/macro attachments, or archive payloads referenced in the email?",
+        "criteria": {
+          "true_description": "Contains suspicious domains, newly registered links, HTML smuggling, ISO/ZIP/LNK attachments, or macro-enabled documents.",
+          "false_description": "Links and attachments point to verified corporate domains or are absent."
+        }
+      },
+      "email_disposition": {
+        "type": "choice",
+        "instructions": "What disposition should the email security playbook apply to this message?",
+        "criteria": {
+          "deliver_legitimate": "Legitimate business or transactional email; mark safe and release.",
+          "quarantine_spam_marketing": "Unsolicited commercial spam or graymail without security threat.",
+          "quarantine_phishing_and_purge": "Confirmed phishing or malicious payload; quarantine and purge from all recipient mailboxes.",
+          "escalate_compromised_sender": "Internal or trusted partner account appears compromised; escalate to SOC Incident Response."
+        }
+      },
+      "phishing_risk_score": {
+        "type": "score",
+        "instructions": "Rate the overall phishing and social engineering risk level of the inspected message.",
+        "criteria": [
+          "Safe / Legitimate: Verified sender and normal business content.",
+          "Low Risk / Graymail: Bulk marketing or cold outreach with no deceptive indicators.",
+          "Suspicious / Probable Phishing: Social engineering urgency, sender mismatch, or questionable links.",
+          "Critical Phishing / Active Attack: High-confidence credential harvester, malware delivery, or targeted BEC fraud."
+        ]
+      }
+    }
+  },
+  "Command-Line & Script Risk Assessment": {
+    "description": "Analyzes process command lines, PowerShell, Bash, or script blocks for obfuscation, LOLBin abuse, MITRE ATT&CK tactic classification, and execution risk.",
+    "questions": {
+      "is_obfuscated_or_encoded": {
+        "type": "noul",
+        "instructions": "Does the command line or script use Base64 encoding, string concatenation, XOR/compression, environment variable slicing, or other obfuscation techniques?",
+        "criteria": {
+          "true_description": "Uses -enc/-EncodedCommand, Base64 blobs, Invoke-Expression (IEX), charCode conversion, or deliberate syntax obfuscation.",
+          "false_description": "Clear-text arguments and standard readable script parameters."
+        }
+      },
+      "is_lolbin_abuse": {
+        "type": "noul",
+        "instructions": "Does the command abuse a legitimate operating system binary (LOLBin/GTFOBin) for proxy execution, payload download, or defense evasion?",
+        "criteria": {
+          "true_description": "Abuses powershell, certutil, mshta, rundll32, regsvr32, bitsadmin, wmic, curl, or bash for anomalous execution or download.",
+          "false_description": "Standard application binary or routine administrative usage."
+        }
+      },
+      "downloads_or_executes_external_payload": {
+        "type": "noul",
+        "instructions": "Does the command attempt to fetch, decode, or execute code from an external IP address, domain, or temporary staging path?",
+        "criteria": {
+          "true_description": "Initiates WebClient/Invoke-WebRequest/curl/wget downloads, decodes staged files in Temp/AppData/dev/shm, or executes remote scripts in memory.",
+          "false_description": "Operates strictly on local trusted paths without external payload retrieval."
+        }
+      },
+      "primary_mitre_tactic": {
+        "type": "choice",
+        "instructions": "Which primary MITRE ATT&CK tactic best characterizes this command line or script activity?",
+        "criteria": {
+          "benign_administration": "Routine system administration, patching, or configuration management.",
+          "execution": "Running malicious or unauthorized code, scripts, or scheduled tasks (TA0002).",
+          "persistence": "Creating services, registry run keys, cron jobs, or startup items (TA0003).",
+          "privilege_escalation": "Bypassing UAC, exploiting sudo/setuid, or elevating token privileges (TA0004).",
+          "defense_evasion": "Disabling security tools, clearing logs, masquerading, or decoding payloads (TA0005).",
+          "credential_access": "Dumping LSASS, SAM, NTDS.dit, browser stores, or cloud credentials (TA0006).",
+          "discovery": "Enumerating users, domain trusts, network shares, or processes (TA0007).",
+          "lateral_movement": "Remote execution via WinRM, SMB/PsExec, WMI, SSH, or RDP (TA0008).",
+          "command_and_control": "Establishing reverse shells, beacons, or encrypted tunnels (TA0011)."
+        }
+      },
+      "script_risk_score": {
+        "type": "score",
+        "instructions": "Rate the maliciousness and operational risk of this command line or script execution.",
+        "criteria": [
+          "Benign: Standard administrative or application command line.",
+          "Low Risk: Diagnostic or enumeration command (`whoami`, `ipconfig`, `netstat`) warranting context check.",
+          "High Risk: Suspicious LOLBin usage, abnormal parent-child process tree, or unauthorized configuration change.",
+          "Critical Malicious: Obfuscated cradle, credential dumping, reverse shell, or active malware payload execution."
+        ]
+      }
+    }
+  },
+  "DLP & Data Exfiltration Policy Gate": {
+    "description": "Evaluates outbound network transfers, cloud storage uploads, and DLP alerts for sensitive data exposure, authorization status, and response actions.",
+    "questions": {
+      "contains_sensitive_or_regulated_data": {
+        "type": "noul",
+        "instructions": "Does the telemetry indicate the presence of PII, PHI, payment card data, source code, cryptographic keys, or confidential corporate records?",
+        "criteria": {
+          "true_description": "References customer PII, financial records, credentials/keys, proprietary source code, or database dumps.",
+          "false_description": "Public documentation, non-sensitive telemetry, or generic web traffic."
+        }
+      },
+      "is_untrusted_external_destination": {
+        "type": "noul",
+        "instructions": "Is the data being transmitted to a personal cloud storage account, unapproved file-sharing service, personal email, or unknown external IP?",
+        "criteria": {
+          "true_description": "Destination is personal webmail, consumer cloud storage (Mega, Dropbox, personal Drive), paste site, or non-corporate external endpoint.",
+          "false_description": "Destination is a sanctioned corporate tenant, internal repository, or approved partner domain."
+        }
+      },
+      "dlp_response_action": {
+        "type": "choice",
+        "instructions": "What DLP response workflow should be triggered for this event?",
+        "criteria": {
+          "allow_and_log": "Authorized business transfer; log for compliance audit only.",
+          "request_user_justification": "Ambiguous business transfer; send automated prompt to user and manager for justification.",
+          "block_and_revoke_sharing": "Unauthorized external sharing or upload; revoke link permissions and block transfer.",
+          "escalate_insider_threat_ir": "High-volume archive staging or deliberate exfiltration of sensitive assets; escalate to Insider Threat & IR."
+        }
+      },
+      "exfiltration_severity_score": {
+        "type": "score",
+        "instructions": "Rate the data loss and compliance impact severity of this event.",
+        "criteria": [
+          "Negligible: Sanctioned transfer of non-sensitive data.",
+          "Low: Minor policy violation (e.g., non-sensitive file sent to personal email).",
+          "Moderate: Unapproved transfer of internal business documents requiring remediation.",
+          "Severe / Breach Risk: Bulk exfiltration of regulated PII, credentials, or critical intellectual property."
+        ]
+      }
+    }
+  },
+  "Case Closure & False Positive Gate": {
+    "description": "Evaluates whether an investigated SOAR case or alert is safe for automated false-positive closure and recommends SIEM detection tuning actions.",
+    "questions": {
+      "is_confirmed_benign_pattern": {
+        "type": "noul",
+        "instructions": "Based on the alert telemetry and case context, is this activity a recurring benign administrative, scanner, or infrastructure pattern?",
+        "criteria": {
+          "true_description": "Activity matches known vulnerability scanners, backup agents, IT automation, or verified benign user workflows.",
+          "false_description": "Activity includes unresolved anomalies, unverified external entities, or potential security risks."
+        }
+      },
+      "is_safe_to_auto_close": {
+        "type": "noul",
+        "instructions": "Can this alert be safely closed without further human analyst intervention?",
+        "criteria": {
+          "true_description": "All indicators are accounted for as benign with zero residual indicators of compromise.",
+          "false_description": "Any ambiguity, unverified indicator, or elevated severity remains that requires human sign-off."
+        }
+      },
+      "tuning_recommendation": {
+        "type": "choice",
+        "instructions": "What Chronicle SIEM detection or SOAR tuning action is recommended to handle similar alerts in the future?",
+        "criteria": {
+          "no_tuning_keep_alerting": "Rule logic is sound; keep alerting as normal.",
+          "add_reference_list_exclusion": "Exclude the specific benign scanner IP, service account, or host via a Chronicle Reference List.",
+          "refine_yara_l_rule_conditions": "Narrow the YARA-L rule condition (e.g., require parent process or command-line filter) to reduce false positives.",
+          "convert_to_silent_detection": "Demote rule to non-alerting (NOT_ALERTING) so it remains available for case correlation without generating standalone cases."
+        }
+      },
+      "reoccurrence_noise_score": {
+        "type": "score",
+        "instructions": "Rate how likely this alert pattern is to generate repetitive false-positive noise across the fleet if left untuned.",
+        "criteria": [
+          "Isolated One-Off: Unlikely to recur.",
+          "Occasional: Triggered by periodic manual admin tasks.",
+          "Frequent: Triggered daily by automated jobs or subset of hosts.",
+          "High-Volume Fleet Noise: Triggered continuously across many endpoints or users."
+        ]
+      },
+      "exclusion_blast_radius_safe": {
+        "type": "noul",
+        "instructions": "Is the proposed YARA-L / Curated Rule exclusion narrow and multi-factor enough to avoid suppressing legitimate true-positive detections across the fleet?",
+        "criteria": {
+          "true_description": "Narrow multi-factor tuple with compiler verification and acceptable retrospective blast radius.",
+          "false_description": "Overly broad single-factor wildcard or unverified rule change that risks blinding detections."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "status": "success",
+  "model": "gemini-decision-1",
+  "preset_name": "Tier-1 Alert Triage & Routing",
+  "auth_method": "wif_apikeys_auto",
+  "latency_ms": 420,
+  "confidence_threshold": 0.8,
+  "all_confident": true,
+  "escalation_required": false,
+  "question_count": 5,
+  "low_confidence_questions": [],
+  "summary": {
+    "is_true_positive": true,
+    "is_true_positive_probability": 0.99,
+    "is_true_positive_confidence": 0.99,
+    "malicious_intent_detected": true,
+    "malicious_intent_detected_probability": 0.98,
+    "malicious_intent_detected_confidence": 0.98,
+    "recommended_queue": "tier2_incident_response",
+    "recommended_queue_confidence": 0.96,
+    "containment_action": "isolate_endpoint",
+    "containment_action_confidence": 0.91,
+    "severity_rubric": 2.92,
+    "severity_rubric_level": 3,
+    "severity_rubric_label": "High / Critical Severity: Active exploitation, malware execution, credential compromise, or data exfiltration.",
+    "severity_rubric_confidence": 0.93
+  },
+  "questions_metadata": {},
+  "answers": {
+    "is_true_positive": {
+      "type": "noul",
+      "noul": 0.99,
+      "confidence": 0.99
+    },
+    "malicious_intent_detected": {
+      "type": "noul",
+      "noul": 0.98,
+      "confidence": 0.98
+    },
+    "recommended_queue": {
+      "type": "choice",
+      "choice": "tier2_incident_response",
+      "confidence": 0.96,
+      "probabilities": {
+        "tier2_incident_response": 0.96,
+        "threat_hunting": 0.025,
+        "tier1_standard_triage": 0.01,
+        "vulnerability_management": 0.003,
+        "auto_close_benign": 0.002
+      }
+    },
+    "containment_action": {
+      "type": "choice",
+      "choice": "isolate_endpoint",
+      "confidence": 0.91,
+      "probabilities": {
+        "isolate_endpoint": 0.91,
+        "block_external_ioc": 0.06,
+        "monitor_and_enrich": 0.02,
+        "suspend_user_identity": 0.008,
+        "no_action_needed": 0.002
+      }
+    },
+    "severity_rubric": {
+      "type": "score",
+      "score": 2.92,
+      "confidence": 0.93,
+      "probabilities": {
+        "0": 0.001,
+        "1": 0.009,
+        "2": 0.06,
+        "3": 0.93
+      },
+      "legend": {
+        "0": "Informational / Benign: Expected operational behavior or non-security event.",
+        "1": "Low Severity: Minor policy deviation or isolated reconnaissance with no system impact.",
+        "2": "Medium Severity: Suspicious execution, anomalous authentication, or unverified threat indicator requiring investigation.",
+        "3": "High / Critical Severity: Active exploitation, malware execution, credential compromise, or data exfiltration."
+      }
+    }
+  },
+  "usage": {
+    "total_input_tokens": 584,
+    "total_output_tokens": 0,
+    "total_tokens": 584,
+    "input_tokens_by_modality": [
+      {
+        "modality": "text",
+        "tokens": 584
+      }
+    ],
+    "estimated_cost_usd": 5.84e-05
+  }
+}

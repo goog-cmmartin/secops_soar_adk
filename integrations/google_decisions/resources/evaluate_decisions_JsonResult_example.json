@@ -1,0 +1,94 @@
+{
+  "status": "success",
+  "model": "gemini-decision-1",
+  "preset_name": "Custom Decisions",
+  "auth_method": "api_key",
+  "latency_ms": 385,
+  "confidence_threshold": 0.8,
+  "all_confident": true,
+  "escalation_required": false,
+  "question_count": 3,
+  "low_confidence_questions": [],
+  "summary": {
+    "is_malicious": true,
+    "is_malicious_probability": 0.99,
+    "is_malicious_confidence": 0.99,
+    "triage_queue": "tier2_incident_response",
+    "triage_queue_confidence": 0.9973,
+    "severity_score": 2.8985,
+    "severity_score_level": 3,
+    "severity_score_label": "High/Critical active compromise or malware execution.",
+    "severity_score_confidence": 0.9099
+  },
+  "questions_metadata": {
+    "is_malicious": {
+      "type": "noul",
+      "instructions": "Does this event indicate likely malicious activity?"
+    },
+    "triage_queue": {
+      "type": "choice",
+      "instructions": "Which SOC queue should handle this alert?",
+      "criteria": {
+        "tier1_false_positive": "Benign admin activity or expected scheduled task.",
+        "tier2_incident_response": "Active malware execution, encoded payload download, C2, or unauthorized privilege escalation.",
+        "threat_intel": "IOC enrichment request only."
+      }
+    },
+    "severity_score": {
+      "type": "score",
+      "instructions": "Rate the severity of this security alert.",
+      "criteria": [
+        "Informational or benign activity.",
+        "Low severity policy violation.",
+        "Medium severity suspicious behavior requiring review.",
+        "High/Critical active compromise or malware execution."
+      ]
+    }
+  },
+  "answers": {
+    "is_malicious": {
+      "type": "noul",
+      "noul": 0.99,
+      "confidence": 0.99
+    },
+    "triage_queue": {
+      "type": "choice",
+      "choice": "tier2_incident_response",
+      "confidence": 0.9973,
+      "probabilities": {
+        "tier2_incident_response": 0.9973,
+        "tier1_false_positive": 0.0015,
+        "threat_intel": 0.0012
+      }
+    },
+    "severity_score": {
+      "type": "score",
+      "score": 2.8985,
+      "confidence": 0.9099,
+      "probabilities": {
+        "0": 0.0022,
+        "1": 0.0069,
+        "2": 0.081,
+        "3": 0.9099
+      },
+      "legend": {
+        "0": "Informational or benign activity.",
+        "1": "Low severity policy violation.",
+        "2": "Medium severity suspicious behavior requiring review.",
+        "3": "High/Critical active compromise or malware execution."
+      }
+    }
+  },
+  "usage": {
+    "total_input_tokens": 416,
+    "total_output_tokens": 0,
+    "total_tokens": 416,
+    "input_tokens_by_modality": [
+      {
+        "modality": "text",
+        "tokens": 416
+      }
+    ],
+    "estimated_cost_usd": 4.16e-05
+  }
+}

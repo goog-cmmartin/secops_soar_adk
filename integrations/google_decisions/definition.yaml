@@ -1,0 +1,99 @@
+api_version: "2.0"
+identifier: GoogleDecisions
+name: "GoogleDecisions"
+description: "Google Gemini Decisions API (gemini-decision-1) integration for Google SecOps SOAR. Evaluates up to 1,000 structured binary (noul), routing (choice), and rubric (score) questions in a single pass with calibrated probabilities, confidence gating, and zero output tokens."
+categories:
+  - "Artificial Intelligence"
+  - "Security Operations"
+author: "Christopher Martin"
+version: 1.4
+python_version: "3.11"
+is_custom: true
+svg_logo_path: resources/logo.svg
+image_path: resources/image.png
+
+parameters:
+  - name: "Gemini API Key"
+    description: "API Key for direct Google Gemini Decisions API authentication (optional if Workload Identity Federation, Service Account JSON, or ADC is used)."
+    integration_identifier: GoogleDecisions
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "Workload Identity Email"
+    description: "Target Google Cloud Service Account email for keyless authentication via Workload Identity Federation or Service Account Impersonation."
+    integration_identifier: GoogleDecisions
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "Service Account JSON"
+    description: "Google Cloud Service Account JSON key credentials for OAuth2 and automatic GCP API Keys discovery."
+    integration_identifier: GoogleDecisions
+    is_mandatory: false
+    type: password
+    default_value: ""
+  - name: "GCP Project ID"
+    description: "Google Cloud Project ID used for WIF quota project headers and automatic Gemini API Key resolution via apikeys.googleapis.com."
+    integration_identifier: GoogleDecisions
+    is_mandatory: false
+    type: string
+    default_value: ""
+  - name: "Model Name"
+    description: "Default Gemini Decision model identifier."
+    integration_identifier: GoogleDecisions
+    is_mandatory: false
+    type: string
+    default_value: "gemini-decision-1"
+  - name: "API Endpoint"
+    description: "Google Gemini Decisions API endpoint URL."
+    integration_identifier: GoogleDecisions
+    is_mandatory: false
+    type: string
+    default_value: "https://generativelanguage.googleapis.com/v1beta/decisions"
+  - name: "Verify SSL"
+    description: "Verify SSL certificates for API requests."
+    integration_identifier: GoogleDecisions
+    is_mandatory: false
+    type: boolean
+    default_value: true
+
+configuration:
+  - name: "Gemini API Key"
+    description: "API Key for direct Google Gemini Decisions API authentication (optional if Workload Identity Federation, Service Account JSON, or ADC is used)."
+    type: string
+    is_mandatory: false
+    is_password: true
+    default_value: ""
+  - name: "Workload Identity Email"
+    description: "Target Google Cloud Service Account email for keyless authentication via Workload Identity Federation or Service Account Impersonation."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "Service Account JSON"
+    description: "Google Cloud Service Account JSON key credentials for OAuth2 and automatic GCP API Keys discovery."
+    type: string
+    is_mandatory: false
+    is_password: true
+    default_value: ""
+  - name: "GCP Project ID"
+    description: "Google Cloud Project ID used for WIF quota project headers and automatic Gemini API Key resolution via apikeys.googleapis.com."
+    type: string
+    is_mandatory: false
+    default_value: ""
+  - name: "Model Name"
+    description: "Default Gemini Decision model identifier."
+    type: string
+    is_mandatory: false
+    default_value: "gemini-decision-1"
+  - name: "API Endpoint"
+    description: "Google Gemini Decisions API endpoint URL."
+    type: string
+    is_mandatory: false
+    default_value: "https://generativelanguage.googleapis.com/v1beta/decisions"
+  - name: "Verify SSL"
+    description: "Verify SSL certificates for API requests."
+    type: boolean
+    is_mandatory: false
+    default_value: true
+
+simulation_data:
+  provider_name: "GoogleDecisions"
